@@ -38,6 +38,7 @@ const { Calls } = require('./calls');
 const { Relay } = require('./relay');
 const { Dashboard } = require('./dashboard');
 const { Voice } = require('./voice');
+const { Voicemail } = require('./voicemail');
 const { registry: workerTools } = require('./worker-tools');
 const { startEgress } = require('./egress');
 const workFiles = require('./work-files');
@@ -63,6 +64,7 @@ let jobs;    // work mode (jobs.js): background Claude workers
 let calls;   // the ARES phone line (calls.js): ElevenLabs agent on a Twilio number
 let relay;   // the Cloudflare relay (relay.js): FCM pushes to the Android app, even with the Mac off
 let dashboard; // the dashboard's live data (dashboard.js): weather, calendar, leave-by, now playing
+let voicemail; // voicemails from the Twilio fallback when the phone agent can't answer (voicemail.js)
 let speech;    // her voice (voice.js): Katherine on ElevenLabs, the local Kokoro backup, budget mode, phrase cache, credit watch
 
 /** A message for the window's dashboard (renderer/dash.js). */
@@ -453,7 +455,7 @@ const readable = (t) => t.replace(/\[[a-z ]+\]\s*/gi, '').trim();
 async function transcribe(audio, type = 'audio/ogg') {
   const form = new FormData();
   form.append('model_id', 'scribe_v2');
-  form.append('file', new Blob([audio], { type }), type.includes('mp4') ? 'voice.m4a' : type.includes('webm') ? 'voice.webm' : 'voice.ogg');
+  form.append('file', new Blob([audio], { type }), type.includes('mp4') ? 'voice.m4a' : type.includes('webm') ? 'voice.webm' : type.includes('wav') ? 'voice.wav' : 'voice.ogg');
   const res = await fetch('https://api.elevenlabs.io/v1/speech-to-text', { method: 'POST', headers: { 'xi-api-key': ELEVEN.key }, body: form });
   if (!res.ok) throw new Error(`transcription HTTP ${res.status}`);
   return ((await res.json()).text || '').trim();
@@ -1411,7 +1413,16 @@ function createCalls() {
   });
   // Asleep: the phone line carries on alone, so give it the rest of today's availability first. Awake: catch up.
   powerMonitor.on('suspend', () => c.syncContext('suspend'));
-  powerMonitor.on('resume', () => setTimeout(() => { c.catchUp('resume'); c.refreshContext('resume'); }, 8000));
+  powerMonitor.on('resume', () => setTimeout(() => { c.catchUp('resume'); c.refreshContext('resume'); voicemail?.check('resume'); }, 8000));
+  // Voicemails left on the Twilio fallback, reported like missed calls (and part of the catch-up on wake)
+  voicemail = new Voicemail({ dir: path.join(app.getPath('userData'), 'calls'), log, number: () => process.env.ARES_LINE_NUMBER || c.ownNumber || '',
+    transcribe: (audio, type) => transcribe(audio, type), contactByNumber: (n) => contacts?.byNumber(n)?.name || '' });
+  voicemail.on('voicemail', ({ from, title, body, line, name }) => {
+    toDash({ type: 'inbox', id: `vm-${Date.now()}`, label: 'VOICEMAIL', value: title, detail: body });
+    pushToPhones({ title, body, tag: `vm-${from || name}`, buttons: buttons(from) }).catch(() => {});
+    if (atMac()) tell(line);
+    else callNotes.push(line);
+  });
   return c;
 }
 
@@ -1592,6 +1603,7 @@ app.whenReady().then(async () => {
   createTray();
   win.webContents.once('did-finish-load', () => {
     listener.start(); checkIntegrations(); startRemote(); startPhone(); calls.start().catch((err) => log('calls start failed', err.message));
+    voicemail.start();
     dashboard.start();
     dashboard.setVisible(win.isVisible());
     pushVoiceStatus();
@@ -1618,6 +1630,7 @@ app.on('will-quit', () => {
   intents?.dispose();
   jobs?.shutdown();
   calls?.stop();
+  voicemail?.stop();
   dashboard?.stop();
   speech?.stop();
   egress?.close();

@@ -30,7 +30,7 @@ try {
     maxNumSentences: 1,
   });
   // Warm up, so the first real sentence isn't slowed by one-off initialisation
-  tts.generate({ text: 'Ready.', sid: 21, speed: 1 });
+  tts.generate({ text: 'Ready.', sid: 21, speed: 1, enableExternalBuffer: false }); // Electron forbids external buffers
   parentPort.postMessage({ type: 'ready', model: path.basename(model), rate: tts.sampleRate });
 } catch (err) {
   parentPort.postMessage({ type: 'failed', error: err.message });
@@ -86,7 +86,7 @@ function next() {
   busy = true;
   const part = job.parts.shift();
   try {
-    const audio = tts.generate({ text: part, sid: job.sid, speed: job.speed });
+    const audio = tts.generate({ text: part, sid: job.sid, speed: job.speed, enableExternalBuffer: false });
     const pcm = toPcm(audio.samples);
     parentPort.postMessage({ type: 'pcm', id: job.id, pcm }, [pcm]);
   } catch (err) {
