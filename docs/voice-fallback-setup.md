@@ -65,6 +65,10 @@ error, a timeout or invalid TwiML. If ElevenLabs answers the webhook normally bu
 agent (for example with no credits), Twilio may never use the fallback. That's why ARES keeps a credit
 reserve for calls (section 3).
 
+**Your bins (created 2026-10-01):**
+- `ARES hangup`: https://handler.twilio.com/twiml/EH…
+- `ARES voicemail`: https://handler.twilio.com/twiml/EH…
+
 ## 3. Credits and the call reserve
 
 ElevenLabs agent calls and TTS **share one credit pool**: the Creator plan has about 121k credits a
