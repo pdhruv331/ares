@@ -15,6 +15,9 @@ xcrun swiftc -O -swift-version 5 native/AresListener.swift -o native/build/ares-
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker native/Info.plist
 codesign --force --sign "$SIGN" native/build/ares-listener
 
+echo "› Backup voice model (Kokoro, downloaded once into the support folder)"
+zsh scripts/get-voice-model.sh
+
 echo "› Vendoring renderer libraries"
 node scripts/vendor.mjs
 

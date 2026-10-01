@@ -113,7 +113,7 @@ class TelegramRemote extends EventEmitter {
       if (!input) return;
 
       const reply = await this.onMessage({ text: input, voice });
-      if (reply.audio) await this.sendVoice(chat, reply.audio, reply.text);
+      if (reply.audio) await this.sendVoice(chat, reply.audio, reply.text, reply.audioType);
       else await this.send(chat, reply.text);
     } finally {
       clearInterval(typing);
@@ -126,10 +126,11 @@ class TelegramRemote extends EventEmitter {
     }
   }
 
-  async sendVoice(chat, audio, caption) {
+  /** `type`: Ogg/Opus from ElevenLabs, or M4A from the backup voice (Telegram accepts both as voice notes). */
+  async sendVoice(chat, audio, caption, type = 'audio/ogg') {
     const form = new FormData();
     form.append('chat_id', String(chat));
-    form.append('voice', new Blob([audio], { type: 'audio/ogg' }), 'ares.ogg');
+    form.append('voice', new Blob([audio], { type }), type === 'audio/mp4' ? 'ares.m4a' : 'ares.ogg');
     if (caption && caption.length <= 1000) form.append('caption', caption);
     const res = await fetch(`${API}/bot${this.token}/sendVoice`, { method: 'POST', body: form });
     const json = await res.json();

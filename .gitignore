@@ -45,3 +45,4 @@ comms-today.json
 # OS / editor
 .DS_Store
 *.swp
+docs/voice-samples/

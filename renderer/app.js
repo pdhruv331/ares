@@ -150,11 +150,15 @@ const Voice = (() => {
     });
   }
 
-  // Fallback: macOS system voice (can't be analysed, so fake a talking envelope)
+  // Last resort (the main process's voices all failed): the best British FEMALE macOS voice, Premium/Enhanced
+  // first. Never Daniel. Can't be analysed, so it fakes a talking envelope.
   let sysVoice = null;
+  const NAMES = ['Serena', 'Kate', 'Stephanie', 'Martha', 'Flo', 'Shelley', 'Sandy'];
   const pick = () => {
-    const voices = speechSynthesis.getVoices();
-    sysVoice = voices.find((v) => v.name === 'Daniel') || voices.find((v) => v.lang === 'en-GB') || voices[0];
+    const tier = (v) => (/Premium/.test(v.name) ? 0 : /Enhanced/.test(v.name) ? 1 : 2);
+    const rank = (v) => NAMES.findIndex((n) => v.name.startsWith(n));
+    const gb = speechSynthesis.getVoices().filter((v) => /^en[-_]GB$/i.test(v.lang) && rank(v) >= 0);
+    sysVoice = gb.sort((a, b) => tier(a) - tier(b) || rank(a) - rank(b))[0] || null;
   };
   speechSynthesis.onvoiceschanged = pick;
   pick();
@@ -164,8 +168,8 @@ const Voice = (() => {
       const u = new SpeechSynthesisUtterance(forDisplay(text));
       u.onboundary = (e) => { if (e.name !== 'sentence') line?.at(e.charIndex); };
       if (sysVoice) u.voice = sysVoice;
+      u.lang = 'en-GB';
       u.rate = 1.05;
-      u.pitch = 1.25;
       let frame;
       const animate = (t) => {
         const env = 0.35 + 0.35 * Math.abs(Math.sin(t / 90)) * (0.6 + 0.4 * Math.sin(t / 37));
@@ -181,9 +185,9 @@ const Voice = (() => {
 
   let warned = false;
   const warn = (err) => {
-    console.error('ElevenLabs TTS failed', err);
+    console.error('TTS failed', err);
     Dash.health('voice', false, /401|403|unauthori|invalid/i.test(String(err)) ? 'ElevenLabs key rejected' : 'voice unavailable');
-    if (!warned) { warned = true; show(`Voice module error (${err}). Falling back to system voice.`); }
+    if (!warned) { warned = true; show(`Voice module error (${err}). Falling back to the Mac's own voice.`); }
   };
   /** A spoken reply: say() sentences as they're ready; done() resolves when she's finished talking;
    *  cancel() stops the rest (barge-in). */

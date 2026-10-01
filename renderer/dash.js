@@ -48,6 +48,7 @@ const Dash = (() => {
 
   // Status: "● all systems ok", or amber with a short reason when something breaks. Click for the full list.
   const health = {}; // key -> reason ('' = fine)
+  let voiceInfo = [];  // which voice she's using and the credits left (not problems: shown in the panel, never amber)
   let integrations = null;
   const GOOGLE = { calendar: 'Calendar', gmail: 'Gmail', drive: 'Drive' };
   // What's broken, and the one click toward fixing it
@@ -55,10 +56,13 @@ const Dash = (() => {
     brain: { label: 'LOG IN AGAIN', fix: 'claude', hint: 'opens Terminal: type /login' },
     brainFound: { label: 'INSTALL', url: 'https://docs.claude.com/en/docs/claude-code/setup' },
     voice: { label: 'CHECK KEY', fix: 'voice', hint: 'shows the .env with ELEVENLABS_API_KEY' },
+    credits: { label: 'USAGE', url: 'https://elevenlabs.io/app/subscription' },
     mic: { label: 'OPEN SETTINGS', fix: 'mic' },
   };
   function problemList() {
-    const out = Object.entries(health).filter(([, r]) => r).map(([k, r]) => ({ text: r, ...(FIXES[k] || {}),
+    const out = Object.entries(health).filter(([, r]) => r).map(([k, r]) => ({ text: r,
+      // Only a rejected key is fixed in the .env: credits, outages and the network fix themselves (she switches back)
+      ...(k === 'voice' && !/key/.test(r) ? {} : FIXES[k] || {}),
       ...(k === 'mic' && /speech/.test(r) && { fix: 'speech' }) }));
     if (integrations) {
       const signIn = Object.keys(GOOGLE).filter((k) => integrations[k] === 'pending').map((k) => GOOGLE[k]);
@@ -83,6 +87,13 @@ const Dash = (() => {
         b.addEventListener('click', () => window.ares.dash.act(x.url ? 'url' : 'fix', x.url ? { url: x.url } : { key: x.fix }));
         row.appendChild(b);
       }
+      box.appendChild(row);
+    }
+    for (const line of voiceInfo) {
+      const row = document.createElement('div');
+      row.className = 'fix-row';
+      row.innerHTML = '<span></span>';
+      row.firstChild.textContent = line;
       box.appendChild(row);
     }
     const re = document.createElement('button');
@@ -1333,6 +1344,7 @@ const Dash = (() => {
       case 'emails': data.emails = msg.emails || []; if (data.emails.length) blip('needs'); break;
       case 'activity': activityAt = Date.now(); say(msg.text, 'work'); break;
       case 'health': setHealth(msg.key, msg.ok, msg.reason); break;
+      case 'voice': voiceInfo = [msg.line, msg.credits].filter(Boolean); if (!$('statusPanel').hidden) renderFixes(); break;
     }
     reconcile();
   });

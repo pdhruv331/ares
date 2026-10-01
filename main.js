@@ -37,6 +37,7 @@ const { Jobs } = require('./jobs');
 const { Calls } = require('./calls');
 const { Relay } = require('./relay');
 const { Dashboard } = require('./dashboard');
+const { Voice } = require('./voice');
 const { registry: workerTools } = require('./worker-tools');
 const { startEgress } = require('./egress');
 const workFiles = require('./work-files');
@@ -62,6 +63,7 @@ let jobs;    // work mode (jobs.js): background Claude workers
 let calls;   // the ARES phone line (calls.js): ElevenLabs agent on a Twilio number
 let relay;   // the Cloudflare relay (relay.js): FCM pushes to the Android app, even with the Mac off
 let dashboard; // the dashboard's live data (dashboard.js): weather, calendar, leave-by, now playing
+let speech;    // her voice (voice.js): Katherine on ElevenLabs, the local Kokoro backup, budget mode, phrase cache, credit watch
 
 /** A message for the window's dashboard (renderer/dash.js). */
 const toDash = (msg) => { if (win && !win.isDestroyed()) win.webContents.send('dash', msg); };
@@ -209,6 +211,8 @@ function refreshTray() {
     { type: 'separator' },
     { label: jobs?.active.length ? `Work: ${jobs.running.length} running, ${jobs.active.length - jobs.running.length} queued` : 'Work: no jobs running', enabled: false },
     { label: 'Open Work Folder…', click: () => shell.openPath(jobs.dir) },
+    { type: 'separator' },
+    ...voiceMenu(),
     { label: 'Reduce Motion', type: 'checkbox', checked: Boolean(readSettings().reduceMotion), click: (item) => { writeSettings({ reduceMotion: item.checked }); win?.webContents.send('ui-prefs', uiPrefs()); refreshTray(); } },
     { label: 'Magnetic Panel Slots', type: 'checkbox', checked: readSettings().ui?.magnetic !== false, click: (item) => { writeUi({ magnetic: item.checked }); win?.webContents.send('ui-prefs', uiPrefs()); refreshTray(); } },
     { label: 'Open Calls Log…', visible: Boolean(calls?.ready), click: () => shell.openPath(calls.dir) },
@@ -228,6 +232,20 @@ function refreshTray() {
     },
     { label: 'Quit ARES', click: () => { app.isQuitting = true; app.quit(); } },
   ]));
+}
+
+/** The menu bar's voice section: what she's speaking with, credits, the Budget voice submenu, dev mode. */
+function voiceMenu() {
+  if (!speech) return [];
+  const s = speech.status();
+  const mode = s.budget;
+  const radio = (m, label) => ({ label, type: 'radio', checked: mode === m, click: () => speech.setBudget(m) });
+  return [
+    { label: voiceLine(s), enabled: false },
+    { label: creditLine(s), enabled: false },
+    { label: `Budget Voice${mode === 'auto' && s.autoBudget ? ' (auto: on)' : ''}`, submenu: [radio('off', 'Off'), radio('auto', 'Auto'), radio('always', 'Always')] },
+    { label: 'Use Backup Voice While I\'m Building/Testing', type: 'checkbox', checked: Boolean(readSettings().devVoice), click: (item) => speech.setDevMode(item.checked) },
+  ];
 }
 
 function createTray() {
@@ -368,6 +386,11 @@ function rememberIntent(text, r) {
  * put ahead of the brain prompt. `intent` is passed when the listener already classified it.
  */
 async function planRemark(text, source, { intent = null, afterBarge = false, addressed = true } = {}) {
+  const budget = budgetCommand(text);
+  if (budget) {
+    remember('user', text, source); remember('ares', budget, source, true);
+    return { r: intent, quick: { reply: budget }, notes: '' };
+  }
   let r = intent;
   if (!r) {
     r = await classify(text);
@@ -436,22 +459,6 @@ async function transcribe(audio, type = 'audio/ogg') {
   return ((await res.json()).text || '').trim();
 }
 
-/** Katherine's voice as an Ogg/Opus voice note (Telegram's native format). */
-async function voiceNote(text) {
-  await acquireSlot();
-  try {
-    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN.voice}?output_format=opus_48000_64`, {
-      method: 'POST',
-      headers: { 'xi-api-key': ELEVEN.key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, model_id: ELEVEN.model, voice_settings: voiceSettings() }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return Buffer.from(await res.arrayBuffer());
-  } finally {
-    releaseSlot();
-  }
-}
-
 let keepAwake = null;
 function startRemote() {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -469,9 +476,10 @@ function startRemote() {
       const plan = await planRemark(text, 'telegram');
       const result = plan.quick ? { ok: true, text: plan.quick.reply } : await askBrain(text, REMOTE_NOTE(voice) + plan.notes + text, null, 'telegram');
       const reply = result.ok ? result.text : `Apologies, sir: ${result.error}.`;
-      if (!voice || !ELEVEN.key || plan.quick?.voice === false) return { text: readable(reply) };
+      if (!voice || !speech.available || plan.quick?.voice === false) return { text: readable(reply) };
       try {
-        return { text: readable(reply), audio: await voiceNote(speakable(reply)) };
+        const note = await speech.voiceNote(speakable(reply)); // Katherine (Ogg/Opus) or the backup voice (M4A)
+        return { text: readable(reply), audio: note.audio, audioType: note.type };
       } catch (err) {
         log('telegram voice error', err.message);
         return { text: readable(reply) };
@@ -503,31 +511,13 @@ const PHONE_PORT = Number(process.env.ARES_PHONE_PORT) || 8765;
 const PHONE_NOTE = "(ARES note: the user is using the ARES app on their phone, away from the Mac. Keep replies concise. To open, call, text, message, navigate or play something, use the phone_action tool so it happens on their phone, not the Mac; use notify_phone for anything they should be reminded of later.)\n\n";
 let phoneUrl = process.env.ARES_PHONE_URL || null; // https://<mac>.<tailnet>.ts.net once Tailscale is set up
 
-/** Stream one sentence of speech (raw 24kHz PCM) into `out.chunks`, holding a TTS slot. */
+/** Stream one sentence of speech (raw 24kHz PCM) into `out.chunks`, in whichever voice is speaking now. */
 function speakInto(text, out) {
-  (async () => {
-    await acquireSlot();
-    const ctrl = new AbortController();
-    out.abort = () => ctrl.abort();
-    try {
-      const { reader, first } = await openTtsStream(text, ctrl.signal);
-      let { done, value } = first;
-      let carry = null; // network chunks can split a 16-bit sample in half: only ever send whole samples
-      while (!done) {
-        let bytes = Buffer.from(value);
-        if (carry) { bytes = Buffer.concat([carry, bytes]); carry = null; }
-        if (bytes.length % 2) { carry = bytes.subarray(bytes.length - 1); bytes = bytes.subarray(0, bytes.length - 1); }
-        if (bytes.length) { out.chunks.push(bytes); out.wake?.(); }
-        ({ done, value } = await reader.read());
-      }
-    } catch (err) {
-      if (!ctrl.signal.aborted) log('phone tts error', err.message);
-    } finally {
-      releaseSlot();
-      out.done = true;
-      out.wake?.();
-    }
-  })();
+  const ctrl = new AbortController();
+  out.abort = () => ctrl.abort();
+  speech.speak(text, { signal: ctrl.signal, source: 'phone', onChunk: (bytes) => { out.chunks.push(bytes); out.wake?.(); } })
+    .catch((err) => { if (!ctrl.signal.aborted) log('phone tts error', err.message); })
+    .finally(() => { out.done = true; out.wake?.(); });
 }
 
 let phoneStream = null; // the phone conversation in progress: actions are delivered straight into it
@@ -537,7 +527,7 @@ async function phoneAsk({ text, voice, images = [] }, send) {
   let consumed = 0;
   let sofar = '';
   const speakable = (t) => t.replace(/(^|\n)\s*Sources?:[\s\S]*$/i, '').replace(/\(?https?:\/\/\S+\)?/g, '').trim();
-  const queue = (t) => { t = speakable(t); if (voice && ELEVEN.key && /[a-z0-9]/i.test(t)) { const c = { chunks: [], done: false }; clips.push(c); speakInto(t, c); } };
+  const queue = (t) => { t = speakable(t); if (voice && speech.available && /[a-z0-9]/i.test(t)) { const c = { chunks: [], done: false }; clips.push(c); speakInto(t, c); } };
   const split = (final) => {
     const re = /[.!?…]+["')\]]*\s+/g;
     re.lastIndex = consumed;
@@ -823,139 +813,37 @@ function voiceSettings() {
     : { ...base, stability: 0.45, style: 0.2, use_speaker_boost: true };
 }
 
-// Text-to-speech runs here so the API key never reaches the renderer
-ipcMain.handle('tts-available', () => Boolean(ELEVEN.key));
-ipcMain.handle('tts', async (_e, text) => {
-  // Only eleven_v3 understands [dryly]-style delivery cues; other models would read them aloud
-  if (ELEVEN.model !== 'eleven_v3') text = text.replace(/\[[a-z ]+\]\s*/gi, '');
-  try {
-    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN.voice}?output_format=mp3_44100_128`, {
-      method: 'POST',
-      headers: { 'xi-api-key': ELEVEN.key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text,
-        model_id: ELEVEN.model,
-        voice_settings: voiceSettings(),
-      }),
-    });
-    if (!res.ok) return { ok: false, error: `HTTP ${res.status}: ${(await res.text()).slice(0, 200)}` };
-    return { ok: true, audio: new Uint8Array(await res.arrayBuffer()) };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
-});
-
-// Streaming TTS: audio chunks are forwarded as they arrive so playback starts in ~0.5s.
-// ElevenLabs v3 occasionally takes 5s+ to start a stream, so if the first request hasn't produced
-// audio within HEDGE_MS, fire a second identical request and keep whichever starts first.
-const HEDGE_MS = 1200;
-// The ElevenLabs plan caps simultaneous requests (3 on Creator). Every request, backups included,
-// holds a slot until its stream finishes; sentences queue in order for a free slot.
-const TTS_SLOTS = Number(process.env.ELEVENLABS_CONCURRENCY) || 3;
-let ttsActive = 0;
-const ttsWaiting = [];
-const acquireSlot = () => (ttsActive < TTS_SLOTS ? (ttsActive++, Promise.resolve()) : new Promise((r) => ttsWaiting.push(r)));
-const tryAcquireSlot = () => (ttsActive < TTS_SLOTS && !ttsWaiting.length ? (ttsActive++, true) : false);
-function releaseSlot() {
-  const next = ttsWaiting.shift();
-  if (next) next(); else ttsActive--;
-}
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function openTtsStream(text, signal) {
-  for (let attempt = 0; ; attempt++) {
-    const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN.voice}/stream?output_format=pcm_24000`, {
-      method: 'POST',
-      headers: { 'xi-api-key': ELEVEN.key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, model_id: ELEVEN.model, voice_settings: voiceSettings() }),
-      signal,
-    });
-    // Over the concurrency limit anyway (e.g. another app using the same key): wait and retry
-    if (res.status === 429 && attempt < 5) { await res.text(); await sleep(350 * (attempt + 1)); continue; }
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    const reader = res.body.getReader();
-    const first = await reader.read(); // resolves when audio actually starts flowing
-    return { reader, first };
-  }
-}
+// Text-to-speech runs here so the API key never reaches the renderer (voice.js picks the engine)
+ipcMain.handle('tts-available', () => speech.available);
 
 // Clips being spoken right now (id -> text), for the echo check, plus which of them were cut off.
 const speaking = new Map();
 const cancelledClips = new Set();
 const ttsAborts = new Map(); // id -> () => void
 
+// Streaming TTS: raw 24kHz PCM chunks are forwarded as they arrive, so playback starts in well under a second.
 ipcMain.on('tts-stream', async (e, id, text, native) => {
-  const t0 = Date.now();
   const send = (...args) => { if (!e.sender.isDestroyed()) e.sender.send(...args); };
   // Native playback: audio goes to the listener (echo cancellation + barge-in), not the window
   const toListener = native && listener.canPlay;
   speaking.set(id, text); // for the echo check (whichever way it plays)
   if (toListener) listener.clip(id);
   if (native && !toListener) return send('tts-native-off', id); // the window will play it itself
-  const chunk = (value) => (toListener ? listener.play(id, value) : send('tts-chunk', id, value));
   const finish = (err) => {
     ttsAborts.delete(id);
     if (toListener) listener.playEnd(id);
     send('tts-end', id, err);
   };
-  // Raw 24kHz PCM: the renderer can schedule it the instant each chunk lands (no MP3 buffering)
-  if (ELEVEN.model !== 'eleven_v3') text = text.replace(/\[[a-z ]+\]\s*/gi, '');
-
-  const attempts = [];
-  let hedged = false;
-  ttsAborts.set(id, () => attempts.forEach((a) => { a.ctrl.abort(); a.release?.(); }));
-  await acquireSlot();
-  if (cancelledClips.has(id)) { releaseSlot(); return finish('cancelled'); } // cut off while queued
+  if (cancelledClips.has(id)) return finish('cancelled'); // cut off before it started
+  const ctrl = new AbortController();
+  ttsAborts.set(id, () => ctrl.abort());
   try {
-    const winner = await new Promise((resolve, reject) => {
-      let pending = 0;
-      let settled = false;
-      const launch = () => {
-        const attempt = { ctrl: new AbortController(), won: false, released: false };
-        attempt.release = () => { if (!attempt.released) { attempt.released = true; releaseSlot(); } };
-        attempts.push(attempt);
-        pending++;
-        openTtsStream(text, attempt.ctrl.signal).then(
-          (stream) => {
-            if (settled) { attempt.ctrl.abort(); return attempt.release(); } // the other request got there first
-            settled = true;
-            attempt.won = true;
-            resolve({ ...stream, attempt });
-          },
-          (err) => {
-            attempt.release();
-            if (--pending > 0 || settled) return;
-            if (!hedged) { hedged = true; acquireSlot().then(launch); } // first failure: retry once
-            else reject(err);
-          },
-        );
-      };
-      launch(); // uses the slot acquired above
-      setTimeout(() => {
-        if (settled || hedged || !tryAcquireSlot()) return; // only hedge when a slot is free
-        hedged = true;
-        launch();
-      }, HEDGE_MS);
-    });
-    attempts.forEach((a) => { if (!a.won) { a.ctrl.abort(); a.release(); } });
-
-    const firstMs = Date.now() - t0;
-    try {
-      let { done, value } = winner.first;
-      while (!done && !cancelledClips.has(id)) {
-        chunk(value);
-        ({ done, value } = await winner.reader.read());
-      }
-      if (cancelledClips.has(id)) winner.attempt.ctrl.abort();
-    } finally {
-      winner.attempt.release();
-    }
-    log('timing tts', { chars: text.length, firstAudioMs: firstMs, doneMs: Date.now() - t0, hedged, native: toListener });
-    finish(null);
+    await speech.speak(text, { signal: ctrl.signal, source: 'mac',
+      onChunk: (value) => (toListener ? listener.play(id, value) : send('tts-chunk', id, value)) });
+    finish(cancelledClips.has(id) ? 'cancelled' : null);
   } catch (err) {
-    attempts.forEach((a) => { a.ctrl.abort(); a.release(); });
-    if (!cancelledClips.has(id)) log('tts error', err.message);
-    finish(cancelledClips.has(id) ? 'cancelled' : err.message);
+    if (!cancelledClips.has(id) && err.kind !== 'cancelled') log('tts error', err.message);
+    finish(cancelledClips.has(id) || err.kind === 'cancelled' ? 'cancelled' : err.message);
   }
 });
 
@@ -1563,6 +1451,65 @@ function liveCall() {
   return { live: true, id, name: rec?.name || 'Call', since: rec?.at || Date.now() };
 }
 
+// ---- Voice: Katherine, the backup voice, budget mode and the credit watch (voice.js) ------------------------
+function createSpeech() {
+  const v = new Voice({
+    dir: app.getPath('userData'), log, settings: readSettings, saveSettings: writeSettings, devBuild: !app.isPackaged,
+    eleven: { key: ELEVEN.key, voice: ELEVEN.voice, model: ELEVEN.model, speed: ELEVEN.speed, settings: voiceSettings },
+  });
+  v.on('state', () => { refreshTray(); pushVoiceStatus(); });
+  // Once per outage: the status pill, the menu bar, and a short spoken note when she's next free
+  v.on('down', ({ reason, note }) => {
+    log('voice backup on', { reason });
+    if (!win || win.isDestroyed()) return;
+    if (atMac()) win.webContents.send('job-announce', { line: note, open: false });
+    else notice(note);
+  });
+  v.on('restored', () => { log('voice backup off'); notice("Katherine's voice is back."); });
+  v.on('warn', ({ level, remaining, reset }) => {
+    const left = `${Math.round(remaining / 1000)}k credits left${reset ? `, reset ${new Date(reset).toLocaleDateString([], { month: 'short', day: 'numeric' })}` : ''}`;
+    log('voice credits warning', { level, remaining });
+    notice(`ElevenLabs credits ${level}% used: ${left}.`);
+    pushToPhones({ title: `ElevenLabs credits ${level}% used`, body: `${left}. Budget voice is ${v.budgetMode === 'off' ? 'off' : 'covering fillers'}.`, tag: `credits-${level}` }).catch(() => {});
+  });
+  return v;
+}
+
+/** Status pill + the status panel's voice line in the window. */
+function pushVoiceStatus() {
+  if (!speech) return;
+  const s = speech.status();
+  toDash({ type: 'health', key: 'voice', ok: !s.backup, reason: s.backup ? `backup voice: ${s.reason}` : '' });
+  const c = s.credits;
+  toDash({ type: 'health', key: 'credits', ok: !(c.known && c.pct >= 0.8), reason: c.known ? `credits ${Math.round(c.pct * 100)}% used` : '' });
+  toDash({ type: 'voice', line: voiceLine(s), credits: creditLine(s) });
+}
+function creditLine(s) {
+  const c = s.credits;
+  if (c.known) return `${Math.round(c.remaining / 1000)}k credits left · resets ${new Date(c.reset).toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
+  return c.access === 'no-permission' ? `credits unknown (key needs user_read) · ARES sent ~${Math.round(c.aresSent / 1000)}k this month` : `ARES sent ~${Math.round(c.aresSent / 1000)}k credits this month`;
+}
+function voiceLine(s) {
+  if (s.backup) return `Backup voice (${s.reason}) until ${s.retryAt ? new Date(s.retryAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'later'}`;
+  if (s.dev) return 'Backup voice: building/testing mode';
+  if (s.reserve) return 'Backup voice: saving credits for phone calls';
+  if (s.budgetActive) return s.budget === 'auto' ? 'Budget voice: AUTO is on (credits low)' : 'Budget voice: always on';
+  return `Voice: Katherine${s.budget === 'off' ? '' : ` · budget ${s.budget}`}`;
+}
+
+/** "budget mode on/off/auto", from the Mac, the phone or Telegram. */
+function budgetCommand(raw) {
+  const text = raw.trim().replace(/[.!?]+$/, '').toLowerCase();
+  const m = text.match(/^(?:please\s+)?(?:(?:turn|switch|put|set)\s+)?(?:the\s+)?budget(?:\s+voice)?(?:\s+mode)?(?:\s+(?:to|on to))?\s+(on|off|auto(?:matic)?|always)(?:\s+mode)?$/)
+    || text.match(/^(?:please\s+)?(?:turn|switch)\s+(on|off)\s+(?:the\s+)?budget(?:\s+voice)?(?:\s+mode)?$/);
+  if (!m || !speech) return null;
+  const mode = m[1] === 'on' ? 'always' : m[1].startsWith('auto') ? 'auto' : m[1];
+  speech.setBudget(mode);
+  return mode === 'always' ? "Budget voice on, sir. Small talk in my backup voice, answers in my usual one."
+    : mode === 'off' ? "Budget voice off. All Katherine, all the time."
+    : "Budget voice on auto. I'll economise when the credits run low.";
+}
+
 // ---- Startup -------------------------------------------------------------------------
 app.on('second-instance', () => showWindow());
 
@@ -1576,6 +1523,8 @@ app.whenReady().then(async () => {
   memory.add = (fact) => { const saved = addFact(fact); toDash({ type: 'memory', fact: saved }); return saved; }; // the REMEMBERED flash
   dashboard = new Dashboard({ log, cli: claude.CLI, dir: path.join(app.getPath('userData'), 'dashboard'), settings: readSettings, country: app.getLocaleCountryCode() });
   dashboard.on('update', toDash);
+  speech = createSpeech();
+  speech.start();
   relay = new Relay({ log, firebaseFile: path.join(app.getPath('userData'), 'google-services.json') });
   calls = createCalls();
   bridge = await startBridge({
@@ -1645,6 +1594,7 @@ app.whenReady().then(async () => {
     listener.start(); checkIntegrations(); startRemote(); startPhone(); calls.start().catch((err) => log('calls start failed', err.message));
     dashboard.start();
     dashboard.setVisible(win.isVisible());
+    pushVoiceStatus();
   });
   globalShortcut.register(HOTKEY, toggleWindow);
   app.on('activate', () => showWindow());
@@ -1669,6 +1619,7 @@ app.on('will-quit', () => {
   jobs?.shutdown();
   calls?.stop();
   dashboard?.stop();
+  speech?.stop();
   egress?.close();
   claude.shutdown();
 });

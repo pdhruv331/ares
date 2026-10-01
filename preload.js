@@ -2,7 +2,6 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('ares', {
   systemStats: () => ipcRenderer.invoke('system-stats'),
-  tts: (text) => ipcRenderer.invoke('tts', text),
   ttsAvailable: () => ipcRenderer.invoke('tts-available'),
   // Streams one utterance: onChunk(Uint8Array) per audio chunk, then onEnd(errorOrNull)
   ttsStream: (text, onChunk, onEnd) => {
