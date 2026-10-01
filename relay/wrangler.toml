@@ -1,0 +1,14 @@
+name = "ares-relay"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+# Only this agent's calls are relayed
+[vars]
+AGENT_ID = "agent_…"
+
+# Holds only the phone's push token(s) and, for 7 days, ids of calls already notified.
+# Create it with:  npx wrangler kv namespace create ARES_KV   then paste the id here.
+[[kv_namespaces]]
+binding = "ARES_KV"
+id = "b401e8951acb49458a483c163f5e0eab"

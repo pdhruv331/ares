@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@color/bg">
+
+    <!-- Pairing -->
+    <LinearLayout android:id="@+id/pair" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_gravity="center" android:orientation="vertical" android:padding="24dp" android:visibility="gone">
+        <ImageView android:layout_width="120dp" android:layout_height="120dp" android:layout_gravity="center" android:src="@drawable/reactor" android:layout_marginBottom="24dp"/>
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center"
+            android:text="PAIR WITH YOUR MAC" android:textColor="@color/cyan" android:textSize="16sp" android:letterSpacing="0.2" android:textStyle="bold"/>
+        <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:layout_marginTop="10dp" android:layout_marginBottom="20dp"
+            android:text="With Tailscale on, choose Pair a Phone… in the ARES menu on your Mac and enter the code it shows."
+            android:textColor="@color/muted" android:textSize="13sp" android:lineSpacingMultiplier="1.3"/>
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="MAC ADDRESS" android:textColor="@color/muted" android:textSize="10sp" android:letterSpacing="0.2" android:layout_marginBottom="4dp"/>
+        <EditText android:id="@+id/url" style="@style/AresInput" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:inputType="textUri" android:singleLine="true" android:textSize="13sp"/>
+        <EditText android:id="@+id/code" style="@style/AresInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp"
+            android:hint="000000" android:inputType="number" android:maxLength="6" android:gravity="center" android:textSize="28sp" android:letterSpacing="0.5" android:padding="14dp"/>
+        <TextView android:id="@+id/pairBtn" style="@style/AresButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="14dp" android:text="PAIR"/>
+        <TextView android:id="@+id/pairErr" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:gravity="center"
+            android:textColor="@color/amber" android:textSize="13sp"/>
+    </LinearLayout>
+
+    <!-- The app -->
+    <LinearLayout android:id="@+id/app" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="vertical" android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingBottom="12dp">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="52dp" android:gravity="center_vertical" android:orientation="horizontal">
+            <FrameLayout android:layout_width="9dp" android:layout_height="9dp" android:background="@drawable/dot" android:layout_marginEnd="10dp"/>
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                android:text="A.R.E.S" android:textColor="@color/cyan" android:textStyle="bold" android:textSize="14sp" android:letterSpacing="0.3"/>
+            <TextView android:id="@+id/callsBtn" android:layout_width="wrap_content" android:layout_height="34dp" android:layout_marginEnd="8dp"
+                android:background="@drawable/bg_chip" android:gravity="center" android:paddingStart="10dp" android:paddingEnd="10dp"
+                android:text="CALLS" android:textColor="@color/cyan" android:textSize="10sp" android:letterSpacing="0.15" android:contentDescription="Calls on your ARES line"/>
+            <TextView android:id="@+id/workBtn" android:layout_width="wrap_content" android:layout_height="34dp" android:layout_marginEnd="10dp"
+                android:background="@drawable/bg_chip" android:gravity="center" android:paddingStart="10dp" android:paddingEnd="10dp"
+                android:text="WORK" android:textColor="@color/cyan" android:textSize="10sp" android:letterSpacing="0.15" android:contentDescription="Work: your background jobs"/>
+            <TextView android:id="@+id/status" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:textColor="@color/status" android:textSize="10sp" android:letterSpacing="0.15"/>
+            <ImageView android:id="@+id/menu" android:layout_width="40dp" android:layout_height="40dp" android:padding="8dp" android:layout_marginStart="4dp"
+                android:src="@drawable/ic_menu" android:contentDescription="Menu" android:background="?android:attr/selectableItemBackgroundBorderless"/>
+        </LinearLayout>
+
+        <TextView android:id="@+id/setup" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone"
+            android:background="@drawable/bg_setup" android:padding="12dp" android:textColor="@color/purple" android:textSize="13sp"/>
+
+        <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="0.85">
+            <com.dhruv.ares.BrainView android:id="@+id/reactor" android:layout_width="match_parent" android:layout_height="match_parent" android:contentDescription="ARES. Tap to stop her talking; tap a job's orb to open it."/>
+            <TextView android:id="@+id/stateText" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_gravity="bottom"
+                android:gravity="center" android:textColor="@color/cyan" android:textSize="10sp" android:letterSpacing="0.45"/>
+        </FrameLayout>
+
+        <ScrollView android:id="@+id/scroll" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fadingEdgeLength="24dp" android:requiresFadingEdge="vertical">
+            <LinearLayout android:id="@+id/log" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingTop="6dp" android:paddingBottom="6dp"/>
+        </ScrollView>
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="8dp">
+            <EditText android:id="@+id/input" style="@style/AresInput" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
+                android:hint="@string/type_hint" android:imeOptions="actionSend" android:inputType="textCapSentences|textAutoCorrect" android:singleLine="true"/>
+            <ImageView android:id="@+id/send" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginStart="8dp" android:padding="12dp"
+                android:background="@drawable/bg_round" android:src="@drawable/ic_send" android:contentDescription="Send"/>
+        </LinearLayout>
+
+        <TextView android:id="@+id/talk" style="@style/AresButton" android:layout_width="match_parent" android:layout_height="64dp" android:layout_marginTop="10dp"
+            android:text="TAP TO TALK" android:drawableStart="@drawable/ic_mic" android:paddingStart="24dp" android:paddingEnd="48dp"/>
+    </LinearLayout>
+</FrameLayout>

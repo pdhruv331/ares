@@ -1,0 +1,26 @@
+/* Printed job results (Save as PDF): clean, light, readable pages */
+* { box-sizing: border-box; margin: 0; }
+body { font: 11pt/1.55 -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif; color: #1f2937; background: #fff; padding: 0 4mm; }
+.print-head { display: flex; justify-content: space-between; font: 8pt "SF Mono", Menlo, monospace; letter-spacing: 0.2em; color: #0e7490; border-bottom: 1px solid #cbd5e1; padding-bottom: 6px; margin-bottom: 16px; }
+.md h1, .md h2, .md h3, .md h4 { color: #0f172a; margin: 1.1em 0 0.4em; line-height: 1.25; break-after: avoid; }
+.md h1 { font-size: 20pt; margin-top: 0; } .md h2 { font-size: 14pt; } .md h3 { font-size: 12pt; }
+.md p, .md ul, .md ol, .md blockquote, .md pre, .md table, .md figure, .md .md-chart, .md .md-mermaid { margin: 0 0 0.8em; }
+.md ul, .md ol { padding-left: 1.4em; }
+.md a { color: #0e7490; text-decoration: none; }
+.md code { font: 9pt "SF Mono", Menlo, monospace; background: #f1f5f9; padding: 0 3px; border-radius: 3px; }
+.md pre { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 8px 10px; white-space: pre-wrap; break-inside: avoid; }
+.md pre code { background: none; }
+.md blockquote { border-left: 3px solid #94a3b8; padding-left: 10px; color: #475569; }
+.md table { border-collapse: collapse; font-size: 9.5pt; width: 100%; break-inside: auto; }
+.md th, .md td { border: 1px solid #cbd5e1; padding: 4px 8px; text-align: left; vertical-align: top; }
+.md th { background: #f1f5f9; }
+.md tr { break-inside: avoid; }
+.md figure { break-inside: avoid; text-align: center; }
+.md img { max-width: 100%; max-height: 120mm; border-radius: 3px; }
+.md figcaption { font-size: 8.5pt; color: #64748b; margin-top: 4px; }
+.md .md-chart, .md .md-mermaid { break-inside: avoid; }
+.md .md-mermaid svg { max-width: 100%; height: auto; }
+.md input[type=checkbox] { margin-right: 6px; }
+.md .md-app-print { font-size: 9pt; color: #64748b; border: 1px dashed #cbd5e1; padding: 8px; border-radius: 4px; }
+.md .md-error { color: #b91c1c; font-size: 9pt; }
+.md .md-img { color: #64748b; }

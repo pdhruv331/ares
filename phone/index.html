@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="ARES" />
+  <meta name="theme-color" content="#040a10" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icon.png" />
+  <title>ARES</title>
+  <link rel="stylesheet" href="/phone.css" />
+  <link rel="stylesheet" href="/work.css" />
+  <link rel="stylesheet" href="/vendor/hljs-dark.css" />
+</head>
+<body>
+  <header>
+    <span class="mark"></span><span class="name">A.R.E.S.</span>
+    <button id="bell" type="button" hidden aria-label="Enable notifications">🔔 Enable</button>
+    <button id="workBtn" type="button" hidden aria-label="Work">WORK <b id="workCount"></b></button>
+    <span id="status">connecting…</span>
+  </header>
+
+  <section id="pair" hidden>
+    <h1>Pair with your Mac</h1>
+    <p>On your Mac, click the ARES icon in the menu bar and choose <b>Pair a Phone…</b>. Enter the six-digit code it shows.</p>
+    <input id="code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" placeholder="••••••" />
+    <button id="pairBtn">Pair</button>
+    <p id="pairErr" class="err"></p>
+  </section>
+
+  <main id="app" hidden>
+    <div class="core">
+      <canvas id="brain"></canvas>
+      <canvas id="hud"></canvas>
+      <div id="stateText">ONLINE</div>
+    </div>
+    <div id="log"></div>
+    <div id="attach" hidden><span id="attachText"></span><button id="attachJob" type="button">Make it a job</button><button id="attachClear" type="button" aria-label="Remove">✕</button></div>
+    <form id="form">
+      <input id="input" placeholder="Type to ARES…" autocomplete="off" enterkeyhint="send" />
+      <button id="send" type="submit" aria-label="Send">↑</button>
+    </form>
+    <button id="talk" type="button">Hold to talk</button>
+  </main>
+
+  <!-- Work: the Mac's background jobs, on the phone -->
+  <section id="work" hidden>
+    <div id="wkList">
+      <div class="wk-top"><button class="wk-x" data-close aria-label="Close">✕</button><h2>WORK</h2><button id="wkGalleryBtn" class="icon-btn" type="button">GALLERY</button></div>
+      <form id="wkNew">
+        <textarea id="wkNewText" rows="2" placeholder="A new job: research, compare, write, make slides…"></textarea>
+        <div class="wk-new-bar">
+          <label class="icon-btn wk-attach" aria-label="Attach files">📎<input type="file" id="wkFiles" multiple accept="image/*,application/pdf,.docx,.pptx,.xlsx,.csv,.txt,.md" hidden /></label>
+          <button id="wkMic" class="icon-btn" type="button" aria-label="Dictate">🎤</button>
+          <span id="wkNewFiles"></span>
+          <button class="icon-btn wk-go" type="submit">START</button>
+        </div>
+      </form>
+      <input id="wkSearch" type="search" placeholder="Search past work…" autocomplete="off" />
+      <ul id="wkJobs"></ul>
+      <div id="wkGallery" class="gallery" hidden></div>
+    </div>
+    <div id="wkDetail" hidden></div>
+  </section>
+  <div id="wkPreview" class="work-preview" hidden>
+    <div class="pv-frame">
+      <div class="pv-bar"><span class="pv-title"></span><span><a class="icon-btn" data-pv-dl download>DOWNLOAD</a><button class="icon-btn" type="button" data-pv-close>✕</button></span></div>
+      <div class="pv-body"></div>
+    </div>
+  </div>
+
+  <script src="/vendor/marked.umd.js"></script>
+  <script src="/vendor/purify.min.js"></script>
+  <script src="/vendor/chart.umd.min.js"></script>
+  <script src="/vendor/highlight.min.js"></script>
+  <script src="/renderer/markdown.js"></script>
+  <script src="/renderer/neural.js"></script>
+  <script type="module" src="/renderer/brain3d.mjs"></script>
+  <script src="/phone.js"></script>
+  <script src="/work.js"></script>
+</body>
+</html>

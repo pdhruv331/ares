@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_gravity="bottom" android:layout_margin="12dp"
+        android:layout_marginBottom="48dp" android:background="@drawable/bg_panel" android:orientation="horizontal" android:gravity="center_vertical" android:padding="16dp" android:elevation="12dp">
+        <com.dhruv.ares.ReactorView android:id="@+id/reactor" android:layout_width="56dp" android:layout_height="56dp"/>
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="14dp" android:orientation="vertical">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="UPDATING ARES" android:textColor="@color/cyan" android:textStyle="bold" android:textSize="12sp" android:letterSpacing="0.25"/>
+            <TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp"
+                android:text="Checking your Mac…" android:textColor="@color/text" android:textSize="14sp" android:lineSpacingMultiplier="1.25"/>
+            <LinearLayout android:id="@+id/buttons" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp"
+                android:orientation="horizontal" android:visibility="gone">
+                <TextView android:id="@+id/openSettings" style="@style/AresButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:padding="10dp" android:textSize="12sp" android:text="SECURITY SETTINGS"/>
+                <TextView android:id="@+id/installNow" style="@style/AresButton" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:layout_marginStart="8dp" android:padding="10dp" android:textSize="12sp" android:text="INSTALL"/>
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

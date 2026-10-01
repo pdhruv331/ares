@@ -1,0 +1,12 @@
+<resources>
+    <color name="bg">#040A10</color>
+    <color name="panel">#E60A1620</color>
+    <color name="cyan">#3EE6FF</color>
+    <color name="cyan_dim">#593EE6FF</color>
+    <color name="cyan_faint">#1F3EE6FF</color>
+    <color name="amber">#FFB547</color>
+    <color name="purple">#9D8CFF</color>
+    <color name="text">#CFEFFF</color>
+    <color name="text_user">#8FB3C1</color>
+    <color name="muted">#5D8797</color>
+</resources>

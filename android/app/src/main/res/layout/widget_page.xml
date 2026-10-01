@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/bg_widget" android:orientation="vertical" android:padding="20dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:text="A.R.E.S" android:textColor="@color/cyan" android:textStyle="bold" android:textSize="15sp" android:letterSpacing="0.3" android:fontFamily="monospace"/>
+        <TextView android:id="@+id/w_status" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="10sp" android:letterSpacing="0.15" android:fontFamily="monospace"/>
+    </LinearLayout>
+
+    <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:layout_marginTop="8dp" android:layout_marginBottom="8dp">
+        <ImageView android:id="@+id/w_orb" android:layout_width="match_parent" android:layout_height="match_parent" android:layout_gravity="center"
+            android:maxWidth="260dp" android:maxHeight="260dp" android:adjustViewBounds="true" android:scaleType="fitCenter" android:src="@drawable/reactor" android:contentDescription="Talk to ARES"/>
+    </FrameLayout>
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+            <TextView android:id="@+id/w_said" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                android:textColor="@color/text_user" android:textSize="12sp" android:fontFamily="monospace" android:maxLines="2" android:ellipsize="end"/>
+            <TextView android:id="@+id/w_when" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp"
+                android:textColor="@color/muted" android:textSize="10sp" android:fontFamily="monospace"/>
+        </LinearLayout>
+        <TextView android:id="@+id/w_reply" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="6dp"
+            android:textColor="@color/text" android:textSize="14sp" android:fontFamily="monospace" android:maxLines="8" android:ellipsize="end" android:lineSpacingMultiplier="1.25"/>
+    </LinearLayout>
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="14dp">
+        <TextView android:id="@+id/w_q1" style="@style/WidgetChip" android:layout_width="0dp" android:layout_weight="1"/>
+        <TextView android:id="@+id/w_q2" style="@style/WidgetChip" android:layout_width="0dp" android:layout_weight="1" android:layout_marginStart="6dp"/>
+        <TextView android:id="@+id/w_q3" style="@style/WidgetChip" android:layout_width="0dp" android:layout_weight="1" android:layout_marginStart="6dp"/>
+    </LinearLayout>
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="10dp">
+        <TextView android:id="@+id/w_talk" android:layout_width="0dp" android:layout_height="56dp" android:layout_weight="1" android:background="@drawable/bg_button"
+            android:gravity="center" android:text="TAP TO TALK" android:textColor="@color/cyan" android:textSize="13sp" android:letterSpacing="0.2" android:fontFamily="monospace"
+            android:drawableStart="@drawable/ic_mic" android:paddingStart="20dp" android:paddingEnd="20dp"/>
+        <ImageView android:id="@+id/w_type" android:layout_width="56dp" android:layout_height="56dp" android:layout_marginStart="10dp" android:padding="15dp"
+            android:background="@drawable/bg_round" android:src="@drawable/ic_keyboard" android:contentDescription="Type"/>
+    </LinearLayout>
+</LinearLayout>

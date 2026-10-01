@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: ares-job:; media-src 'self' blob: mediastream: ares-job:; connect-src 'self' ares-job:; frame-src ares-job:; object-src 'none'; base-uri 'none'; form-action 'none'" />
+  <title>ARES</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="vendor/hljs-dark.css" />
+</head>
+<body>
+  <div class="frame">
+    <canvas id="stars" aria-hidden="true"></canvas>
+    <header id="titlebar" class="titlebar">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <span class="brand-name">ARES</span>
+        <span id="greeting" class="greeting"></span>
+      </div>
+      <div class="titlebar-right">
+        <span id="weather" class="weather" hidden></span>
+        <span id="clock" class="clock">--:--:--</span>
+        <button id="statusBtn" class="status-pill" title="System status"><i></i><span id="statusText">all systems ok</span></button>
+        <button id="workBtn" class="icon-btn work-btn" title="Work: background jobs">WORK <b id="workCount"></b></button>
+        <button id="fullBtn" class="icon-btn" title="Full screen (⌃⌘F)">FULL</button>
+        <button id="pinBtn" class="icon-btn" title="Keep on top">PIN</button>
+        <button id="hideBtn" class="icon-btn" title="Hide (⌥Space)">✕</button>
+      </div>
+    </header>
+
+    <main class="stage">
+      <section class="core">
+        <canvas id="brain"></canvas>
+        <canvas id="hud"></canvas>
+        <div class="state-label"><span id="stateText">ONLINE</span></div>
+      </section>
+      <div id="panels" class="panels"></div>
+      <canvas id="fx" aria-hidden="true"></canvas>
+      <div id="closeHint" class="close-hint" hidden>RELEASE TO CLOSE</div>
+
+      <section id="work" class="work" hidden>
+        <div class="work-list">
+          <div class="work-list-head"><h3>Work</h3><button id="galleryBtn" class="icon-btn" title="Every past job, as cards">GALLERY</button></div>
+          <input id="workSearch" class="work-search" type="search" placeholder="Search your work…" spellcheck="false" autocomplete="off" />
+          <ul id="jobList"></ul>
+        </div>
+        <div id="jobDetail" class="work-detail"></div>
+        <button class="icon-btn work-close" title="Close">✕</button>
+        <div id="workPreview" class="work-preview" hidden>
+          <div class="pv-frame">
+            <div class="pv-bar"><span class="pv-title"></span>
+              <span><button class="icon-btn" data-pv-open>OPEN IN APP</button><button class="icon-btn" data-pv-close>✕</button></span></div>
+            <div class="pv-body"></div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <div class="ticker"><span class="ticker-caret">›</span><span id="ticker"></span><canvas id="pulse" aria-hidden="true"></canvas></div>
+
+    <div id="statusPanel" class="status-panel" hidden>
+      <i class="br tl"></i><i class="br tr"></i><i class="br bl"></i><i class="br bo"></i>
+      <div id="statusFix" class="status-fix"></div>
+      <h3>Integrations</h3>
+      <ul class="integrations">
+        <li data-key="voice"><span class="dot"></span>Voice · ElevenLabs</li>
+        <li data-key="brain"><span class="dot"></span>Brain · Claude</li>
+        <li data-key="wake"><span class="dot"></span>Wake word · Hey ARES</li>
+        <li data-key="voiceid"><span class="dot"></span>Voice ID · not set up</li>
+        <li data-key="google"><span class="dot"></span>Google</li>
+        <li data-key="mac"><span class="dot"></span>Mac control</li>
+        <li data-key="web"><span class="dot"></span>Web search</li>
+        <li data-key="phone"><span class="dot"></span>Phone · Telegram</li>
+      </ul>
+      <h3>System</h3>
+      <div class="stat"><label>Host</label><span id="host">—</span></div>
+      <div class="stat"><label>CPU load</label><div class="bar"><i id="cpuBar"></i></div><span id="cpuVal">0%</span></div>
+      <div class="stat"><label>Memory</label><div class="bar"><i id="memBar"></i></div><span id="memVal">0%</span></div>
+      <div class="stat"><label>Uptime</label><span id="uptime">—</span></div>
+      <div class="stat"><label>Date</label><span id="date">—</span></div>
+    </div>
+
+    <section class="console">
+      <div id="dropCard" class="drop-card" hidden></div>
+      <div id="subs" class="subs" title="Show COMMS (⌃C)">
+        <div id="subUser" class="sub-user"></div>
+        <div id="subAres" class="sub-ares" aria-live="polite"></div>
+      </div>
+      <button id="commsTab" class="comms-tab" aria-expanded="false" aria-controls="comms" title="Conversation history (⌃C)">COMMS <span class="caret">▴</span></button>
+      <div class="input-zone">
+        <form id="inputForm" class="input-row">
+          <button type="button" id="micBtn" class="mic" title="Microphone">
+            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"/></svg>
+          </button>
+          <input id="input" autocomplete="off" spellcheck="false" placeholder="Type to ARES, sir…" />
+          <kbd>esc</kbd>
+        </form>
+      </div>
+    </section>
+    <section id="comms" class="comms" hidden aria-label="COMMS">
+      <i class="br tl"></i><i class="br tr"></i><i class="br bl"></i><i class="br bo"></i>
+      <div class="cm-head"><span>COMMS · TODAY</span><span class="cm-count"></span></div>
+      <div class="cm-list"></div>
+    </section>
+  </div>
+  <div id="dropZone" class="drop-zone" hidden><div><b>Drop files for ARES</b><span>Then tell her what to do with them: summarise, make slides, compare…</span></div></div>
+
+  <script src="perf.js"></script>
+  <script src="stars.js"></script>
+  <script src="neural.js"></script>
+  <script type="module" src="brain3d.mjs"></script>
+  <script src="brain.js"></script>
+  <script src="vendor/marked.umd.js"></script>
+  <script src="vendor/purify.min.js"></script>
+  <script src="vendor/chart.umd.min.js"></script>
+  <script src="vendor/highlight.min.js"></script>
+  <script src="markdown.js"></script>
+  <script src="work.js"></script>
+  <script src="drop.js"></script>
+  <script src="dash.js"></script>
+  <script src="comms.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

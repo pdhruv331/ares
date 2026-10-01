@@ -1,0 +1,113 @@
+// Hand-written core examples for the intent layer (intent.js). The conversation datasets supply most of
+// the everyday backchannels, yes/no answers and thanks, but nobody in them tells an assistant to be quiet
+// or go to sleep, so those intents lean on this list. The "chat" block matters just as much: commands and
+// remarks that share words with the others ("stop the music", "thanks for the email, reply to it") but
+// must reach the brain.
+export const SEEDS = {
+  stop: [
+    'stop', 'stop stop', 'stop talking', 'please stop', 'ok stop', 'alright stop', 'wait', 'wait wait',
+    'wait a sec', 'wait a minute', 'hold on', 'hold on a second', 'hang on', 'hang on a minute', 'hold it',
+    'pause', 'quiet', 'be quiet', 'shh', 'shush', 'hush', 'enough', "that's enough", 'okay okay', 'yeah yeah okay',
+    'one sec', 'one moment', 'just a moment', 'give me a second', 'gimme a minute', 'let me think',
+    'hold that thought', 'wait up', 'stop there', 'cut it out', 'can you stop', 'zip it', 'quiet please',
+    'sorry to interrupt', 'excuse me', 'oi', 'woah', 'easy', 'slow down', 'not now', 'shut up',
+    'alright alright', 'ok i get it', 'yeah i get it', 'got it got it', 'no no no', 'no wait',
+    'actually wait', 'hang about', 'just a tick', 'bear with me', 'give me a moment',
+    'whoa', 'whoa hold on', 'wait stop', 'stop it', 'hold on hold on', 'okay alright stop',
+  ],
+  continue: [
+    'go on', 'carry on', 'keep going', 'continue', 'and then', 'and', 'mm', 'mhm', 'uh huh', 'mm hmm',
+    'yeah', 'yeah go on', 'right', 'i see', 'ok go on', 'sure go on', "i'm listening", 'go ahead',
+    'what else', 'tell me more', 'and after that', 'yep', 'keep talking', 'finish what you were saying',
+    'sorry go on', 'as you were saying', 'you were saying', 'go on then', 'oh really', 'interesting',
+  ],
+  yes: [
+    'yes', 'yes please', 'yeah do it', 'sure', 'of course', 'absolutely', 'definitely', 'yep that one',
+    "that's right", 'correct', 'exactly', 'please do', 'go for it', 'sounds good', 'ok', 'alright',
+    'fine', 'why not', 'do it', 'affirmative', 'yes that', 'totally', 'i guess so', 'yeah sure',
+    'sure thing', 'that works', 'perfect', 'let\'s do it', 'yup', 'aye',
+  ],
+  no: [
+    'no', 'nope', 'no thanks', 'nah', 'no thank you', "don't", 'not really', 'no way', 'negative',
+    'no not that one', 'the other one', 'not that', "that's wrong", "that's not right", 'wrong one',
+    'no i meant the other', 'definitely not', 'absolutely not', "i don't think so", 'nah leave it',
+    'not today', 'no need', "it's fine no", 'rather not', 'nah not that one',
+  ],
+  thanks: [
+    'thanks', 'thank you', 'thank you so much', 'thanks a lot', 'cheers', 'ta', 'much appreciated',
+    'appreciate it', 'got it', 'okay got it', 'great thanks', 'perfect thanks', 'nice one', 'brilliant',
+    'lovely', 'cool thanks', 'noted', 'understood', 'good to know', 'makes sense', 'fair enough',
+    'okay cool', 'ok thanks', 'great', 'awesome', 'thanks mate', 'you legend', 'nice', 'sweet',
+    'that helps', 'good stuff', 'right okay', 'okay thank you', 'thanks very much', 'thank you very much',
+    'oh okay thanks', 'great, got it', 'wonderful', 'excellent', 'superb',
+  ],
+  repeat: [
+    'what', 'what did you say', 'say that again', 'come again', 'pardon', 'sorry what', 'repeat that',
+    'can you repeat that', 'huh', "i didn't catch that", 'one more time', 'again please', 'sorry?',
+    'what was that', 'say again', 'i missed that', 'could you say that again', "didn't hear you",
+    'repeat please', 'can you say it again',
+  ],
+  nevermind: [
+    'never mind', 'nevermind', 'forget it', 'forget about it', "don't worry", "don't worry about it",
+    'cancel', 'cancel that', 'scratch that', 'ignore that', 'ignore me', 'nothing', "it's nothing",
+    'doesn\'t matter', 'it doesn\'t matter', 'never mind then', 'oh forget it', 'leave it',
+    'skip it', 'drop it', 'nothing never mind', 'not important', 'forget i asked',
+  ],
+  sleep: [
+    'go to sleep', 'sleep', "that's all", 'that will be all', "that's all for now", "we're done",
+    'goodnight', 'good night', 'bye', 'goodbye', 'see you later', 'talk later', 'stand by', 'dismissed',
+    'you can rest now', 'stop listening', 'go back to sleep', "i'm done", 'nothing else', 'that is all',
+    'all done', 'rest now', 'catch you later', 'later', 'over and out', "that's it for now", 'bye for now',
+    "that's everything", 'we can stop there', 'sleep mode', 'night', 'cheerio',
+  ],
+  chat: [
+    'stop the music', 'pause the music', 'pause spotify', 'stop the timer', 'cancel my meeting',
+    'cancel the 3pm meeting', 'wait for me at the station', 'hold on to that file for me',
+    'thanks for the email, can you reply to it', 'never mind the weather, what time is it',
+    'what time is it', "what's the weather like", 'set a timer for ten minutes', 'play some jazz',
+    'turn the volume down', 'open safari', 'how are you', "how's your day", 'tell me a joke',
+    'remind me to call mum', 'send a text to sam', 'what did i have on today',
+    "i'm so tired today", 'ugh that meeting', "it's freezing in here", 'i had a great day',
+    'my sister is coming over', 'do you like music', 'what do you think about that',
+    'who won the game last night', 'how long till dinner', 'read me my emails', "what's next on my calendar",
+    'is it going to rain', 'lock the screen', 'what battery am i on', 'go to the next song',
+    'why is that', 'how does that work', 'what does that mean', 'who is she', 'where is it',
+    'the blue one looks better', 'i was thinking about pizza', "let's watch a film", 'my back hurts',
+    'can you stop the alarm', 'stop the song', 'pause the video', 'wait until tomorrow to send it',
+    'yes and also add milk to the list', 'no, send it to priya instead', 'thanks, now book the table',
+    'repeat the last song', 'skip this song', 'mute the tv', 'turn off the lights',
+    'remind me in ten minutes', 'call me back in an hour', 'give me a summary', 'give me the news',
+    'give me directions home', 'text me in a minute', 'wake me up at seven', 'set a reminder for tomorrow',
+    'in an hour', 'tomorrow morning', 'at five', 'the one from yesterday', 'what about friday',
+  ],
+};
+
+// Casual phrasings that are NOT above or in the datasets' mined phrasings: the held-out check in
+// scripts/test-intents.mjs. Keep them out of SEEDS so the test stays honest.
+export const HELD_OUT = {
+  stop: ['hold up', 'whoa whoa', 'gimme a sec', 'whoa there', 'hold your horses', 'wait wait wait hold on',
+    'ok ok stop', 'stop stop stop', 'hang fire', 'shhh', 'hold it right there', 'one second please',
+    'gimme a moment', 'right stop there', 'yeah yeah alright', 'can you just stop', 'pause for a sec',
+    'stop please', 'hush now', 'woah woah woah'],
+  continue: ['and?', 'keep it going', 'yeah and', 'uh-huh', 'then what', 'right right',
+    'mm yeah', 'okay and', 'yeah yeah go on'],
+  yes: ['yeah go for it', 'yes do that', 'sure why not', 'yeah that one', 'yup sounds good', 'go ahead and do it',
+    'yeah please', 'course', 'yes mate', 'that\'s the one'],
+  no: ['nah the other one', 'no not that', 'nope not that', 'no no the second one', 'not that one',
+    'no thanks mate', 'nah mate'],
+  thanks: ['cheers mate', 'ta very much', 'nice one thanks', 'lovely thank you',
+    'brill', 'thanks ares', 'perfect cheers', 'great stuff', 'ah got it', 'ok cool cheers'],
+  repeat: ['sorry come again', 'you what', 'what was that again', 'say what', 'didn\'t catch that',
+    'can you say that again', 'pardon me', 'sorry i missed that'],
+  nevermind: ['ah forget it', 'don\'t bother', 'scrap that', 'actually never mind',
+    'it\'s not important', 'nah forget it', 'no worries forget it'],
+  sleep: ['that\'s all thanks', 'night night', 'see ya', 'i\'m off', 'we\'re good for now', 'go to sleep ares',
+    'that\'ll do for now', 'speak later', 'ok bye'],
+  chat: ['stop the playlist', 'pause netflix', 'hold on is it raining', 'wait what time is my flight',
+    'thanks for that, now text mum', 'what\'s the capital of peru', 'i fancy a curry tonight',
+    'ugh mondays', 'how\'s the traffic', 'set an alarm for seven', 'turn it up', 'who\'s calling',
+    'my phone\'s dead', 'is the shop still open', 'tell me something interesting', 'next track',
+    'cancel my dentist appointment', 'did sam reply', 'what should i cook', 'i can\'t sleep',
+    'what was the score', 'open spotify', 'remind me in an hour', 'play the other one',
+    'stop reminding me about the gym'],
+};

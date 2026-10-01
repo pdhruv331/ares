@@ -1,0 +1,46 @@
+{
+  "name": "ARES",
+  "short_name": "ARES",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#040a10",
+  "theme_color": "#040a10",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "share_target": {
+    "action": "/share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "media",
+          "accept": [
+            "image/*",
+            "application/pdf",
+            "text/plain",
+            "text/csv",
+            ".pdf",
+            ".docx",
+            ".pptx",
+            ".xlsx",
+            ".csv",
+            ".txt",
+            ".md",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          ]
+        }
+      ]
+    }
+  }
+}

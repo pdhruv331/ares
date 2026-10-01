@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
+    <!-- Updates from the Mac: install new builds of itself -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION"/>
+
+    <!-- The phone's speech recogniser (Android 11+ needs this to see it) -->
+    <queries>
+        <intent><action android:name="android.speech.RecognitionService"/></intent>
+        <!-- Which app is the home screen (no screen context is sent from there) -->
+        <intent><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.HOME"/></intent>
+    </queries>
+
+    <application
+        android:name=".AresApp"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.Ares"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/no_backup"
+        android:supportsRtl="true">
+
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- Long-press the Quick Settings tile: opens the app -->
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES"/>
+            </intent-filter>
+        </activity>
+
+        <activity android:name=".AskActivity" android:exported="true" android:theme="@style/Theme.Ares.Floating"
+            android:taskAffinity="com.dhruv.ares.ask" android:launchMode="singleTask" android:excludeFromRecents="true"
+            android:label="@string/share_label" android:windowSoftInputMode="adjustResize">
+            <!-- Summoned as the assistant by apps and launchers that use the classic intents -->
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST"/>
+                <action android:name="android.intent.action.VOICE_COMMAND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <!-- Share → ARES from any app -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <action android:name="android.intent.action.SEND_MULTIPLE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="image/*"/>
+            </intent-filter>
+            <!-- PDFs, documents, any file: ask about it, or tap JOB to hand it to a worker on the Mac -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <action android:name="android.intent.action.SEND_MULTIPLE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="application/*"/>
+                <data android:mimeType="text/*"/>
+            </intent-filter>
+        </activity>
+
+        <service android:name=".AresService" android:exported="false" android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps a private connection to the user's own assistant on their Mac, for its notifications, and hosts the floating assistant bubble."/>
+        </service>
+
+        <!-- ARES as the default digital assistant (side button, corner swipe) -->
+        <service android:name=".AresAssistService" android:exported="true" android:label="@string/app_name"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <meta-data android:name="android.voice_interaction" android:resource="@xml/assist_service"/>
+            <intent-filter><action android:name="android.service.voice.VoiceInteractionService"/></intent-filter>
+        </service>
+        <service android:name=".AresSessionService" android:exported="true" android:permission="android.permission.BIND_VOICE_INTERACTION"/>
+        <service android:name=".AresRecognitionService" android:exported="true" android:label="@string/app_name">
+            <intent-filter><action android:name="android.speech.RecognitionService"/></intent-filter>
+            <meta-data android:name="android.speech" android:resource="@xml/recognizer"/>
+        </service>
+
+        <activity android:name=".CallsActivity" android:exported="false" android:launchMode="singleTask" android:windowSoftInputMode="stateAlwaysHidden|adjustResize"/>
+
+        <!-- Firebase Cloud Messaging, for pushes only: started by the app with the config from the Mac (AresApp),
+             so Firebase's own auto-start is removed, and nothing is collected -->
+        <service android:name=".AresPush" android:exported="false">
+            <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT"/></intent-filter>
+        </service>
+        <provider android:name="com.google.firebase.provider.FirebaseInitProvider" android:authorities="${applicationId}.firebaseinitprovider" tools:node="remove"/>
+        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false"/>
+        <meta-data android:name="delivery_metrics_exported_to_big_query_enabled" android:value="false"/>
+        <meta-data android:name="firebase_analytics_collection_deactivated" android:value="true"/>
+
+        <activity android:name=".WorkActivity" android:exported="false" android:launchMode="singleTask" android:windowSoftInputMode="stateAlwaysHidden|adjustResize"/>
+
+        <activity android:name=".UpdateActivity" android:exported="false" android:theme="@style/Theme.Ares.Floating"
+            android:taskAffinity="com.dhruv.ares.update" android:excludeFromRecents="true" android:launchMode="singleTask"/>
+        <receiver android:name=".UpdateReceiver" android:exported="false"/>
+
+        <service android:name=".AresTile" android:exported="true" android:label="@string/tile_label" android:icon="@drawable/ic_ares"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE"/></intent-filter>
+            <meta-data android:name="android.service.quicksettings.ACTIVE_TILE" android:value="false"/>
+        </service>
+
+        <receiver android:name=".AresWidget" android:exported="true" android:label="@string/app_name">
+            <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE"/></intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_info"/>
+        </receiver>
+
+        <receiver android:name=".BootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

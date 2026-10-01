@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@color/bg">
+
+    <!-- The list: every call on the ARES line and every call ARES made, newest first -->
+    <LinearLayout android:id="@+id/listPane" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="vertical" android:paddingStart="16dp" android:paddingEnd="16dp">
+
+        <LinearLayout android:layout_width="match_parent" android:layout_height="52dp" android:gravity="center_vertical" android:orientation="horizontal">
+            <TextView android:id="@+id/back" android:layout_width="40dp" android:layout_height="40dp" android:gravity="center" android:text="‹"
+                android:textColor="@color/cyan" android:textSize="24sp" android:contentDescription="Back" android:background="?android:attr/selectableItemBackgroundBorderless"/>
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="6dp"
+                android:text="CALLS" android:textColor="@color/cyan" android:textStyle="bold" android:textSize="14sp" android:letterSpacing="0.3"/>
+            <TextView android:id="@+id/newCall" android:layout_width="wrap_content" android:layout_height="36dp" android:background="@drawable/bg_chip"
+                android:gravity="center" android:paddingStart="12dp" android:paddingEnd="12dp" android:text="+ NEW CALL" android:textColor="@color/cyan" android:textSize="11sp" android:letterSpacing="0.12"/>
+        </LinearLayout>
+
+        <!-- Have ARES call someone: who, number, what for, details, when. A confirm step follows. -->
+        <LinearLayout android:id="@+id/form" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+            android:background="@drawable/bg_input" android:padding="10dp" android:layout_marginBottom="12dp" android:visibility="gone">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                <EditText android:id="@+id/to" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:background="@null"
+                    android:hint="Number, e.g. +1 212 555 0100" android:inputType="phone" android:textColor="@color/text" android:textColorHint="@color/muted" android:textSize="15sp"/>
+                <TextView android:id="@+id/pick" android:layout_width="wrap_content" android:layout_height="36dp" android:background="@drawable/bg_chip" android:gravity="center"
+                    android:paddingStart="10dp" android:paddingEnd="10dp" android:text="CONTACTS" android:textColor="@color/cyan" android:textSize="10sp" android:letterSpacing="0.12"/>
+            </LinearLayout>
+            <EditText android:id="@+id/name" android:layout_width="match_parent" android:layout_height="44dp" android:background="@null"
+                android:hint="Who, e.g. Luigi's" android:inputType="textCapWords" android:textColor="@color/text" android:textColorHint="@color/muted" android:textSize="15sp"/>
+            <EditText android:id="@+id/purpose" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@null" android:minHeight="44dp"
+                android:hint="What for, e.g. to book a table for four at 8 tonight" android:inputType="textCapSentences|textAutoCorrect" android:textColor="@color/text" android:textColorHint="@color/muted" android:textSize="15sp"/>
+            <EditText android:id="@+id/brief" android:layout_width="match_parent" android:layout_height="wrap_content" android:background="@null"
+                android:hint="Details: name for the booking, what's OK if they can't, anything to ask…" android:inputType="textCapSentences|textAutoCorrect|textMultiLine"
+                android:minLines="2" android:maxLines="6" android:gravity="top" android:textColor="@color/text" android:textColorHint="@color/muted" android:textSize="14sp"/>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="6dp">
+                <TextView android:id="@+id/when" android:layout_width="wrap_content" android:layout_height="40dp" android:background="@drawable/bg_chip" android:gravity="center"
+                    android:paddingStart="12dp" android:paddingEnd="12dp" android:text="NOW" android:textColor="@color/purple" android:textSize="11sp" android:letterSpacing="0.12"/>
+                <TextView android:id="@+id/formNote" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="8dp"
+                    android:textColor="@color/amber" android:textSize="11sp" android:maxLines="3"/>
+                <TextView android:id="@+id/place" android:layout_width="wrap_content" android:layout_height="40dp" android:background="@drawable/bg_button"
+                    android:gravity="center" android:paddingStart="16dp" android:paddingEnd="16dp" android:text="CALL" android:textColor="@color/cyan" android:textSize="12sp" android:letterSpacing="0.15"/>
+            </LinearLayout>
+        </LinearLayout>
+
+        <TextView android:id="@+id/messages" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone"
+            android:background="@drawable/bg_setup" android:padding="10dp" android:layout_marginBottom="10dp" android:textColor="@color/purple" android:textSize="12sp"/>
+        <TextView android:id="@+id/offline" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone" android:paddingBottom="8dp"
+            android:text="Can't reach your Mac: showing calls pushed to this phone." android:textColor="@color/muted" android:textSize="11sp"/>
+
+        <ScrollView android:id="@+id/scroll" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+            <LinearLayout android:id="@+id/calls" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingBottom="16dp"/>
+        </ScrollView>
+    </LinearLayout>
+
+    <!-- One call: what was said, and the transcript -->
+    <ScrollView android:id="@+id/detailPane" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone" android:background="@color/bg">
+        <LinearLayout android:id="@+id/detail" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+            android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingBottom="24dp"/>
+    </ScrollView>
+</FrameLayout>

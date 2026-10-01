@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>com.dhruv.ares.listener</string>
+  <key>CFBundleName</key>
+  <string>ARES Listener</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>ARES listens for "Hey ARES" and your voice commands.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>ARES transcribes your voice on this Mac to understand commands.</string>
+</dict>
+</plist>

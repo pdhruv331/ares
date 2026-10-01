@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Menu-bar app: no Dock icon -->
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>ARES listens for "Hey ARES" and your voice commands.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>ARES controls apps like Music, Reminders and Notes when you ask her to.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>ARES transcribes your voice on this Mac to understand commands. Audio never leaves your Mac.</string>
+</dict>
+</plist>

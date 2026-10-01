@@ -1,0 +1,47 @@
+# Dependencies and build outputs
+node_modules/
+dist/
+native/build/
+renderer/vendor/
+relay/.wrangler/
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/ARES.apk
+android/local.properties
+
+# Secrets and keys (never commit)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+keystore.properties
+google-services.json
+*firebase-adminsdk*.json
+service-account*.json
+
+# Large/downloaded models and datasets (re-creatable)
+models/brain-src/
+models/data/
+models/*.onnx
+models/intent/*.onnx
+models/intent/vectors.bin
+models/kokoro*/
+
+# User data (lives in ~/Library/Application Support/ARES, never in the repo)
+memory.md
+memory.md.bak
+contacts*.json
+voiceprint*
+settings.json
+*.log
+comms-today.json
+
+# OS / editor
+.DS_Store
+*.swp

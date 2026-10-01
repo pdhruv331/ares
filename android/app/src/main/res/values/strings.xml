@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">ARES</string>
+    <string name="type_hint">Type to ARES…</string>
+    <string name="widget_desc">Talk to ARES. Resize it from a single orb up to a whole home page.</string>
+    <string name="tile_label">ARES</string>
+    <string name="share_label">Ask ARES</string>
+</resources>

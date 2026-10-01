@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/bg_widget" android:orientation="horizontal" android:gravity="center_vertical" android:padding="8dp">
+    <ImageView android:id="@+id/w_orb" android:layout_width="40dp" android:layout_height="40dp" android:src="@drawable/reactor" android:contentDescription="Talk to ARES"/>
+    <TextView android:id="@+id/w_reply" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginStart="10dp" android:layout_marginEnd="8dp"
+        android:textColor="@color/text" android:textSize="13sp" android:fontFamily="monospace" android:maxLines="2" android:ellipsize="end"/>
+    <ImageView android:id="@+id/w_talk" android:layout_width="40dp" android:layout_height="40dp" android:padding="9dp" android:background="@drawable/bg_round" android:src="@drawable/ic_mic" android:contentDescription="Talk"/>
+</LinearLayout>
