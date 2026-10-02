@@ -523,3 +523,30 @@ kbd { font: 10px var(--mono); color: var(--muted); border: 1px solid var(--cyan-
 @media (prefers-reduced-motion: reduce) {
   .core, .input-zone, .sub-ares span, .comms-tab .caret { transition: none; }
 }
+
+/* ---- The live desktop (renderer/surface.js) ----------------------------------------------------------------------
+   The window is transparent. As the desktop it shows no background of its own (the starry backdrop sits below the
+   desktop icons); lifted above the apps, the dark glass fades in; as a window it's the classic look. */
+html, body { background: transparent; }
+html.s-window body { background: transparent; }
+.frame { background: none; }
+.frame::before {
+  content: ''; position: absolute; inset: 0; z-index: -2; pointer-events: none;
+  background:
+    radial-gradient(ellipse at 50% 44%, rgba(62, 230, 255, 0.10), transparent 58%),
+    radial-gradient(ellipse at 50% 115%, rgba(120, 90, 255, 0.07), transparent 60%),
+    #02050a;
+  transition: opacity 0.24s ease;
+}
+#stars { transition: opacity 0.24s ease; }
+html.s-desktop .frame::before, html.s-sinking .frame::before { opacity: 0; }
+html.s-desktop #stars, html.s-sinking #stars { opacity: 0; }
+html.s-lifted .frame::before { opacity: 0.92; animation: lift-in 0.26s ease-out; }
+@keyframes lift-in { from { opacity: 0; } }
+html.s-desktop .frame, html.s-lifted .frame, html.s-sinking .frame { border: none; border-radius: 0; }
+html.s-desktop .titlebar, html.s-sinking .titlebar { border-bottom-color: transparent; -webkit-app-region: no-drag; }
+html.s-desktop #fullBtn, html.s-desktop #pinBtn, html.s-desktop #hideBtn,
+html.s-lifted #pinBtn, html.s-sinking #pinBtn { display: none; }
+html.s-desktop .input-zone { display: none; }
+html.s-desktop .state-label { opacity: 0.55; }
+html.s-sinking .panels, html.s-sinking .console { transition: opacity 0.2s; }

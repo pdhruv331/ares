@@ -609,7 +609,7 @@ function start() {
     if (!gate(t)) return;
     const dt = Math.min(0.05, last ? (t - last) / 1000 : 0.016);
     last = t;
-    if (!w) return;
+    if (!w || window.SCENE_HIDE_BRAIN) return; // (the wallpaper backdrop under the live ARES desktop)
     const live = hud.live();
     if (live.state !== state && live.state === 'thinking') for (let i = 0; i < 6; i++) fire(pick(), 1); // spark of thought
     state = live.state;

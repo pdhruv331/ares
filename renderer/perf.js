@@ -11,7 +11,7 @@ const Perf = (() => {
     update();
   }).catch(() => {});
   return {
-    get fps() { return policy ? policy() : fps; },
+    get fps() { return (policy && policy()) ?? fps; },
     get battery() { return battery; },
     setPolicy(fn) { policy = fn; },
     /** A per-loop gate: call gate(now) at the top of a requestAnimationFrame callback; false = skip this frame. */
@@ -19,7 +19,7 @@ const Perf = (() => {
       let last = 0;
       return (now) => {
         if (document.hidden && !window.SCENE_STILL) return false; // (the still renders in a window never shown)
-        const cap = policy ? policy() : fps;
+        const cap = (policy && policy()) ?? fps; // a policy may return undefined: the normal rules
         if (!cap || now - last < 1000 / cap - 2) return false;
         last = now;
         return true;

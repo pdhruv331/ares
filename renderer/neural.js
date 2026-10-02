@@ -368,7 +368,7 @@ const HUD = (() => {
   const gate = Perf.gate();
   function frame(t) {
     requestAnimationFrame(frame);
-    if (!gate(t)) return;
+    if (!gate(t) || window.SCENE_HIDE_BRAIN) return;
     try { draw(t); } catch (e) { console.error('HUD frame failed', e); }
   }
   requestAnimationFrame(frame);

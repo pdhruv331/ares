@@ -13,6 +13,8 @@ html, body {
   position: absolute; width: var(--size); height: var(--size);
   left: calc(var(--cx) - var(--size) / 2); top: calc(var(--cy) - var(--size) / 2);
 }
+
+.core[hidden] { visibility: hidden; }
 #hud, #brain { position: absolute; inset: 0; width: 100%; height: 100%; }
 .orb-tip { display: none; }
 

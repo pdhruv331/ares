@@ -40,6 +40,7 @@ const { Dashboard } = require('./dashboard');
 const { Voice } = require('./voice');
 const { Voicemail } = require('./voicemail');
 const { Wallpaper } = require('./wallpaper');
+const { Surface } = require('./surface');
 const { registry: workerTools } = require('./worker-tools');
 const { startEgress } = require('./egress');
 const workFiles = require('./work-files');
@@ -66,7 +67,8 @@ let calls;   // the ARES phone line (calls.js): ElevenLabs agent on a Twilio num
 let relay;   // the Cloudflare relay (relay.js): FCM pushes to the Android app, even with the Mac off
 let dashboard; // the dashboard's live data (dashboard.js): weather, calendar, leave-by, now playing
 let voicemail; // voicemails from the Twilio fallback when the phone agent can't answer (voicemail.js)
-let wallpaper; // ARES as the desktop (wallpaper.js): live wallpaper windows and the lock-screen still
+let wallpaper; // the starry backdrop below the desktop icons, the lock-screen still (wallpaper.js)
+let surface;   // where the ARES window lives: the live desktop, lifted above the apps, or a window (surface.js)
 let speech;    // her voice (voice.js): Katherine on ElevenLabs, the local Kokoro backup, budget mode, phrase cache, credit watch
 
 /** A message for the window's dashboard (renderer/dash.js). */
@@ -89,8 +91,11 @@ function createWindow({ show }) {
     minWidth: 760,
     minHeight: 540,
     frame: false,
-    // Solid (not transparent) so macOS allows native fullscreen
-    backgroundColor: '#040a10',
+    // Transparent, so it can be the live desktop over the icons (the page draws its own dark background as a
+    // window). Native full screen still works.
+    transparent: true,
+    backgroundColor: '#00000000',
+    acceptFirstMouse: true, // as the desktop it's never the key window: a click on a panel must still land
     fullscreenable: true,
     hasShadow: true,
     show: false,
@@ -105,7 +110,9 @@ function createWindow({ show }) {
   // The window only ever shows ARES itself: links open in the browser, never in here
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
-  if (show) win.once('ready-to-show', () => win.show());
+  surface = new Surface({ win, log, opts: () => ({ enabled: wallpaper?.opts.enabled ?? readSettings().wallpaper?.enabled !== false, summon: readSettings().summon || 'lift' }),
+    onChange: (name) => { wallpaper?.mainSurface(name, win); win.webContents.send('ui-prefs', uiPrefs()); setTimeout(() => dashboard?.setVisible(win.isVisible()), 50); } });
+  win.once('ready-to-show', () => { if (surface.desktopOn) surface.desktop(); else if (show) win.show(); });
 
   // Closing the window hides it; the assistant keeps running in the menu bar.
   win.on('close', (e) => {
@@ -121,18 +128,13 @@ function createWindow({ show }) {
   win.on('leave-full-screen', () => win.webContents.send('fullscreen-changed', false));
 }
 
-// A fullscreen window must leave its Space before hiding, or macOS leaves a black screen behind.
-function hideWindow() {
-  if (win.isFullScreen()) {
-    win.once('leave-full-screen', () => win.hide());
-    win.setFullScreen(false);
-  } else {
-    win.hide();
-  }
-}
+// Dismiss: back to being the desktop (or hidden, with the wallpaper off). surface.js also takes a fullscreen window
+// out of its Space first, or macOS leaves a black screen behind.
+function hideWindow() { surface.hide(); }
 
+// Summon: lift the desktop above the apps, or open the window (the ◉ menu's summon mode).
 function showWindow() {
-  if (!win.isVisible()) win.show();
+  surface.show();
   app.focus({ steal: true });
   win.focus();
 }
@@ -140,7 +142,7 @@ function showWindow() {
 // ⌥Space: summon ARES and start listening straight away (push-to-talk); again to hide.
 function toggleWindow() {
   if (!win) return;
-  if (win.isVisible() && win.isFocused()) {
+  if (surface.summoned && win.isFocused()) {
     hideWindow();
   } else {
     showWindow();
@@ -161,9 +163,11 @@ function writeSettings(patch) {
 /** What the window needs to know about the interface: motion, magnetic panel slots, where panels were left. */
 function uiPrefs() {
   const s = readSettings();
-  return { reduceMotion: Boolean(s.reduceMotion), magnetic: s.ui?.magnetic !== false, panels: s.ui?.panels || {},
+  return { reduceMotion: Boolean(s.reduceMotion), magnetic: s.ui?.magnetic !== false, panels: s.ui?.[panelsKey()] || {},
     owner: process.env.ARES_OWNER_NAME || 'Dhruv' };
 }
+/** Panel positions are remembered separately for the desktop (and lifted) and for the window. */
+const panelsKey = () => (surface && surface.name !== 'window' ? 'desktopPanels' : 'panels');
 function writeUi(patch) { writeSettings({ ui: { ...(readSettings().ui || {}), ...patch } }); }
 function setLaunchAtLogin(on) {
   if (!app.isPackaged) return; // in development this would register the bare Electron binary
@@ -193,7 +197,7 @@ function refreshTray() {
     { label: 'Microphone Mode (Voice Isolation)…', click: () => listener.send('micmode show') },
     { type: 'separator' },
     { label: `Show / Hide  (${HOTKEY.replace('Alt', '⌥')})`, click: toggleWindow },
-    { label: 'Toggle Full Screen  (⌃⌘F)', click: () => { showWindow(); win.setFullScreen(!win.isFullScreen()); } },
+    { label: 'Toggle Full Screen  (⌃⌘F)', click: toggleFullScreen },
     { type: 'separator' },
     ...wallpaperMenu(),
     { type: 'separator' },
@@ -1008,8 +1012,20 @@ ipcMain.handle('brain-ask', (e, text) => {
 ipcMain.on('brain-reset', () => resetBrain());
 
 ipcMain.on('window-hide', () => hideWindow());
-ipcMain.on('window-fullscreen', () => win.setFullScreen(!win.isFullScreen()));
-ipcMain.on('window-pin', (_e, pinned) => win.setAlwaysOnTop(pinned, 'floating'));
+ipcMain.on('window-fullscreen', () => toggleFullScreen());
+ipcMain.on('window-pin', (_e, pinned) => { if (surface.name === 'window') win.setAlwaysOnTop(pinned, 'floating'); });
+ipcMain.on('surface-interactive', (_e, on) => surface.setInteractive(Boolean(on)));
+// Development only: drive the surfaces from a test (⌥Space belongs to the installed ARES)
+ipcMain.on('test-surface', (_e, what) => {
+  if (app.isPackaged) return;
+  if (what === 'show') showWindow(); else if (what === 'window') surface.window(); else hideWindow();
+});
+/** Full screen is the window's: from the desktop or lifted, it opens as a window first. */
+function toggleFullScreen() {
+  if (surface.name !== 'window') { surface.window(); setTimeout(() => win.setFullScreen(true), 80); return; }
+  if (!win.isVisible()) showWindow();
+  win.setFullScreen(!win.isFullScreen());
+}
 
 // ---- Work mode: background jobs (jobs.js) --------------------------------------------------------
 // The brain hands real jobs to a separate full-strength Claude Code worker (start_job) and stays free to
@@ -1315,7 +1331,7 @@ ipcMain.handle('job-delete', async (_e, id) => {
 });
 ipcMain.handle('ui-prefs', () => uiPrefs());
 // Where the user left each dashboard panel (renderer/dash.js), and the dashboard's current data
-ipcMain.on('ui-panels', (_e, panels) => { if (panels && typeof panels === 'object') writeUi({ panels }); });
+ipcMain.on('ui-panels', (_e, panels) => { if (panels && typeof panels === 'object') writeUi({ [panelsKey()]: panels }); });
 ipcMain.handle('dash-state', () => ({ ...(dashboard?.snapshot() || {}), timers: bridge?.timers() || [], call: liveCall() }));
 ipcMain.handle('dash-city', (_e, city) => {
   city = String(city || '').trim().slice(0, 80);
@@ -1630,7 +1646,6 @@ app.whenReady().then(async () => {
   });
   intents.init().then(refreshTray, (err) => log('intent unavailable', err.message)); // until then, everything is chat
   createListener();
-  createWindow({ show: !openedAtLogin }); // at login, wait quietly in the menu bar
   wallpaper = new Wallpaper({
     log, readSettings, writeSettings, appDir: __dirname, supportDir: app.getPath('userData'), prefs: uiPrefs,
     helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-desktop') : path.join(__dirname, 'native', 'build', 'ares-desktop'),
@@ -1643,6 +1658,7 @@ app.whenReady().then(async () => {
     }
   }
   wallpaper.jobs(jobs.list());
+  createWindow({ show: !openedAtLogin }); // at login, wait quietly in the menu bar
   createTray();
   // First run with the wallpaper on: ask (once) about the ARES lock-screen picture
   if (wallpaper.opts.enabled && !wallpaper.opts.lockAsked && (app.isPackaged || process.env.ARES_ASK_LOCK)) setTimeout(() => wallpaper.setLockStill(true).then(refreshTray), 8000);

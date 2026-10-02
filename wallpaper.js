@@ -1,16 +1,20 @@
-// ARES everywhere on the Mac (docs/wallpaper-prompt.md): the live desktop wallpaper and the lock-screen still.
-// The brain stays centred; desktop icons are left to the user. The screen saver is a separate native bundle
-// (native/saver), fed by saver-state.json.
+// ARES everywhere on the Mac (docs/wallpaper-prompt.md, docs/live-desktop-prompt.md).
 //
-// The wallpaper is one BrowserWindow per display at the desktop level (type 'desktop': above the desktop picture,
-// below the icons and every app window, on all Spaces, click-through, never focused). It's a second view of the
-// one running ARES: main.js forwards her state, voice levels, wake pulses and jobs. A small native helper
-// (native/AresDesktop.swift) says when the desktop can't be seen, so rendering stops completely then.
+// The live desktop is the ARES window itself (surface.js), just above the desktop icons. This module looks after
+// what surrounds it:
+//  - the BACKDROP: one BrowserWindow per display at the desktop-picture level (type 'desktop': below the icons and
+//    every app, on all Spaces, click-through, never focused) drawing the stars. It shows the brain too (a second view
+//    of the one ARES: main.js forwards her state, levels, pulses and jobs) where the ARES window isn't: on other
+//    displays, and while ARES is open as a separate window.
+//  - when each surface can't be seen (native/AresDesktop.swift), so rendering stops completely then;
+//  - where the desktop icons are (Finder), so the panels, brain and orbs keep clear of them;
+//  - the lock-screen still. The screen saver is a separate native bundle (native/saver), fed by saver-state.json.
 const { BrowserWindow, screen, powerMonitor, dialog } = require('electron');
 const { spawn, execFile } = require('child_process');
 const EventEmitter = require('events');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 const COVERED = 0.985; // this much hidden by app windows = nothing worth drawing
 const STILL_EVERY_MS = 60 * 60_000; // with "warmer in the evening" on: re-render at most hourly when the tint changes
@@ -34,6 +38,8 @@ class Wallpaper extends EventEmitter {
     this.lastScene = { state: { type: 'state', state: 'idle' }, attention: { type: 'attention', on: false } };
     this.watcher = null;
     this.stillTimer = null;
+    this.main = null; // { win, wid, name, mode } the ARES window, while it's the desktop or lifted
+    this.icons = [];
   }
 
   // ---- Settings ------------------------------------------------------------------------------------------
@@ -61,6 +67,8 @@ class Wallpaper extends EventEmitter {
     this.closeAll();
     this.watcher?.kill();
     this.watcher = null;
+    this.desktopWatch?.close();
+    clearInterval(this.iconPoll);
   }
 
   /** Make the windows match the settings and the connected displays. */
@@ -76,6 +84,7 @@ class Wallpaper extends EventEmitter {
       this.views.set(d.id, this.createView(d));
     }
     this.ensureWatcher();
+    this.watchIcons();
     this.pushIds();
   }
 
@@ -119,7 +128,7 @@ class Wallpaper extends EventEmitter {
     view.ready = true;
     view.mode = null;
     const send = (ch, msg) => view.win.webContents.send(ch, msg);
-    send('wp-prefs', { ...this.prefsOf(), clock: this.opts.clock });
+    send('wp-prefs', this.backdropPrefs(view));
     send('wp-scene', this.lastScene.state);
     send('wp-scene', this.lastScene.attention);
     send('wp-jobs', this.jobList);
@@ -144,7 +153,24 @@ class Wallpaper extends EventEmitter {
     this.send('wp-jobs', this.jobList);
     this.saverState();
   }
-  prefs() { this.send('wp-prefs', { ...this.prefsOf(), clock: this.opts.clock }); }
+  prefs() { for (const v of this.views.values()) if (v.ready) v.win.webContents.send('wp-prefs', this.backdropPrefs(v)); }
+  /** The backdrop draws the brain (and the optional clock) only where the ARES window isn't the desktop. */
+  backdropPrefs(view) {
+    const here = this.main && view.display.id === screen.getPrimaryDisplay().id && this.main.name !== 'window';
+    return { ...this.prefsOf(), clock: this.opts.clock && !here, brain: !here };
+  }
+
+  /** The ARES window moved between the desktop, lifted and a window (surface.js). */
+  mainSurface(name, win) {
+    const wasHere = this.main?.name;
+    this.main = { win, wid: this.main?.wid, name: name === 'sinking' ? 'lifted' : name, mode: null };
+    if (!this.main.wid) this.main.wid = Number(String(win.getMediaSourceId()).split(':')[1]) || null;
+    if ((wasHere === 'window') !== (this.main.name === 'window')) this.prefs();
+    this.ensureWatcher();
+    this.pushIds();
+    this.sendIcons();
+    this.refreshModes();
+  }
 
   /** For the screen saver: a small read-only file with whether work is running (it never talks to ARES). */
   saverState() {
@@ -157,7 +183,7 @@ class Wallpaper extends EventEmitter {
 
   // ---- Pausing ------------------------------------------------------------------------------------------------
   ensureWatcher() {
-    if (this.watcher || !this.views.size) return;
+    if (this.watcher || (!this.views.size && !this.main)) return;
     if (!fs.existsSync(this.helper)) { this.log('wallpaper helper missing', this.helper); return; }
     const p = spawn(this.helper, ['watch'], { stdio: ['pipe', 'pipe', 'pipe'] });
     this.watcher = p;
@@ -175,24 +201,33 @@ class Wallpaper extends EventEmitter {
     p.on('exit', (code) => {
       if (this.watcher !== p) return;
       this.watcher = null;
-      if (this.views.size) { this.log('wallpaper helper exited', code); setTimeout(() => this.ensureWatcher(), 3000); }
+      if (this.views.size || this.main) { this.log('wallpaper helper exited', code); setTimeout(() => this.ensureWatcher(), 3000); }
     });
     this.pushIds();
   }
   pushIds() {
-    const ids = [...this.views.values()].map((v) => v.wid).filter(Boolean);
+    const ids = [...this.views.values()].map((v) => v.wid).concat(this.main?.wid).filter(Boolean);
     if (this.watcher) this.watcher.stdin.write(`ids ${ids.join(' ')}\n`);
-    if (!this.views.size && this.watcher) { const w = this.watcher; this.watcher = null; w.kill(); }
+    if (!this.views.size && !this.main && this.watcher) { const w = this.watcher; this.watcher = null; w.kill(); }
   }
 
   /** Paused (draw nothing) while the desktop can't be seen; still in Low Power Mode; simpler on battery. */
   modeFor(view) {
     const d = this.desk;
     const w = view.wid ? d.windows?.[view.wid] : null;
-    const hidden = this.suspended || this.screenLocked || d.locked || d.asleep || (w && (!w.onScreen || w.covered >= COVERED));
+    const lifted = this.main?.name === 'lifted' && view.display?.id === screen.getPrimaryDisplay().id; // under ARES's own glass
+    const hidden = this.suspended || this.screenLocked || d.locked || d.asleep || lifted || (w && (!w.onScreen || w.covered >= COVERED));
     return { paused: Boolean(hidden), still: Boolean(d.lowPower), battery: powerMonitor.isOnBatteryPower() };
   }
   refreshModes() {
+    // The ARES window as the desktop paces itself the same way (lifted or as a window, it runs as normal)
+    const m = this.main;
+    if (m && !m.win.isDestroyed()) {
+      const mode = m.name === 'desktop' ? { surface: 'desktop', ...this.modeFor({ wid: m.wid }) }
+        : { surface: m.name, paused: false, still: false, battery: powerMonitor.isOnBatteryPower() };
+      const key = JSON.stringify(mode);
+      if (key !== m.mode) { m.mode = key; m.win.webContents.send('surface-mode', mode); this.emit('main-mode', mode); }
+    }
     for (const v of this.views.values()) {
       if (!v.ready) continue;
       const m = this.modeFor(v);
@@ -206,7 +241,47 @@ class Wallpaper extends EventEmitter {
 
   /** For measuring: is each wallpaper drawing right now? */
   status() {
-    return [...this.views.values()].map((v) => ({ display: v.display.id, wid: v.wid, ...this.modeFor(v), desk: v.wid ? this.desk.windows?.[v.wid] : null }));
+    return [...this.views.values()].map((v) => ({ display: v.display.id, wid: v.wid, ...this.modeFor(v), desk: v.wid ? this.desk.windows?.[v.wid] : null }))
+      .concat(this.main ? [{ main: this.main.name, wid: this.main.wid, mode: this.main.mode }] : []);
+  }
+
+  // ---- Desktop icons ------------------------------------------------------------------------------------------
+  // Where the icons are (Finder's scripting interface), re-read when ~/Desktop changes (which includes Finder saving
+  // moved positions to its .DS_Store) and every couple of minutes. The ARES window gets the rectangles on its
+  // display, in its own coordinates: its panels, brain and orbs keep clear of them.
+  watchIcons() {
+    if (this.desktopWatch || !this.opts.enabled) return;
+    try {
+      this.desktopWatch = fs.watch(path.join(os.homedir(), 'Desktop'), () => this.debounce('icons', () => this.refreshIcons(), 1500));
+    } catch (err) { this.log('desktop watch failed', err.message); }
+    this.iconPoll = setInterval(() => this.refreshIcons(), 120_000);
+    this.refreshIcons();
+  }
+  refreshIcons() {
+    if (!this.opts.enabled) return;
+    const script = 'JSON.stringify(Application("Finder").desktop.items.desktopPosition())';
+    execFile('osascript', ['-l', 'JavaScript', '-e', script], { timeout: 20_000 }, (err, out) => {
+      if (err) { this.log('desktop icons unavailable', err.message.split('\n')[0]); return; }
+      let points;
+      try { points = JSON.parse(out); } catch { return; }
+      const key = JSON.stringify(points);
+      if (key === this.iconKey) return;
+      this.iconKey = key;
+      // Each item takes its grid cell: the icon (Finder's icon size, 64 by default) and the label under it
+      const size = finderIconSize();
+      const half = Math.max(46, size * 0.8), up = size * 0.62, down = size * 0.55 + 32;
+      this.icons = points.map((p) => ({ x: p.x - half, y: p.y - up, w: half * 2, h: up + down }));
+      this.log('desktop icons', { count: this.icons.length });
+      this.sendIcons();
+    });
+  }
+  sendIcons() {
+    const m = this.main;
+    if (!m || m.win.isDestroyed()) return;
+    const a = screen.getPrimaryDisplay().workArea; // the ARES window's bounds as the desktop (and lifted)
+    const list = this.icons.filter((r) => r.x + r.w > a.x && r.x < a.x + a.width && r.y + r.h > a.y && r.y < a.y + a.height)
+      .map((r) => ({ x: Math.round(r.x - a.x), y: Math.round(r.y - a.y), w: Math.round(r.w), h: Math.round(r.h) }));
+    m.win.webContents.send('desk-icons', list);
   }
 
   // ---- Lock-screen still ---------------------------------------------------------------------------------------
@@ -326,6 +401,14 @@ class Wallpaper extends EventEmitter {
   }
 }
 
+/** Finder's desktop icon size (Show View Options), best effort. */
+function finderIconSize() {
+  try {
+    const out = require('child_process').execFileSync('plutil', ['-extract', 'DesktopViewSettings.IconViewSettings.iconSize', 'raw', '-o', '-',
+      path.join(os.homedir(), 'Library/Preferences/com.apple.finder.plist')], { encoding: 'utf8', timeout: 3000 });
+    return Number(out.trim()) || 64;
+  } catch { return 64; }
+}
 const isEvening = () => { const h = new Date().getHours(); return h >= 19 || h < 6; };
 
 module.exports = { Wallpaper };

@@ -74,6 +74,14 @@ contextBridge.exposeInMainWorld('ares', {
   onListener: (fn) => ipcRenderer.on('listener-event', (_e, evt) => fn(evt)),
   log: (...parts) => ipcRenderer.send('log', ...parts),
   scene: (msg) => ipcRenderer.send('scene', msg), // to the wallpaper (renderer/scene-link.js)
+  // Where this window lives (surface.js): the live desktop, lifted above the apps, or a window
+  surface: {
+    on: (fn) => ipcRenderer.on('surface', (_e, s) => fn(s)),
+    onMode: (fn) => ipcRenderer.on('surface-mode', (_e, m) => fn(m)),
+    onIcons: (fn) => ipcRenderer.on('desk-icons', (_e, list) => fn(list)),
+    interactive: (on) => ipcRenderer.send('surface-interactive', on),
+    test: (what) => ipcRenderer.send('test-surface', what), // development builds only
+  },
   hide: () => ipcRenderer.send('window-hide'),
   pin: (pinned) => ipcRenderer.send('window-pin', pinned),
   toggleFullscreen: () => ipcRenderer.send('window-fullscreen'),

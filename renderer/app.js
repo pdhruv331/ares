@@ -9,6 +9,7 @@ function setState(s) {
   state = s;
   HUD.setState(s);
   window.Stars?.setState(s);
+  Surface.state(s);
   Dash.state(s);
   $('stateText').textContent = { idle: awakeMode ? 'ALWAYS LISTENING' : 'ONLINE', listening: 'LISTENING', thinking: 'PROCESSING', speaking: 'SPEAKING' }[s];
 }

@@ -81,6 +81,10 @@
     clock.hidden = MODE !== 'wallpaper' || !p.clock;
     tickClock();
     if (window.JobOrbs) window.JobOrbs.reduceMotion = Boolean(p.reduceMotion);
+    // The backdrop under the live ARES desktop: stars only (the ARES window above draws the brain)
+    window.SCENE_HIDE_BRAIN = p.brain === false;
+    core.hidden = window.SCENE_HIDE_BRAIN;
+    drawUntil = performance.now() + 1500;
   }
 
   // ---- The lock-screen still: one picture of the scene at this display's native resolution, no text --------
