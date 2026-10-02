@@ -210,6 +210,7 @@ class Voice extends EventEmitter {
     } catch (err) {
       this.state.access ||= 'unreachable';
     }
+    this.#saveState();
     this.#evaluate();
   }
 
