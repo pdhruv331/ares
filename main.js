@@ -41,6 +41,8 @@ const { Voice } = require('./voice');
 const { Voicemail } = require('./voicemail');
 const { Wallpaper } = require('./wallpaper');
 const { Surface } = require('./surface');
+const { DeskMode } = require('./desk');
+const { judge: judgeAddressed } = require('./addressed');
 const { registry: workerTools } = require('./worker-tools');
 const { startEgress } = require('./egress');
 const workFiles = require('./work-files');
@@ -68,6 +70,7 @@ let relay;   // the Cloudflare relay (relay.js): FCM pushes to the Android app, 
 let dashboard; // the dashboard's live data (dashboard.js): weather, calendar, leave-by, now playing
 let voicemail; // voicemails from the Twilio fallback when the phone agent can't answer (voicemail.js)
 let wallpaper; // the starry backdrop below the desktop icons, the lock-screen still (wallpaper.js)
+let desk;      // desk mode (desk.js): no wake word needed while the user is at the Mac
 let surface;   // where the ARES window lives: the live desktop, lifted above the apps, or a window (surface.js)
 let speech;    // her voice (voice.js): Katherine on ElevenLabs, the local Kokoro backup, budget mode, phrase cache, credit watch
 
@@ -187,8 +190,8 @@ function refreshTray() {
   tray.setTitle(muted ? '○' : awake ? '●' : '◉');
   tray.setToolTip(muted ? `ARES — muted${until}` : awake ? 'ARES — always listening' : 'ARES — listening for "Hey ARES"');
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: muted ? `Muted${until}` : awake ? 'Always listening (no wake word)' : 'Listening for “Hey ARES”', enabled: false },
-    { label: 'Stay Awake (always listening)', type: 'checkbox', checked: awake, click: (item) => setAwake(item.checked) },
+    { label: muted ? `Muted${until}` : desk?.state.active && !manualAwake ? 'Desk mode: no wake word needed' : awake ? 'Always listening (no wake word)' : 'Listening for “Hey ARES”', enabled: false },
+    { label: 'Stay Awake (always listening)', type: 'checkbox', checked: manualAwake, click: (item) => setAwake(item.checked) },
     muted
       ? { label: 'Start Listening', click: () => listener.unmute() }
       : { label: 'Mute', click: () => listener.mute() },
@@ -264,6 +267,24 @@ function wallpaperMenu() {
       { label: 'Re-render Lock Screen Picture', enabled: o.lockStill, click: act(() => wallpaper.renderStills()) },
     ] },
     { label: 'Restore My Original Wallpaper', enabled: Boolean(o.original), click: act(() => wallpaper.restoreOriginal()) },
+    { label: 'When Summoned (Hey ARES / ⌥Space)', enabled: o.enabled, submenu: [
+      { label: 'Lift the Wallpaper', type: 'radio', checked: (readSettings().summon || 'lift') === 'lift', click: act(() => writeSettings({ summon: 'lift' })) },
+      { label: 'Open ARES Window', type: 'radio', checked: readSettings().summon === 'window', click: act(() => writeSettings({ summon: 'window' })) },
+    ] },
+    { type: 'separator' },
+    ...deskMenu(),
+  ];
+}
+
+/** Desk mode: no wake word while the user is at the Mac. */
+function deskMenu() {
+  if (!desk) return [];
+  const o = desk.opts, st = desk.state;
+  const idle = (m) => ({ label: `${m} minutes`, type: 'radio', checked: o.idleMin === m, click: () => { desk.set({ idleMin: m }); refreshTray(); } });
+  return [
+    { label: 'Desk Mode (no wake word while I\'m at the Mac)', type: 'checkbox', checked: o.enabled, click: (item) => { desk.set({ enabled: item.checked }); refreshTray(); } },
+    { label: o.enabled ? `   ${st.active ? 'Listening: only your voice, only when you talk to her' : `Paused: ${st.reason}`}` : '   Off', enabled: false },
+    { label: 'Desk Mode Idle Timeout', enabled: o.enabled, submenu: [2, 5, 10, 15].map(idle) },
   ];
 }
 
@@ -340,21 +361,43 @@ function onPlayback(evt) {
 }
 ipcMain.on('reply-start', () => { playedTexts.length = 0; cancelledClips.clear(); });
 
-// ---- Always-listening ("stay awake") ----------------------------------------------
-// Drops back to wake-word mode after a stretch with no commands, so it can't be left on by accident.
+// ---- Always-listening: "stay awake" (manual) and desk mode (automatic while the user is at the Mac) --------------
+// Manual awake drops back to wake-word mode after a stretch with no commands, so it can't be left on by accident.
+// Desk mode switches itself (desk.js). The listener is awake while either is on.
 const AWAKE_TIMEOUT_MS = (Number(process.env.ARES_AWAKE_TIMEOUT_MIN) || 10) * 60_000;
 let awakeTimer = null;
+let manualAwake = false;
 function touchAwake() {
   clearTimeout(awakeTimer);
-  if (listener.awake) awakeTimer = setTimeout(() => setAwake(false, 'idle'), AWAKE_TIMEOUT_MS);
+  if (manualAwake) awakeTimer = setTimeout(() => setAwake(false, 'idle'), AWAKE_TIMEOUT_MS);
+}
+function syncAwake(reason) {
+  const on = manualAwake || Boolean(desk?.state.active);
+  if (listener.awake !== on) listener.setAwake(on);
+  win?.webContents.send('listener-event', { type: 'awake', on, reason, manual: manualAwake, desk: desk?.state || null });
 }
 function setAwake(on, reason = 'user') {
-  listener.setAwake(on);
+  manualAwake = on;
+  if (!on && reason === 'user') desk?.goQuiet(); // "go to sleep" / "go quiet" in desk mode: until they're away and back
   touchAwake();
   log('awake', { on, reason });
   if (!on && reason === 'idle') consolidateMemory('sleep');
-  win?.webContents.send('listener-event', { type: 'awake', on, reason });
+  syncAwake(reason);
 }
+function createDesk() {
+  desk = new DeskMode({ log, readSettings, writeSettings, voiceId, powerMonitor });
+  desk.on('change', (st, was) => {
+    if (was.active && !st.active && st.reason === 'idle' && !manualAwake) consolidateMemory('sleep');
+    syncAwake(st.active ? 'desk' : `desk: ${st.reason}`);
+    refreshTray();
+  });
+  wallpaper.on('desk', (d) => desk.setMic(d.mic));
+  wallpaper.watchAlways(() => desk.opts.enabled);
+  desk.check();
+}
+// The conversation's timing, for judging speech heard without the wake word (addressed.js)
+const talk = { lastReplyAt: 0, askedQuestion: false, fromWake: false };
+ipcMain.on('reply-done', (_e, asked) => { talk.lastReplyAt = Date.now(); talk.askedQuestion = Boolean(asked); });
 ipcMain.on('listener-awake', (_e, on) => setAwake(on));
 ipcMain.on('scene', (_e, msg) => wallpaper?.scene(msg));
 ipcMain.on('wp-ready', (e) => wallpaper?.onReady(e.sender));
@@ -368,8 +411,14 @@ function createListener() {
     if (evt.type === 'debug') return log('hearing', evt);
     if (evt.type !== 'level' && evt.type !== 'partial' && evt.type !== 'outlevel') {
       const { audio, ...rest } = evt;
+      // Overheard without the wake word: no words in the log unless it turns out to be for her (onCommand)
+      if (rest.type === 'command' && rest.addressed === false) rest.text = `[${(rest.text || '').split(/\s+/).filter(Boolean).length} words]`;
       log('listener', rest.type === 'command' ? { ...rest, audioSeconds: (audio?.length || 0) * 0.75 / 32000 } : rest);
     }
+    if (evt.type === 'wake' || evt.type === 'listening') talk.fromWake = true;
+    if (evt.type === 'timeout') talk.fromWake = false;
+    // Always listening: what's being said only shows as a live subtitle once it's clearly for her
+    if (evt.type === 'partial' && listener.awake && !talk.fromWake && Date.now() - talk.lastReplyAt > 20_000) return;
     if (evt.type === 'wake') {
       showWindow();
       win.webContents.send('summoned');
@@ -394,14 +443,24 @@ async function onCommand(evt) {
   // Speaker check: push-to-talk is trusted; everything else must sound like the owner. Being told to stop
   // (or, just after cutting her off, to never mind) authorises nothing, so it needs no Voice ID.
   const harmless = r.intent === 'stop' || (r.intent === 'nevermind' && r.local && Date.now() - lastBargeAt < 15_000);
-  const check = evt.trusted || harmless ? { ok: true, score: null } : voiceId.verify(evt.audio);
-  const addressed = evt.addressed !== false;
-  if (listener.awake) touchAwake();
+  let addressed = evt.addressed !== false;
+  talk.fromWake = false;
+  // Heard without the wake word (desk mode / "stay awake"): only the owner's voice counts (checked against the
+  // voiceprint even with Voice ID off), and only when it's clearly said TO her. Otherwise she stays quiet, and
+  // nothing of it goes to the brain or the log.
+  const check = evt.trusted || harmless ? { ok: true, score: null } : voiceId.verify(evt.audio, { force: !addressed });
+  if (manualAwake) touchAwake();
   // In always-listening mode, other people's voices are ignored quietly rather than refused aloud.
   if (!check.ok && !addressed) return log('voice-id', { ignored: true, score: check.score });
+  if (!addressed && !harmless) {
+    const j = judgeAddressed(evt.text, talk);
+    if (j.verdict !== 'yes') return log('overheard', { words: (evt.text || '').split(/\s+/).filter(Boolean).length, verdict: j.verdict, why: j.why });
+    log('addressed', { why: j.why });
+    if (j.followUp) addressed = true; // part of the conversation: no "were you talking to me?" note for the brain
+  }
   log('voice-id', { authorized: check.ok, score: check.score });
   // Starting a job needs to know it's really the owner: push-to-talk, or a voice Voice ID actually checked
-  lastHeard = { text: (evt.text || '').trim(), verified: check.ok && (evt.trusted || (voiceId.enabled && !harmless)), at: Date.now() };
+  lastHeard = { text: (evt.text || '').trim(), verified: check.ok && (evt.trusted || (check.score !== null && !harmless)), at: Date.now() };
   log('intent', { intent: r.intent, guess: r.guess, score: r.score, margin: r.margin, local: r.local, ms: r.ms });
   win.webContents.send('listener-event', { type: 'command', text: evt.text, authorized: check.ok, score: check.score, addressed, intent: r });
 }
@@ -450,7 +509,7 @@ async function learnPhrase(phrase, meaning, why) {
   return { message: `Learned: "${text}" means ${intent}.` };
 }
 
-ipcMain.handle('listener-state', () => ({ available: listener.available, muted: listener.muted, until: listener.muteUntil, awake: listener.awake }));
+ipcMain.handle('listener-state', () => ({ available: listener.available, muted: listener.muted, until: listener.muteUntil, awake: listener.awake, manual: manualAwake, desk: desk?.state || null }));
 ipcMain.on('listener-mute', (_e, minutes) => listener.mute(minutes));
 ipcMain.on('listener-unmute', () => listener.unmute());
 ipcMain.on('listener-listen', (_e, ms, trusted) => listener.listen(ms, trusted));
@@ -1016,6 +1075,14 @@ ipcMain.on('window-fullscreen', () => toggleFullScreen());
 ipcMain.on('window-pin', (_e, pinned) => { if (surface.name === 'window') win.setAlwaysOnTop(pinned, 'floating'); });
 ipcMain.on('surface-interactive', (_e, on) => surface.setInteractive(Boolean(on)));
 ipcMain.handle('surface-state', () => ({ name: surface.name, ...(wallpaper?.mainState() || {}) }));
+// Development only: inject what the listener heard (a test can't share the mic with the installed ARES)
+ipcMain.on('test-hear', (_e, evt) => { if (!app.isPackaged) listener.emit('event', evt); });
+ipcMain.handle('test-desk', (_e, patch) => {
+  if (app.isPackaged) return null;
+  if (patch?.mic) desk.setMic(patch.mic);
+  if (patch?.idleMin) desk.set({ idleMin: patch.idleMin });
+  return { desk: desk.state, awake: listener.awake, manualAwake, talk };
+});
 // Development only: drive the surfaces from a test (⌥Space belongs to the installed ARES)
 ipcMain.on('test-surface', (_e, what) => {
   if (app.isPackaged) return;
@@ -1659,6 +1726,7 @@ app.whenReady().then(async () => {
     }
   }
   wallpaper.jobs(jobs.list());
+  createDesk();
   createWindow({ show: !openedAtLogin }); // at login, wait quietly in the menu bar
   createTray();
   // First run with the wallpaper on: ask (once) about the ARES lock-screen picture
@@ -1695,6 +1763,7 @@ app.on('will-quit', () => {
   voicemail?.stop();
   dashboard?.stop();
   wallpaper?.stop();
+  desk?.stop();
   speech?.stop();
   egress?.close();
   claude.shutdown();

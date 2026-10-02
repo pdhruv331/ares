@@ -2,13 +2,17 @@
 //
 //   ares-desktop watch            Long-running. Reads "ids <windowID> …" lines on stdin (the wallpaper windows), and
 //                                 prints one JSON line whenever anything changes, checked about once a second:
-//                                 {"windows":{"<id>":{"onScreen":true,"covered":0.42}},"locked":false,"lowPower":false,"asleep":false}
+//                                 {"windows":{"<id>":{"onScreen":true,"covered":0.42}},"locked":false,"lowPower":false,"asleep":false,
+//                                  "mic":["us.zoom.xos"]}
+//                                 mic = the other processes using microphone input right now (bundle ID, or executable name),
+//                                 so desk mode can pause during calls. Only who, never any audio.
 //                                 onScreen = false while a full-screen app (or another Space) is in front on that display;
 //                                 covered = how much of the window ordinary app windows hide (0…1).
 //   ares-desktop wallpaper-get    The desktop picture of every screen: [{"id":1,"name":"…","url":"file:///…","scaling":3,"clip":false}]
 //   ares-desktop wallpaper-set <screenID> <file URL or path> [scaling] [clip 0|1]
 //                                 Sets one screen's desktop picture (NSWorkspace.setDesktopImageURL).
 import AppKit
+import CoreAudio
 import CoreGraphics
 import Foundation
 
@@ -21,6 +25,35 @@ func emit(_ obj: Any) {
 
 func screenID(_ s: NSScreen) -> Int {
   (s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.intValue ?? 0
+}
+
+/** Processes using microphone input (CoreAudio's process objects, macOS 14+). */
+func micUsers() -> [String] {
+  let system = AudioObjectID(kAudioObjectSystemObject)
+  var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyProcessObjectList, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+  var size: UInt32 = 0
+  guard AudioObjectGetPropertyDataSize(system, &addr, 0, nil, &size) == noErr, size > 0 else { return [] }
+  var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+  guard AudioObjectGetPropertyData(system, &addr, 0, nil, &size, &ids) == noErr else { return [] }
+  var out: [String] = []
+  for id in ids {
+    var a = AudioObjectPropertyAddress(mSelector: kAudioProcessPropertyIsRunningInput, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var running: UInt32 = 0
+    var sz = UInt32(MemoryLayout<UInt32>.size)
+    guard AudioObjectGetPropertyData(id, &a, 0, nil, &sz, &running) == noErr, running != 0 else { continue }
+    var bid: Unmanaged<CFString>?
+    sz = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+    a.mSelector = kAudioProcessPropertyBundleID
+    let bundle = AudioObjectGetPropertyData(id, &a, 0, nil, &sz, &bid) == noErr ? (bid?.takeRetainedValue() as String? ?? "") : ""
+    if !bundle.isEmpty { out.append(bundle); continue }
+    var pid: pid_t = 0
+    sz = UInt32(MemoryLayout<pid_t>.size)
+    a.mSelector = kAudioProcessPropertyPID
+    AudioObjectGetPropertyData(id, &a, 0, nil, &sz, &pid)
+    var path = [CChar](repeating: 0, count: 4096)
+    out.append(proc_pidpath(pid, &path, 4096) > 0 ? URL(fileURLWithPath: String(cString: path)).lastPathComponent : "pid \(pid)")
+  }
+  return out.sorted()
 }
 
 // ---- watch -----------------------------------------------------------------------------------------------
@@ -101,7 +134,7 @@ final class Watcher {
     if CGGetOnlineDisplayList(16, &displays, &count) == .success {
       asleep = count > 0 && displays[0..<Int(count)].allSatisfy { CGDisplayIsAsleep($0) != 0 }
     }
-    let state: [String: Any] = ["windows": windows, "locked": locked, "lowPower": ProcessInfo.processInfo.isLowPowerModeEnabled, "asleep": asleep]
+    let state: [String: Any] = ["windows": windows, "locked": locked, "lowPower": ProcessInfo.processInfo.isLowPowerModeEnabled, "asleep": asleep, "mic": micUsers()]
     if let data = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]), let s = String(data: data, encoding: .utf8), s != last {
       last = s
       print(s)

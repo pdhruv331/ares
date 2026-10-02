@@ -181,9 +181,12 @@ class Wallpaper extends EventEmitter {
     fs.writeFile(path.join(this.supportDir, 'saver-state.json'), body, () => {});
   }
 
+  /** Desk mode needs the helper too (who's using the microphone), with or without the wallpaper. */
+  watchAlways(fn) { this.always = fn; this.ensureWatcher(); }
+
   // ---- Pausing ------------------------------------------------------------------------------------------------
   ensureWatcher() {
-    if (this.watcher || (!this.views.size && !this.main)) return;
+    if (this.watcher || (!this.views.size && !this.main && !this.always?.())) return;
     if (!fs.existsSync(this.helper)) { this.log('wallpaper helper missing', this.helper); return; }
     const p = spawn(this.helper, ['watch'], { stdio: ['pipe', 'pipe', 'pipe'] });
     this.watcher = p;
@@ -194,21 +197,21 @@ class Wallpaper extends EventEmitter {
       while ((i = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, i);
         buf = buf.slice(i + 1);
-        try { this.desk = JSON.parse(line); this.refreshModes(); } catch {}
+        try { this.desk = JSON.parse(line); this.refreshModes(); this.emit('desk', this.desk); } catch {}
       }
     });
     p.stderr.on('data', (d) => this.log('wallpaper helper', String(d).trim()));
     p.on('exit', (code) => {
       if (this.watcher !== p) return;
       this.watcher = null;
-      if (this.views.size || this.main) { this.log('wallpaper helper exited', code); setTimeout(() => this.ensureWatcher(), 3000); }
+      if (this.views.size || this.main || this.always?.()) { this.log('wallpaper helper exited', code); setTimeout(() => this.ensureWatcher(), 3000); }
     });
     this.pushIds();
   }
   pushIds() {
     const ids = [...this.views.values()].map((v) => v.wid).concat(this.main?.wid).filter(Boolean);
     if (this.watcher) this.watcher.stdin.write(`ids ${ids.join(' ')}\n`);
-    if (!this.views.size && !this.main && this.watcher) { const w = this.watcher; this.watcher = null; w.kill(); }
+    if (!this.views.size && !this.main && !this.always?.() && this.watcher) { const w = this.watcher; this.watcher = null; w.kill(); }
   }
 
   /** Paused (draw nothing) while the desktop can't be seen; still in Low Power Mode; simpler on battery. */

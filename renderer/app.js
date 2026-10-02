@@ -4,14 +4,16 @@ const micBtn = $('micBtn');
 
 // ---- State ----------------------------------------------------------------
 let state = 'idle';
-let awakeMode = false; // "stay awake": every utterance is for ARES, no wake word
+let awakeMode = false; // "stay awake" or desk mode: no wake word needed
+let deskOn = false;     // desk mode is what's keeping her listening (desk.js)
+let deskWhy = '';       // why desk mode is off right now (idle, on a call, locked…)
 function setState(s) {
   state = s;
   HUD.setState(s);
   window.Stars?.setState(s);
   Surface.state(s);
   Dash.state(s);
-  $('stateText').textContent = { idle: awakeMode ? 'ALWAYS LISTENING' : 'ONLINE', listening: 'LISTENING', thinking: 'PROCESSING', speaking: 'SPEAKING' }[s];
+  $('stateText').textContent = { idle: deskOn ? 'DESK MODE' : awakeMode ? 'ALWAYS LISTENING' : 'ONLINE', listening: 'LISTENING', thinking: 'PROCESSING', speaking: 'SPEAKING' }[s];
 }
 
 // Delivery cues like [dryly] are for the voice, not the screen (also hides a half-streamed "[dry")
@@ -315,7 +317,7 @@ function localCommand(raw) {
       after: () => { window.ares.setAwake(true); window.ares.resumeListening(); },
     };
   }
-  if (/^(please\s+)?(go (back )?to sleep|sleep( now)?|stand ?by|that'?s all|that will be all|you can rest|stop staying awake)\b/i.test(text)) {
+  if (/^(please\s+)?(go (back )?to sleep|go quiet|be quiet|quiet mode|sleep( now)?|stand ?by|that'?s all|that will be all|you can rest|stop staying awake)\b/i.test(text)) {
     return {
       reply: awakeMode ? "Very good, sir. I'll wait for my name." : "[dryly] I'm already resting, sir. Just say my name.",
       after: () => { window.ares.setAwake(false); window.ares.resumeListening(); },
@@ -400,6 +402,7 @@ async function handle(text, { voice = false, addressed = true, intent = null } =
   const speech = turn.speech = Voice.session();
   const sentences = Voice.splitter(speech.say);
   let ignored = false;
+  let said = ''; // the reply, for desk mode's follow-up judgement
   if (!local) {
     setState('thinking');
     let streamed = '';
@@ -415,11 +418,15 @@ async function handle(text, { voice = false, addressed = true, intent = null } =
     else if (!turn.barged) {
       if (!streamed && reply) { note('user', text); note('ares', reply); } // answered without the brain (offline, error, "forget")
       sentences.finish(streamed || reply);
+      said = streamed || reply;
     }
   } else if (local.reply) {
     sentences.finish(local.reply);
+    said = local.reply;
   }
   await speech.done();
+  // For desk mode: when she last finished, and whether she asked something (a short answer is then for her)
+  if (!ignored) window.ares.replyDone(/\?\s*$/.test(forDisplay(said)));
   if (turn.barged) return; // the listener is already capturing what the user is saying
   setState('idle');
 
@@ -465,7 +472,13 @@ function chime() {
 function renderListening() {
   wakeItem.classList.remove('online', 'pending');
   if (listening.ready) wakeItem.classList.add(listening.muted ? 'pending' : 'online');
-  wakeItem.lastChild.textContent = listening.muted ? 'Wake word · muted' : awakeMode ? 'Always listening' : 'Wake word · Hey ARES';
+  wakeItem.lastChild.textContent = listening.muted ? 'Wake word · muted' : deskOn ? 'Desk mode · no wake word' : awakeMode ? 'Always listening' : 'Wake word · Hey ARES';
+  // The status bar's ear: how she's listening right now
+  const ear = $('ear');
+  ear.textContent = listening.muted ? 'MUTED' : deskOn ? 'DESK MODE' : awakeMode ? 'LISTENING' : 'WAKE WORD';
+  ear.title = listening.muted ? 'Not listening' : deskOn ? 'Listening without the wake word while you\'re at the Mac (only your voice, only when you talk to her)'
+    : awakeMode ? 'Always listening (say "go to sleep" to stop)' : `Say "Hey ARES"${deskWhy ? ` · desk mode: ${deskWhy}` : ''}`;
+  ear.className = `ear ${listening.muted ? 'muted' : deskOn || awakeMode ? 'open' : ''}`;
   if (state === 'idle') setState('idle');
   micBtn.title = listening.muted ? 'Muted: click to listen' : 'Click to talk (or say "Hey ARES")';
 }
@@ -533,6 +546,10 @@ window.ares.onListener((evt) => {
       break;
     case 'awake':
       awakeMode = evt.on;
+      if ('desk' in evt) { // (the listener's own echo of "awake on" doesn't say why; main.js's does)
+        deskOn = Boolean(evt.desk?.active) && !evt.manual;
+        deskWhy = evt.desk && !evt.desk.active ? evt.desk.reason : '';
+      }
       renderListening();
       if (state === 'idle') setState('idle');
       if (!evt.on && evt.reason === 'idle') show("It's been quiet for a while, so I've gone back to waiting for my name.");
@@ -724,6 +741,8 @@ refreshNativeVoice();
 window.ares.listenerState().then((s) => {
   listening.muted = s.muted;
   awakeMode = Boolean(s.awake);
+  deskOn = Boolean(s.desk?.active) && !s.manual;
+  deskWhy = s.desk && !s.desk.active ? s.desk.reason : '';
   if (!s.available) wakeItem.lastChild.textContent = 'Wake word · not installed';
   renderListening();
 });

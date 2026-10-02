@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld('ares', {
   nativePlayback: () => ipcRenderer.invoke('native-playback'),
   bargeCapable: () => ipcRenderer.invoke('barge-capable'),
   replyStart: () => ipcRenderer.send('reply-start'),
+  replyDone: (asked) => ipcRenderer.send('reply-done', asked),
   speakingMode: (on) => ipcRenderer.send('listener-speaking', on),
   onBarge: (fn) => ipcRenderer.on('barge', (_e, info) => fn(info)),
   brainAvailable: () => ipcRenderer.invoke('brain-available'),
@@ -82,6 +83,8 @@ contextBridge.exposeInMainWorld('ares', {
     onIcons: (fn) => ipcRenderer.on('desk-icons', (_e, list) => fn(list)),
     interactive: (on) => ipcRenderer.send('surface-interactive', on),
     test: (what) => ipcRenderer.send('test-surface', what), // development builds only
+    testHear: (evt) => ipcRenderer.send('test-hear', evt),
+    testDesk: (patch) => ipcRenderer.invoke('test-desk', patch),
   },
   hide: () => ipcRenderer.send('window-hide'),
   pin: (pinned) => ipcRenderer.send('window-pin', pinned),

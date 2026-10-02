@@ -78,9 +78,10 @@ class VoiceId {
     return normalize(Array.from(this.extractor.compute(stream, false))); // Electron forbids external buffers
   }
 
-  /** Is this the owner? Returns { ok, score, seconds }. Always ok when no voiceprint is set up. */
-  verify(b64) {
-    if (!this.enabled) return { ok: true, score: null, seconds: 0 };
+  /** Is this the owner? Returns { ok, score, seconds }. Always ok when no voiceprint is set up.
+   *  force: check against the voiceprint even with Voice ID switched off (speech heard without the wake word). */
+  verify(b64, { force = false } = {}) {
+    if (!this.enrolled || (!this.enabled && !force)) return { ok: true, score: null, seconds: 0 };
     const samples = voiced(decode(b64));
     const seconds = samples.length / RATE;
     if (seconds < 0.3) return { ok: false, score: 0, seconds }; // nothing usable captured
