@@ -226,14 +226,88 @@ const Dash = (() => {
   let cols = 1;
   let slots = { left: [], right: [] };
   let W = stage.clientWidth, H = stage.clientHeight;
-  // The brain fills the stage: centred 8px above the middle, halo radius 44% of the shorter side (as in neural.js)
-  const brainR = () => Math.min(W, H) * 0.44;
-  const brain = () => ({ x: W / 2, y: H / 2 - 8, r: brainR() * 0.85 });
+  // The brain fills the stage: centred 8px above the middle, halo radius 44% of the shorter side (as in neural.js).
+  // As the live desktop it moves (and shrinks if it must) to keep clear of the desktop icons: `place` is where it is.
+  let spot = { dx: 0, dy: 0, s: 1 };
+  const brainR = () => Math.min(W, H) * 0.44 * spot.s;
+  const brain = () => ({ x: W / 2 + spot.dx, y: H / 2 - 8 + spot.dy, r: brainR() * 0.85 });
+
+  // ---- Desktop icons: walls for panels, the brain and orbs -------------------------------------------------------
+  // Finder's icon rectangles (window coordinates, from the main process) merged into clusters, in stage coordinates.
+  // Only while ARES is the desktop (or lifted over it); as a window there are none.
+  let iconRects = [];   // as received
+  let walls = [];       // clusters, stage coordinates
+  let wallsVersion = 0;
+  let surfaceName = Surface.name === 'sinking' ? 'desktop' : Surface.name; // (it may have arrived before this script ran)
+  function clusterIcons() {
+    if (surfaceName === 'window' || !iconRects.length) { walls = []; return; }
+    const st = stage.getBoundingClientRect();
+    let rs = iconRects.map((r) => ({ x: r.x - st.left - 6, y: r.y - st.top - 6, w: r.w + 12, h: r.h + 12 }));
+    for (let merged = true; merged;) { // merge touching rectangles into cluster bounds
+      merged = false;
+      for (let i = 0; i < rs.length && !merged; i++) {
+        for (let j = i + 1; j < rs.length; j++) {
+          const a = rs[i], b = rs[j];
+          if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) {
+            const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+            rs[i] = { x, y, w: Math.max(a.x + a.w, b.x + b.w) - x, h: Math.max(a.y + a.h, b.y + b.h) - y };
+            rs.splice(j, 1);
+            merged = true;
+            break;
+          }
+        }
+      }
+    }
+    walls = rs.filter((r) => r.x + r.w > 0 && r.y + r.h > 0 && r.x < W && r.y < H);
+    wallsVersion++;
+    // The top bar's clock, status and WORK button step left of icons in the top-right corner (never over an icon)
+    const topIcons = walls.filter((r) => r.y < 0);
+    document.querySelector('.titlebar-right').style.marginRight = topIcons.length ? `${Math.max(0, W - Math.min(...topIcons.map((r) => r.x)) - 4)}px` : '';
+  }
+  const hitsWall = (x, y, w, h, pad = 0) => walls.some((r) => x < r.x + r.w + pad && r.x < x + w + pad && y < r.y + r.h + pad && r.y < y + h + pad);
+  const circleWallOverlap = (cx, cy, r) => walls.reduce((sum, q) => {
+    const nx = clamp(cx, q.x, q.x + q.w), ny = clamp(cy, q.y, q.y + q.h);
+    return sum + Math.max(0, r - Math.hypot(cx - nx, cy - ny));
+  }, 0);
+  /** Move (and if it must, shrink) the brain to the clearest spot near the middle; the halo and job orbs come with it. */
+  function placeBrain() {
+    let best = { dx: 0, dy: 0, s: 1, score: walls.length ? Infinity : 0 };
+    if (!walls.length) document.querySelector('.titlebar-right').style.marginRight = '';
+    if (walls.length) {
+      const R0 = Math.min(W, H) * 0.44;
+      for (const s of [1, 0.9, 0.8, 0.7, 0.62, 0.55]) {
+        const reach = R0 * s * 1.12; // the ring, the pedestal and the job orbs' orbits
+        for (let fx = 0; fx <= 1.0001; fx += 0.04) {
+          for (const fy of [0.5, 0.42, 0.58, 0.36, 0.64]) {
+            const cx = reach + (W - 2 * reach) * fx, cy = clamp(H * fy, reach * 0.9, H - reach * 0.9);
+            const score = circleWallOverlap(cx, cy, reach) * 12 + Math.hypot(cx - W / 2, cy - (H / 2 - 8)) / W * 80 + (1 - s) * 120;
+            if (score < best.score) best = { dx: cx - W / 2, dy: cy - (H / 2 - 8), s, score };
+          }
+        }
+      }
+    }
+    if (Math.abs(best.dx - spot.dx) < 2 && Math.abs(best.dy - spot.dy) < 2 && best.s === spot.s) return;
+    spot = { dx: best.dx, dy: best.dy, s: best.s };
+    core.style.setProperty('--bx', `${Math.round(spot.dx)}px`);
+    core.style.setProperty('--by', `${Math.round(spot.dy)}px`);
+    core.style.setProperty('--bs', String(spot.s));
+  }
+  function setWalls() {
+    clusterIcons();
+    placeBrain();
+    layout();
+    for (const p of resting()) if (!p.slot && hitsWall(p.tx, p.ty, size().w, size().h, 4)) place(p); // re-home panels now on icons
+    wake();
+  }
+  window.ares.surface.onIcons((list) => { iconRects = list || []; setWalls(); });
+  addEventListener('desk-icons', (e) => { iconRects = e.detail || []; setWalls(); }); // (the state on load, from surface.js)
+  addEventListener('surface', (e) => { surfaceName = e.detail === 'sinking' ? 'desktop' : e.detail; setWalls(); });
   const kindKey = (id) => id.split(':')[0];
 
   function makeEl(p) {
     const el = document.createElement('div');
     el.className = 'dp';
+    el.dataset.id = p.id;
     el.innerHTML = `<div class="dp-in">
       <i class="br tl"></i><i class="br tr"></i><i class="br bl"></i><i class="br bo"></i>
       <div class="dp-content">
@@ -331,7 +405,7 @@ const Dash = (() => {
         for (let r = 0; r < rows; r++) {
           const x = side === 'left' ? PAD + c * (w + GAP) : W - PAD - w - c * (w + GAP);
           const y = TOP + r * (h + GAP);
-          if (x < 0 || x + w > W || rectHitsCircle(x, y, w, h, b)) continue;
+          if (x < 0 || x + w > W || rectHitsCircle(x, y, w, h, b) || hitsWall(x, y, w, h, GAP / 2)) continue;
           out[side].push({ side, i: out[side].length, x, y });
         }
       }
@@ -350,7 +424,8 @@ const Dash = (() => {
     let pick = LEVELS[LEVELS.length - 1];
     for (const lv of LEVELS) {
       const s = buildSlots(lv[0], lv[1]);
-      if (s.left.length >= need.left && s.right.length >= need.right) { pick = lv; break; }
+      // Enough room on each side, or (icons filling one side) enough altogether: the other side takes the rest
+      if ((s.left.length >= need.left && s.right.length >= need.right) || s.left.length + s.right.length >= need.left + need.right) { pick = lv; break; }
     }
     const changed = pick[0] !== tier || pick[1] !== cols;
     const old = slots;
@@ -373,7 +448,7 @@ const Dash = (() => {
   /** Where a new panel goes: where the user last left one like it, else the next free slot on its side. */
   function place(p) {
     const saved = prefs.panels[kindKey(p.id)];
-    if (saved && Number.isFinite(saved.fx)) {
+    if (saved && Number.isFinite(saved.fx) && !hitsWall(saved.fx * W, saved.fy * H, size().w, size().h, 4)) {
       const x = saved.fx * W, y = saved.fy * H;
       const near = prefs.magnetic && nearestSlot(x + size().w / 2, y + size().h / 2, p, 24);
       if (near) return dock(p, near);
@@ -382,7 +457,8 @@ const Dash = (() => {
       p.ty = clamp(y, 4, H - size().h - 4);
       return;
     }
-    const s = slots[p.side].find((q) => !occupied(q, p));
+    const other = p.side === 'left' ? 'right' : 'left';
+    const s = slots[p.side].find((q) => !occupied(q, p)) || slots[other].find((q) => !occupied(q, p));
     if (s) return dock(p, s);
     const col = slots[p.side][slots[p.side].length - 1] || { x: p.side === 'left' ? PAD : W - PAD - size().w, y: TOP };
     p.slot = null; p.tx = col.x; p.ty = col.y;
@@ -631,6 +707,15 @@ const Dash = (() => {
         const dx = x + w / 2 - b.x, dy = y + h / 2 - b.y, d = Math.hypot(dx, dy) || 1;
         x = clamp(x + (dx / d) * 6, PAD / 2, W - w - PAD / 2);
         y = clamp(y + (dy / d) * 6, 4, H - h - 4);
+      }
+      // Never on desktop icons either: out the shortest way
+      for (let k = 0; k < 40 && hitsWall(x, y, w, h, 4); k++) {
+        const q = walls.find((r) => x < r.x + r.w + 4 && r.x < x + w + 4 && y < r.y + r.h + 4 && r.y < y + h + 4);
+        const moves = [[q.x - w - 6 - x, 0], [q.x + q.w + 6 - x, 0], [0, q.y - h - 6 - y], [0, q.y + q.h + 6 - y]]
+          .filter(([mx, my]) => x + mx >= PAD / 2 && x + mx <= W - w - PAD / 2 && y + my >= 4 && y + my <= H - h - 4)
+          .sort((m1, m2) => Math.hypot(...m1) - Math.hypot(...m2));
+        if (!moves.length) break;
+        x += moves[0][0]; y += moves[0][1];
       }
       // Landing next to another panel: line the edges up
       for (const q of resting()) {
@@ -1042,6 +1127,21 @@ const Dash = (() => {
           if (vn < 0) { p.vx -= (1 + PHYS.bounce) * vn * ux; p.vy -= (1 + PHYS.bounce) * vn * uy; }
           q.el.classList.remove('hit'); void q.el.offsetWidth; q.el.classList.add('hit');
         }
+        // ...and off desktop icon clusters, like walls
+        for (const q of walls) {
+          const nx = clamp(p.ox, q.x, q.x + q.w), ny = clamp(p.oy, q.y, q.y + q.h);
+          const dx = p.ox - nx, dy = p.oy - ny, d = Math.hypot(dx, dy);
+          if (d >= R) continue;
+          let ux, uy;
+          if (d) { ux = dx / d; uy = dy / d; } else { // inside: out through the nearest edge
+            const e = [[p.ox - q.x, -1, 0], [q.x + q.w - p.ox, 1, 0], [p.oy - q.y, 0, -1], [q.y + q.h - p.oy, 0, 1]].sort((a, c) => a[0] - c[0])[0];
+            [ux, uy] = [e[1], e[2]];
+          }
+          p.ox = (d ? nx : ux < 0 ? q.x : ux > 0 ? q.x + q.w : p.ox) + ux * R;
+          p.oy = (d ? ny : uy < 0 ? q.y : uy > 0 ? q.y + q.h : p.oy) + uy * R;
+          const vn = p.vx * ux + p.vy * uy;
+          if (vn < 0) { p.vx -= (1 + PHYS.bounce) * vn * ux; p.vy -= (1 + PHYS.bounce) * vn * uy; }
+        }
         if (Math.hypot(p.ox - b.x, p.oy - b.y) < PHYS.brainCatch) { absorb(p); continue; }
         p.trail.push([p.ox, p.oy]);
         if (p.trail.length > 14) p.trail.shift();
@@ -1101,6 +1201,8 @@ const Dash = (() => {
       if (nx !== p.tx || ny !== p.ty) busy = true;
       p.tx = nx; p.ty = ny;
     }
+    // ...or on desktop icons (they arrived, or moved): re-home them
+    for (const p of rest) if (!p.slot && p.homedFor !== wallsVersion && hitsWall(p.tx, p.ty, w, h, 2)) { p.homedFor = wallsVersion; place(p); busy = true; }
     // Carrying an orb near the brain: it brightens, and says what letting go will do
     HUD.hover(hover);
     const showHint = hand.p && hover > 0.45;
@@ -1194,7 +1296,7 @@ const Dash = (() => {
     fx.beginPath(); fx.arc(x, y, r, 0, Math.PI * 2); fx.fill();
   }
 
-  new ResizeObserver(() => { sizeFx(); layout(); wake(); }).observe(stage);
+  new ResizeObserver(() => { sizeFx(); clusterIcons(); placeBrain(); layout(); wake(); }).observe(stage);
   sizeFx();
 
   // Double-click on empty space: every panel glides back home
@@ -1410,6 +1512,7 @@ const Dash = (() => {
     closeCard() { if (!card) return false; closeCard(); return true; },
     get card() { return card && { id: card.p.id, text: card.el.innerText }; },
     show, hide, // for testing and tuning from the console
+    get desk() { return { walls, spot, brain: brain(), slots: { left: slots.left.length, right: slots.right.length }, tier, surface: surfaceName }; },
     get reduceMotion() { return reduce(); },
     /** The centre column between the left and right panel columns (stage px): COMMS never covers panels. */
     centre() {

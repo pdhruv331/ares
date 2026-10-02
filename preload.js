@@ -76,6 +76,7 @@ contextBridge.exposeInMainWorld('ares', {
   scene: (msg) => ipcRenderer.send('scene', msg), // to the wallpaper (renderer/scene-link.js)
   // Where this window lives (surface.js): the live desktop, lifted above the apps, or a window
   surface: {
+    state: () => ipcRenderer.invoke('surface-state'),
     on: (fn) => ipcRenderer.on('surface', (_e, s) => fn(s)),
     onMode: (fn) => ipcRenderer.on('surface-mode', (_e, m) => fn(m)),
     onIcons: (fn) => ipcRenderer.on('desk-icons', (_e, list) => fn(list)),

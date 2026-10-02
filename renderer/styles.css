@@ -255,7 +255,10 @@ body.comms-open .subs { opacity: 0; pointer-events: none; }
 .console.typing .input-zone > .input-row { opacity: 1; pointer-events: auto; margin-top: 6px; }
 .console.typing .comms-tab { display: none; }
 /* The brain makes room for COMMS: lifts a little and dims, then settles back */
-.core { transition: transform 0.55s cubic-bezier(.3,.7,.4,1), opacity 0.45s ease; transform-origin: 50% 40%; }
+.core { transition: transform 0.55s cubic-bezier(.3,.7,.4,1), opacity 0.45s ease; transform-origin: 50% calc(50% - 8px); }
+/* Where the brain sits (dash.js moves and shrinks it to keep clear of desktop icons) and the COMMS lift, composed */
+.core { transform: translate(var(--bx, 0px), calc(var(--by, 0px) + var(--comms-y, 0px))) scale(calc(var(--bs, 1) * var(--comms-s, 1))); }
+html.s-desktop .core, html.s-lifted .core { transition-duration: 1.4s, 0.45s; }
 .core.comms-dim { opacity: 0.62; }
 
 /* COMMS: today's conversation, FRIDAY text inside EDITH corner brackets, growing up from the subtitle line */

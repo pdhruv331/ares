@@ -398,7 +398,8 @@ function start() {
     toScreen.copy(orb.pos).project(camera);
     const dist = camera.position.distanceTo(orb.pos);
     const px = (h / 2) / (Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * dist); // pixels per world unit there
-    return { x: r.left + (toScreen.x + 1) / 2 * w, y: r.top + (1 - toScreen.y) / 2 * h, r: (ORB_SIZE[orb.job.size] || ORB_SIZE.medium) * orb.shrink * px };
+    // r is the canvas as drawn on screen: the brain may be moved and scaled (around desktop icons, under COMMS)
+    return { x: r.left + (toScreen.x + 1) / 2 * r.width, y: r.top + (1 - toScreen.y) / 2 * r.height, r: (ORB_SIZE[orb.job.size] || ORB_SIZE.medium) * orb.shrink * px * (r.width / w) };
   }
 
   function updateOrbs(dt, t) {

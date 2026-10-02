@@ -31,11 +31,16 @@ const Surface = (() => {
 
   // ---- Click-through: forwarded mouse moves are hit-tested; the window takes clicks only where there's something
   // of ARES's under the pointer, and keeps them while a button is held (dragging an orb across the desktop).
-  const HIT = '.dp, .dp-card, .titlebar button, .titlebar .weather, .status-panel, .comms, .comms-tab, .work, .drop-card, .work-preview, #closeHint';
+  const HIT = '.dp, .dp-card, .titlebar button, .status-panel, .comms, .comms-tab, .work, .drop-card, .work-preview, #closeHint';
   let interactive = false;
   let held = false;
+  // Something open over the desktop (a detail card, COMMS, the status panel, Work): the whole window takes clicks, so
+  // one click anywhere closes it, as in the app (it can't have the keyboard here, so there's no Esc)
+  const popover = () => { // (Dash, Work and Comms are later scripts' globals, not window properties)
+    try { return Boolean(Dash.card || Work.isOpen || Comms.isOpen || !document.getElementById('statusPanel').hidden); } catch { return false; }
+  };
   function wants(x, y) {
-    if (held) return true;
+    if (held || popover()) return true;
     const el = document.elementFromPoint(x, y);
     if (el?.closest(HIT)) return !el.closest('[hidden]');
     if (el?.closest('#subs') && document.getElementById('subs').innerText.trim()) return true; // a subtitle: click opens COMMS
@@ -55,16 +60,24 @@ const Surface = (() => {
   document.addEventListener('mouseleave', () => { if (!held) update(-1, -1); });
 
   window.ares.surface.on(({ name: next }) => set(next));
-  window.ares.surface.onMode((m) => {
+  window.ares.surface.onMode(applyMode);
+  // Where things stand now (the first messages may have come before this page was listening)
+  addEventListener('load', () => window.ares.surface.state().then((st) => {
+    set(st.name);
+    if (st.mode) applyMode(st.mode);
+    if (st.icons) dispatchEvent(new CustomEvent('desk-icons', { detail: st.icons }));
+  }));
+  function applyMode(m) {
     if (m.still && !mode.still) drawUntil = performance.now() + 2500;
     const wasBattery = mode.battery;
     mode = { paused: Boolean(m.paused), still: Boolean(m.still), battery: Boolean(m.battery) };
     if (name === 'desktop' && mode.battery !== wasBattery) { window.SCENE_DPR = mode.battery ? 1 : undefined; dispatchEvent(new Event('scene-quality')); }
-  });
+  }
 
   return {
     get name() { return name; },
     get paused() { return name === 'desktop' && mode.paused; },
+    get interactive() { return interactive; },
     /** ARES's state (for 60 fps while she listens or speaks). */
     state(s) { herState = s; },
   };

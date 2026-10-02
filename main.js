@@ -1015,6 +1015,7 @@ ipcMain.on('window-hide', () => hideWindow());
 ipcMain.on('window-fullscreen', () => toggleFullScreen());
 ipcMain.on('window-pin', (_e, pinned) => { if (surface.name === 'window') win.setAlwaysOnTop(pinned, 'floating'); });
 ipcMain.on('surface-interactive', (_e, on) => surface.setInteractive(Boolean(on)));
+ipcMain.handle('surface-state', () => ({ name: surface.name, ...(wallpaper?.mainState() || {}) }));
 // Development only: drive the surfaces from a test (⌥Space belongs to the installed ARES)
 ipcMain.on('test-surface', (_e, what) => {
   if (app.isPackaged) return;

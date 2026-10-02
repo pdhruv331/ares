@@ -278,11 +278,15 @@ class Wallpaper extends EventEmitter {
   sendIcons() {
     const m = this.main;
     if (!m || m.win.isDestroyed()) return;
-    const a = screen.getPrimaryDisplay().workArea; // the ARES window's bounds as the desktop (and lifted)
-    const list = this.icons.filter((r) => r.x + r.w > a.x && r.x < a.x + a.width && r.y + r.h > a.y && r.y < a.y + a.height)
-      .map((r) => ({ x: Math.round(r.x - a.x), y: Math.round(r.y - a.y), w: Math.round(r.w), h: Math.round(r.h) }));
-    m.win.webContents.send('desk-icons', list);
+    m.win.webContents.send('desk-icons', this.iconsForMain());
   }
+  iconsForMain() {
+    const a = screen.getPrimaryDisplay().workArea; // the ARES window's bounds as the desktop (and lifted)
+    return this.icons.filter((r) => r.x + r.w > a.x && r.x < a.x + a.width && r.y + r.h > a.y && r.y < a.y + a.height)
+      .map((r) => ({ x: Math.round(r.x - a.x), y: Math.round(r.y - a.y), w: Math.round(r.w), h: Math.round(r.h) }));
+  }
+  /** For the ARES window's page when it loads (messages sent before it was listening would be lost). */
+  mainState() { return { mode: this.main?.mode ? JSON.parse(this.main.mode) : null, icons: this.iconsForMain() }; }
 
   // ---- Lock-screen still ---------------------------------------------------------------------------------------
   /** Switch the ARES lock-screen picture on (asking the first time, and saving the current desktop pictures) or off. */

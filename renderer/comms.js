@@ -263,10 +263,12 @@ const Comms = (() => {
       const stageH = document.querySelector('.stage').clientHeight;
       // Just enough to keep the brain clear of the drawer's top, never off the top of the stage
       const up = reduce() ? 0 : Math.max(0, Math.min(height * 0.32, stageH * 0.12));
-      core.style.transform = up ? `translateY(${-up}px) scale(0.92)` : '';
+      core.style.setProperty('--comms-y', `${-up}px`); // (composed with the brain's placement: styles.css .core)
+      core.style.setProperty('--comms-s', up ? '0.92' : '1');
       core.classList.add('comms-dim');
     } else {
-      core.style.transform = '';
+      core.style.setProperty('--comms-y', '0px');
+      core.style.setProperty('--comms-s', '1');
       core.classList.remove('comms-dim');
     }
   }
