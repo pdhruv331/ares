@@ -302,7 +302,10 @@ function parseMinutes(text) {
 const spokenDuration = (min) => (min >= 60 ? `${min / 60 === 1 ? 'an hour' : `${min / 60} hours`}` : `${min} minutes`);
 
 function localCommand(raw) {
-  const text = raw.trim().replace(/[.!?]+$/, '');
+  // "Aries, stay awake" / "can you stay awake": the wake word (as heard) and polite openers don't change the command
+  const text = raw.trim().replace(/[.!?]+$/, '')
+    .replace(/^((hey|ok(ay)?)\s+)?(ares|aries|ayres|arias)\b[,.!]?\s*/i, '')
+    .replace(/^(can|could|would|will) you\s+/i, '');
   if (/^(please\s+)?(stay awake|keep listening|stay with me|conversation mode|always listen(ing)?( mode)?)\b/i.test(text)) {
     return {
       reply: voiceIdOn
@@ -381,7 +384,7 @@ async function handle(text, { voice = false, addressed = true, intent = null } =
   // Echo-cancelled playback: keep listening so the user can simply talk over her. Otherwise pause.
   if (bargeable && Voice.ready()) window.ares.speakingMode(true); else window.ares.pauseListening();
   window.ares.replyStart();
-  const note = interruptedNote;
+  const cutIn = interruptedNote; // (not `note`: that would hide note() below)
   interruptedNote = '';
   Comms.user(text);
 
@@ -389,7 +392,7 @@ async function handle(text, { voice = false, addressed = true, intent = null } =
   // cutting her off with "hold up" or "okay thanks" just means stop, "cheers" gets a quick "any time".
   const command = localCommand(text) || Work.command(text) || (Drop.pending ? await Drop.consume(text, { voice }) : null);
   const plan = command ? { notes: '' }
-    : await window.ares.planRemark(text, { intent, afterBarge: Boolean(note), addressed }).catch(() => ({ notes: '' }));
+    : await window.ares.planRemark(text, { intent, afterBarge: Boolean(cutIn), addressed }).catch(() => ({ notes: '' }));
   const quick = plan.quick && { ...plan.quick, after: plan.quick.action === 'sleep' ? () => { window.ares.setAwake(false); window.ares.resumeListening(); } : null };
   const local = command || quick;
   if (command) { note('user', text); if (command.reply) note('ares', command.reply); } // brain and quick turns are kept by the main process
@@ -401,7 +404,7 @@ async function handle(text, { voice = false, addressed = true, intent = null } =
     let streamed = '';
     // Overheard (no wake word): hold back until we know she isn't choosing to stay out of it.
     const gate = (t) => addressed || (t.trim().length >= 9 && !isIgnore(t));
-    const reply = await Brain.respond(note + plan.notes + Work.contextNote() + (addressed ? '' : AWAKE_NOTE) + text, (sofar) => {
+    const reply = await Brain.respond(cutIn + plan.notes + Work.contextNote() + (addressed ? '' : AWAKE_NOTE) + text, (sofar) => {
       streamed = sofar;
       if (!gate(sofar)) return;
       sentences.feed(sofar);
