@@ -263,8 +263,9 @@ class Wallpaper extends EventEmitter {
   refreshIcons() {
     if (!this.opts.enabled) return;
     const script = 'JSON.stringify(Application("Finder").desktop.items.desktopPosition())';
-    execFile('osascript', ['-l', 'JavaScript', '-e', script], { timeout: 20_000 }, (err, out) => {
-      if (err) { this.log('desktop icons unavailable', err.message.split('\n')[0]); return; }
+    execFile('osascript', ['-l', 'JavaScript', '-e', script], { timeout: 60_000 }, (err, out, stderr) => {
+      // The first time, macOS asks the user to let ARES control Finder (Automation): it waits on that prompt
+      if (err) { this.log('desktop icons unavailable', (stderr || err.message).trim().split('\n').pop()); this.debounce('icons', () => this.refreshIcons(), 30_000); return; }
       let points;
       try { points = JSON.parse(out); } catch { return; }
       const key = JSON.stringify(points);
