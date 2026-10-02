@@ -60,7 +60,8 @@ const Surface = (() => {
   document.addEventListener('mouseleave', () => { if (!held) update(-1, -1); });
 
   window.ares.surface.on(({ name: next }) => set(next));
-  window.ares.surface.onMode(applyMode);
+  let pinned = false; // measuring: a forced mode the main process doesn't override (hold(null) releases it)
+  window.ares.surface.onMode((m) => { if (!pinned) applyMode(m); });
   // Where things stand now (the first messages may have come before this page was listening)
   addEventListener('load', () => window.ares.surface.state().then((st) => {
     set(st.name);
@@ -78,6 +79,7 @@ const Surface = (() => {
     get name() { return name; },
     get paused() { return name === 'desktop' && mode.paused; },
     get interactive() { return interactive; },
+    hold(m) { pinned = Boolean(m); if (m) { applyMode(m); if (m.state) herState = m.state; } },
     /** ARES's state (for 60 fps while she listens or speaks). */
     state(s) { herState = s; },
   };

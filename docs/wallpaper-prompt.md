@@ -5,6 +5,15 @@ STEP 0b, SIMPLIFY THE HALO (in the shared scene, so the app window AND the wallp
 - REMOVE: the extra halo layers (the 2nd and 3rd faint rings), the sparks that fly off it while she speaks, and the expanding ripple rings on the pedestal. The pedestal stays as a soft glow disc only (brighter while she speaks).
 - Keep the thinking comet and the wake-word pulse unless they read as extra rings.
 
+UPDATE 2026-10-02 (as built): section 1 below is SUPERSEDED by docs/live-desktop-prompt.md. The desktop is now the
+FULL live ARES: the ARES window itself (surface.js) sits just above the desktop icons and below all apps, transparent,
+with the real dashboard panels, subtitles, ticker and status, click-through except over panels and orbs, and lifts
+above the apps when summoned. The windows described in section 1 remain as the starry BACKDROP below the icons (they
+draw the brain only where the ARES window isn't: other displays, or while ARES is open as a separate window). Section
+3b is now done the other way round: panels, the brain and orbs work around the icons (no hide-icons toggle). Desk mode
+(no wake word while at the Mac) is in docs/live-desktop-prompt.md section 4. Sections 2 (screen saver) and 3 (lock-screen
+still) are built as written.
+
 Build "ARES everywhere on the Mac": a live desktop wallpaper, an ARES screen saver, and a matching lock-screen still. See the project notes. This comes AFTER the GUI update (docs/gui-update-prompt.md) is built; reuse its scene: renderer/stars.js, the brain (brain3d.mjs), the R2 halo and R4 pedestal, and the job orbs.
 
 1. LIVE DESKTOP WALLPAPER (unlocked Mac)

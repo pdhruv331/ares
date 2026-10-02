@@ -42,3 +42,13 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   mode for measuring. `ARES_TEST_STILL=/path/prefix` (dev only) renders the lock-screen stills to files without
   setting the desktop picture. Don't change the user's desktop picture from a test.
 - Screen saver: `scripts/build-saver.sh` (also run by `npm run build`) → `~/Library/Screen Savers/ARES.saver`.
+
+## Live desktop and desk mode
+
+- The ARES window is the desktop (`surface.js`: desktop / lifted / window; `renderer/surface.js`: looks, click-through
+  hit-testing, pacing). The wallpaper windows are the backdrop below the icons. Icons → `dash.js` walls.
+- Desk mode: `desk.js` (when), `addressed.js` (is it for her), voiceprint always checked without the wake word.
+  Overheard speech is never logged as text, sent to the brain or shown as subtitles; keep it that way.
+- Dev-only test hooks (ignored when packaged): `window.ares.surface.test('show'|'window'|'hide')`,
+  `testHear({type:'command', text, addressed:false, trusted})`, `testDesk({mic, idleMin})`, `Surface.hold({...})`.
+  The dev instance can't share the mic with the installed ARES, so inject speech instead.
