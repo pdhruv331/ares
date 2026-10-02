@@ -187,6 +187,8 @@ function refreshTray() {
       ? { label: 'Start Listening', click: () => listener.unmute() }
       : { label: 'Mute', click: () => listener.mute() },
     { label: 'Mute for 1 Hour', visible: !muted, click: () => listener.mute(60) },
+    // Apple's mic modes (Voice Isolation etc.) are picked per app in its own picker; Control Center may not list the listener
+    { label: 'Microphone Mode (Voice Isolation)…', click: () => listener.send('micmode show') },
     { type: 'separator' },
     { label: `Show / Hide  (${HOTKEY.replace('Alt', '⌥')})`, click: toggleWindow },
     { label: 'Toggle Full Screen  (⌃⌘F)', click: () => { showWindow(); win.setFullScreen(!win.isFullScreen()); } },

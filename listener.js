@@ -76,6 +76,7 @@ class WakeListener extends EventEmitter {
     if (evt.type === 'ready') { this.restarts = 0; this.ready = true; }
     if (evt.type === 'error' && evt.code === 'aec') process.env.ARES_ECHO_CANCEL = '0';
     if (evt.type === 'ready' && this.muted) this.send('mute');
+    if (evt.type === 'ready') this.send('micmode'); // which Apple mic mode is in use, for the log
     this.emit('event', evt);
   }
 

@@ -15,6 +15,7 @@
 // Commands (lines on stdin): start | mute | unmute | pause | resume | listen [ms] [trusted] | record [ms]
 //                             | awake on|off   (always-listening: every utterance is a command, no wake word)
 //                             | clip <id> | play <id> <base64 pcm24k> | playend <id> | stopplay   (ARES's voice)
+//                             | micmode [show]   (report / open Apple's mic mode picker: {"type":"micmode","active","preferred"})
 //                             | speaking on|off   (listen for the user cutting in while she talks) | barge yes|no
 // Playback events: {"type":"played","id"} {"type":"stopped","ids"} {"type":"outlevel","v"}
 // Barge-in: {"type":"barge","text","audio"} while speaking; the app answers "barge yes" (she stops and
@@ -221,7 +222,21 @@ final class Listener {
         case "record":
             let ms = parts.count > 1 ? Double(parts[1]) ?? 7000 : 7000
             record(max: ms / 1000)
+        case "micmode":
+            // macOS mic modes (Standard / Voice Isolation / Wide Spectrum) are chosen by the user, per app, in
+            // Apple's own picker: report the current one, and with "show" open the picker
+            if parts.count > 1, parts[1] == "show" { AVCaptureDevice.showSystemUserInterface(.microphoneModes) }
+            emit(["type": "micmode", "active": micModeName(AVCaptureDevice.activeMicrophoneMode),
+                  "preferred": micModeName(AVCaptureDevice.preferredMicrophoneMode), "engine": engine.isRunning])
         default: break
+        }
+    }
+
+    private func micModeName(_ m: AVCaptureDevice.MicrophoneMode) -> String {
+        switch m {
+        case .voiceIsolation: return "voice isolation"
+        case .wideSpectrum: return "wide spectrum"
+        default: return "standard"
         }
     }
 
