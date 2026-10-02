@@ -2,7 +2,7 @@
 // and fire the neurons they reach, which can set off their neighbours, so activity spreads in
 // cascades. How much it fires, where, and in what colour follows what ARES is doing.
 // Same interface as the old reactor HUD (hud.js): setState, setLevel, setSpectrum, BARS.
-// Around the brain: the voice halo (three wavy rings that breathe, listen, think and speak) on a hologram pedestal.
+// Around the brain: the voice halo (one wavy ring that breathes, listens, thinks and speaks) over a soft glow pedestal.
 const HUD = (() => {
   const canvas = document.getElementById('hud');
   const ctx = canvas.getContext('2d');
@@ -171,7 +171,7 @@ const HUD = (() => {
     ctx.drawImage(sprite, x - size / 2, y - size / 2, size, size);
   };
 
-  // ---- The voice halo (R2) and the hologram pedestal (R4) ---------------------------------------------
+  // ---- The voice halo (R2: one ring) and the glow pedestal (R4) ---------------------------------------------
   const TAU = Math.PI * 2;
   const AMBER = { r: 255, g: 181, b: 71 };
   const RING_POINTS = 144;
@@ -180,19 +180,16 @@ const HUD = (() => {
     attention: 0, attTarget: 0,   // amber while a job or call needs a yes
     hover: 0, hoverTarget: 0,     // an orb carried near the brain
     comet: -Math.PI / 2, cometOn: 0,
-    ripples: [],                  // { r, dir, speed, life, max, amp, phase }
-    sparks: [],                   // { a, r, v, life }
-    spawn: 0,
   };
   const hc = { r: 62, g: 230, b: 255 }; // the halo's own colour (state colour, tinted amber when needed)
 
-  function ringPath(cx, cy, base, layer, t, amp, voice) {
-    const speed = [0.35, 0.52, 0.27][layer];
+  function ringPath(cx, cy, base, t, amp, voice) {
+    const speed = 0.35;
     ctx.beginPath();
     for (let k = 0; k <= RING_POINTS; k++) {
       const a = (k / RING_POINTS) * TAU;
-      const wave = Math.sin(a * 3 + t * speed + layer * 2.1) * 0.6 + Math.sin(a * 5 - t * speed * 1.3 + layer) * 0.4;
-      const shimmer = Math.sin(a * 23 + t * 2.7 + layer) * 0.35;
+      const wave = Math.sin(a * 3 + t * speed) * 0.6 + Math.sin(a * 5 - t * speed * 1.3) * 0.4;
+      const shimmer = Math.sin(a * 23 + t * 2.7) * 0.35;
       const sp = voice ? spectrum[Math.floor((k / RING_POINTS) * BARS) % BARS] || 0 : 0;
       const r = base + wave * amp + shimmer + sp * voice;
       const x = cx + Math.cos(a - Math.PI / 2) * r, y = cy + Math.sin(a - Math.PI / 2) * r;
@@ -215,57 +212,17 @@ const HUD = (() => {
     const voiced = listeningNow || speakingNow ? level : 0;
     const bright = (listeningNow ? 1.25 : 1) * (1 + H.energy * 1.4 + H.hover * 0.6 + voiced * 0.5);
     const base = R * 0.9 * (1 + 0.012 * Math.sin(s * 0.9)) + H.energy * 7;   // idle breathing
-    const drift = 4 + 3 * Math.sin(s * 0.45);                               // layers drift apart and back
     const amp = 1.4 + voiced * 9;
-
-    // Ripples: inward while she listens, outward while she speaks, both driven by the real level
-    if (listeningNow || speakingNow) {
-      H.spawn += dt * (0.9 + level * 5);
-      while (H.spawn >= 1) {
-        H.spawn -= 1;
-        const out = speakingNow;
-        H.ripples.push({ r: out ? base : base + 28, dir: out ? 1 : -1, speed: 26 + level * 30, life: 0, max: out ? 1.4 : 1.1, amp: 0.25 + level * 0.7, phase: Math.random() * TAU });
-      }
-    }
-    // Sparks off the loudest peaks while she speaks
-    if (speakingNow && level > 0.15) {
-      for (let i = 0; i < BARS; i += 3) {
-        const v = spectrum[i];
-        if (v > 0.5 && Math.random() < dt * 10 * v * v && H.sparks.length < 60) {
-          H.sparks.push({ a: (i / BARS) * TAU - Math.PI / 2, r: base + v * R * 0.06, v: 60 + Math.random() * 90, life: 0 });
-        }
-      }
-    }
 
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     ctx.lineJoin = 'round';
-    for (let k = H.ripples.length - 1; k >= 0; k--) {
-      const p = H.ripples[k];
-      p.life += dt;
-      p.r += p.dir * p.speed * dt;
-      const f = p.life / p.max;
-      if (f >= 1) { H.ripples.splice(k, 1); continue; }
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = col(p.amp * Math.sin(Math.PI * f) * 0.55 * bright);
-      ringPath(cx, cy, p.r, 2, s + p.phase, 1 + p.amp * 3, 0);
-      ctx.stroke();
-    }
-
-    // The three layered rings; the main one glows
+    // The one halo ring: it breathes, wiggles with her real voice, and glows
     const voice = voiced ? R * 0.07 * (speakingNow ? 1 : -0.6) : 0;
-    const layers = [[0, 1.4, 0.8], [-drift, 1, 0.34], [drift, 1, 0.22]];
-    for (let i = 2; i >= 0; i--) {
-      const [off, width, alpha] = layers[i];
-      ringPath(cx, cy, base + off, i, s, amp * (i ? 0.8 : 1), voice * (i ? 0.6 : 1));
-      if (i === 0) {
-        ctx.lineWidth = 7; ctx.strokeStyle = col(0.05 * bright); ctx.stroke();
-        ctx.lineWidth = 3.5; ctx.strokeStyle = col(0.1 * bright); ctx.stroke();
-      }
-      ctx.lineWidth = width;
-      ctx.strokeStyle = col(alpha * Math.min(1.6, bright));
-      ctx.stroke();
-    }
+    ringPath(cx, cy, base, s, amp, voice);
+    ctx.lineWidth = 7; ctx.strokeStyle = col(0.05 * bright); ctx.stroke();
+    ctx.lineWidth = 3.5; ctx.strokeStyle = col(0.1 * bright); ctx.stroke();
+    ctx.lineWidth = 1.4; ctx.strokeStyle = col(0.8 * Math.min(1.6, bright)); ctx.stroke();
 
     // Thinking: a bright comet with a fading tail races around the ring
     if (H.cometOn > 0.02) {
@@ -287,20 +244,6 @@ const HUD = (() => {
       ctx.globalAlpha = 1;
     }
 
-    // Sparks
-    ctx.lineCap = 'round';
-    for (let k = H.sparks.length - 1; k >= 0; k--) {
-      const p = H.sparks[k];
-      p.life += dt;
-      if (p.life > 0.6) { H.sparks.splice(k, 1); continue; }
-      const r0 = p.r + p.v * p.life, r1 = r0 + 5;
-      ctx.lineWidth = 1.2;
-      ctx.strokeStyle = col((1 - p.life / 0.6) * 0.9);
-      ctx.beginPath();
-      ctx.moveTo(cx + Math.cos(p.a) * r0, cy + Math.sin(p.a) * r0);
-      ctx.lineTo(cx + Math.cos(p.a) * r1, cy + Math.sin(p.a) * r1);
-      ctx.stroke();
-    }
     ctx.restore();
   }
 
@@ -320,18 +263,6 @@ const HUD = (() => {
     g.addColorStop(1, col(0));
     ctx.fillStyle = g;
     ctx.beginPath(); ctx.arc(0, 0, rx, 0, TAU); ctx.fill();
-    ctx.restore();
-    // Rim, and rings pulsing outward across the disc
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = col(0.3 * b);
-    ctx.beginPath(); ctx.ellipse(px, py, rx, ry, 0, 0, TAU); ctx.stroke();
-    for (let k = 0; k < 3; k++) {
-      const p = (t / 2800 + k / 3) % 1;
-      ctx.strokeStyle = col((1 - p) * 0.32 * b);
-      ctx.beginPath(); ctx.ellipse(px, py, rx * (0.12 + 0.88 * p), ry * (0.12 + 0.88 * p), 0, 0, TAU); ctx.stroke();
-    }
     ctx.restore();
   }
 
@@ -453,7 +384,6 @@ const HUD = (() => {
     /** A short bright pulse (wake word). `strength` 1.6 = something was just sucked into the brain. */
     pulse(strength = 1) {
       halo.energy = Math.max(halo.energy, strength);
-      if (strength > 1.2) halo.ripples.push({ r: geometry.R * 0.9, dir: 1, speed: 90, life: 0, max: 1, amp: 1, phase: 0 });
     },
     /** Amber tint while a job or call is waiting for the user's yes. */
     attention(on) { halo.attTarget = on ? 1 : 0; },

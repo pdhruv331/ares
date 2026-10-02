@@ -1,5 +1,10 @@
 STEP 0, SAFETY FIRST (only if the project isn't a git repo yet): git init with a thorough .gitignore (.env and any keys/tokens, android keystores + keystore.properties, google-services.json, user data like memory/contacts/voiceprint, models/brain-src, dist/, node_modules/, build outputs). Scan for secrets and show me the results BEFORE the first commit. Make a baseline commit, tag it pre-wallpaper, and commit after each working step below. (The full reliability work is a later session: docs/reliability-prompt.md.)
 
+STEP 0b, SIMPLIFY THE HALO (in the shared scene, so the app window AND the wallpaper both get it):
+- Keep ONLY the single main wiggling halo ring around the brain (its breathing and its wiggle reacting to the real voice levels, and the colour easing between states).
+- REMOVE: the extra halo layers (the 2nd and 3rd faint rings), the sparks that fly off it while she speaks, and the expanding ripple rings on the pedestal. The pedestal stays as a soft glow disc only (brighter while she speaks).
+- Keep the thinking comet and the wake-word pulse unless they read as extra rings.
+
 Build "ARES everywhere on the Mac": a live desktop wallpaper, an ARES screen saver, and a matching lock-screen still. See the project notes. This comes AFTER the GUI update (docs/gui-update-prompt.md) is built; reuse its scene: renderer/stars.js, the brain (brain3d.mjs), the R2 halo and R4 pedestal, and the job orbs.
 
 1. LIVE DESKTOP WALLPAPER (unlocked Mac)
