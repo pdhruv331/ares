@@ -31,3 +31,14 @@ run without `ARES_USER_DATA` shares the user's real jobs and paired phones.
 
 The project became a git repo on 2026-10-01. Commit after each working step. Secrets (`.env`, keystores,
 `google-services.json`) and large models are gitignored. Never commit them.
+
+## Wallpaper, screen saver, lock-screen still
+
+- `wallpaper.js` (main) + `renderer/wallpaper.{html,js,css}`: desktop-level windows, a second view of the one ARES
+  (`renderer/scene-link.js` mirrors the window's scene). `native/AresDesktop.swift` (`ares-desktop`) reports when the
+  desktop can't be seen and gets/sets desktop pictures. All settings live under `wallpaper` in settings.json.
+- Testing: the dev instance shows a real wallpaper window on the real desktop. Capture only that window
+  (`screencapture -l <CGWindowID>`), never the whole screen. `ARESWall.hold({...})` in the wallpaper page forces a
+  mode for measuring. `ARES_TEST_STILL=/path/prefix` (dev only) renders the lock-screen stills to files without
+  setting the desktop picture. Don't change the user's desktop picture from a test.
+- Screen saver: `scripts/build-saver.sh` (also run by `npm run build`) → `~/Library/Screen Savers/ARES.saver`.
