@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+  <title>ARES</title>
+  <link rel="stylesheet" href="wallpaper.css" />
+</head>
+<!-- The ARES screen saver: the same scene as the wallpaper (renderer/wallpaper.html), with the 3D brain bundled as a
+     classic script (WebKit won't load module scripts from file:// pages). Built by scripts/build-saver.sh. -->
+<body data-mode="saver">
+  <canvas id="stars" aria-hidden="true"></canvas>
+  <section class="core">
+    <canvas id="brain"></canvas>
+    <canvas id="hud"></canvas>
+  </section>
+  <div id="clock" class="clock" hidden><b></b><span></span></div>
+
+  <script src="perf.js"></script>
+  <script src="stars.js"></script>
+  <script src="neural.js"></script>
+  <script src="wallpaper.js"></script>
+  <script src="brain3d.js"></script>
+</body>
+</html>

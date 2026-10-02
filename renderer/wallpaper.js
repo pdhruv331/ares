@@ -1,10 +1,10 @@
 // The scene-only views of ARES: the live desktop wallpaper, the lock-screen still and the screen saver.
 // The wallpaper is a second view of the one running ARES: the main process forwards her real state, voice levels,
 // wake pulses and jobs (window.wp, wallpaper-preload.js), and tells it when to pause. The screen saver has no
-// bridge; its host calls window.ARESWall instead. ?mode=wallpaper | still | saver
+// bridge; its host calls window.ARESWall instead. ?mode=wallpaper | still | saver, or <body data-mode>
 (() => {
   const q = new URLSearchParams(location.search);
-  const MODE = q.get('mode') || 'wallpaper';
+  const MODE = q.get('mode') || document.body.dataset.mode || 'wallpaper'; // (the screen saver's file:// page can't take a query)
   if (MODE === 'still') window.SCENE_STILL = true; // brain3d keeps its frame so it can be copied
   const bridge = window.wp || null;
   const core = document.querySelector('.core');

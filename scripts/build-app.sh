@@ -54,3 +54,5 @@ mkdir -p "$SUPPORT"
 if [[ -f .env ]]; then cp .env "$SUPPORT/.env"; chmod 600 "$SUPPORT/.env"; fi
 
 echo "✓ Installed /Applications/ARES.app"
+
+zsh scripts/build-saver.sh
