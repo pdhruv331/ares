@@ -73,6 +73,7 @@ contextBridge.exposeInMainWorld('ares', {
   resumeListening: () => ipcRenderer.send('listener-resume'),
   onListener: (fn) => ipcRenderer.on('listener-event', (_e, evt) => fn(evt)),
   log: (...parts) => ipcRenderer.send('log', ...parts),
+  scene: (msg) => ipcRenderer.send('scene', msg), // to the wallpaper (renderer/scene-link.js)
   hide: () => ipcRenderer.send('window-hide'),
   pin: (pinned) => ipcRenderer.send('window-pin', pinned),
   toggleFullscreen: () => ipcRenderer.send('window-fullscreen'),

@@ -137,13 +137,14 @@ const HUD = (() => {
 
   // ---- Drawing ---------------------------------------------------------------------------------
   function resize() {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = sceneDpr(3);
     const { width, height } = canvas.getBoundingClientRect();
     canvas.width = width * dpr;
     canvas.height = height * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
   new ResizeObserver(resize).observe(canvas);
+  addEventListener('scene-quality', resize);
   resize();
 
   const rgba = (a, c = color) => `rgba(${c.r | 0}, ${c.g | 0}, ${c.b | 0}, ${a})`;

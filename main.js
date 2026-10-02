@@ -39,6 +39,7 @@ const { Relay } = require('./relay');
 const { Dashboard } = require('./dashboard');
 const { Voice } = require('./voice');
 const { Voicemail } = require('./voicemail');
+const { Wallpaper } = require('./wallpaper');
 const { registry: workerTools } = require('./worker-tools');
 const { startEgress } = require('./egress');
 const workFiles = require('./work-files');
@@ -65,6 +66,7 @@ let calls;   // the ARES phone line (calls.js): ElevenLabs agent on a Twilio num
 let relay;   // the Cloudflare relay (relay.js): FCM pushes to the Android app, even with the Mac off
 let dashboard; // the dashboard's live data (dashboard.js): weather, calendar, leave-by, now playing
 let voicemail; // voicemails from the Twilio fallback when the phone agent can't answer (voicemail.js)
+let wallpaper; // ARES as the desktop (wallpaper.js): live wallpaper windows and the lock-screen still
 let speech;    // her voice (voice.js): Katherine on ElevenLabs, the local Kokoro backup, budget mode, phrase cache, credit watch
 
 /** A message for the window's dashboard (renderer/dash.js). */
@@ -193,6 +195,8 @@ function refreshTray() {
     { label: `Show / Hide  (${HOTKEY.replace('Alt', '⌥')})`, click: toggleWindow },
     { label: 'Toggle Full Screen  (⌃⌘F)', click: () => { showWindow(); win.setFullScreen(!win.isFullScreen()); } },
     { type: 'separator' },
+    ...wallpaperMenu(),
+    { type: 'separator' },
     {
       label: 'Voice ID (only answer to you)',
       type: 'checkbox',
@@ -217,7 +221,7 @@ function refreshTray() {
     { label: 'Open Work Folder…', click: () => shell.openPath(jobs.dir) },
     { type: 'separator' },
     ...voiceMenu(),
-    { label: 'Reduce Motion', type: 'checkbox', checked: Boolean(readSettings().reduceMotion), click: (item) => { writeSettings({ reduceMotion: item.checked }); win?.webContents.send('ui-prefs', uiPrefs()); refreshTray(); } },
+    { label: 'Reduce Motion', type: 'checkbox', checked: Boolean(readSettings().reduceMotion), click: (item) => { writeSettings({ reduceMotion: item.checked }); win?.webContents.send('ui-prefs', uiPrefs()); wallpaper?.prefs(); refreshTray(); } },
     { label: 'Magnetic Panel Slots', type: 'checkbox', checked: readSettings().ui?.magnetic !== false, click: (item) => { writeUi({ magnetic: item.checked }); win?.webContents.send('ui-prefs', uiPrefs()); refreshTray(); } },
     { label: 'Open Calls Log…', visible: Boolean(calls?.ready), click: () => shell.openPath(calls.dir) },
     { label: 'Always Also Notify My Phone', type: 'checkbox', checked: Boolean(readSettings().workAlwaysPhone), click: (item) => { writeSettings({ workAlwaysPhone: item.checked }); refreshTray(); } },
@@ -236,6 +240,27 @@ function refreshTray() {
     },
     { label: 'Quit ARES', click: () => { app.isQuitting = true; app.quit(); } },
   ]));
+}
+
+/** ARES as the desktop: the live wallpaper, its options, and the lock-screen picture. */
+function wallpaperMenu() {
+  if (!wallpaper) return [];
+  const o = wallpaper.opts;
+  const act = (fn) => async (item) => { await fn(item); refreshTray(); };
+  return [
+    { label: 'ARES as Wallpaper', type: 'checkbox', checked: o.enabled, click: act((item) => wallpaper.setEnabled(item.checked)) },
+    { label: 'Wallpaper Options', submenu: [
+      { label: 'On Every Display', type: 'radio', checked: o.displays !== 'main', click: act(() => wallpaper.setDisplays('all')) },
+      { label: 'Main Display Only', type: 'radio', checked: o.displays === 'main', click: act(() => wallpaper.setDisplays('main')) },
+      { type: 'separator' },
+      { label: 'Show Clock and Greeting', type: 'checkbox', checked: o.clock, click: act((item) => wallpaper.setClock(item.checked)) },
+      { type: 'separator' },
+      { label: 'ARES Lock Screen Picture', type: 'checkbox', checked: o.lockStill, click: act((item) => wallpaper.setLockStill(item.checked)) },
+      { label: 'Warmer in the Evening', type: 'checkbox', checked: o.evening, enabled: o.lockStill, click: act((item) => wallpaper.setEvening(item.checked)) },
+      { label: 'Re-render Lock Screen Picture', enabled: o.lockStill, click: act(() => wallpaper.renderStills()) },
+    ] },
+    { label: 'Restore My Original Wallpaper', enabled: Boolean(o.original), click: act(() => wallpaper.restoreOriginal()) },
+  ];
 }
 
 /** The menu bar's voice section: what she's speaking with, credits, the Budget voice submenu, dev mode. */
@@ -327,6 +352,8 @@ function setAwake(on, reason = 'user') {
   win?.webContents.send('listener-event', { type: 'awake', on, reason });
 }
 ipcMain.on('listener-awake', (_e, on) => setAwake(on));
+ipcMain.on('scene', (_e, msg) => wallpaper?.scene(msg));
+ipcMain.on('wp-ready', (e) => wallpaper?.onReady(e.sender));
 
 // ---- Wake word -----------------------------------------------------------------
 function createListener() {
@@ -348,6 +375,7 @@ function createListener() {
     if (evt.type === 'barge') return onBarge(evt);
     if (evt.type === 'command') return onCommand(evt);
     if ((evt.type !== 'level' && evt.type !== 'outlevel') || win.isVisible()) win.webContents.send('listener-event', evt);
+    else wallpaper?.scene({ type: 'level', v: evt.v }); // the window isn't drawing, but the wallpaper is
   });
   listener.on('stderr', (msg) => log('listener-stderr', msg));
   listener.on('state', () => {
@@ -1024,6 +1052,7 @@ async function startWork() {
   const lastStatus = new Map();
   jobs.on('change', (job) => {
     win?.webContents.send('job-change', job);
+    wallpaper?.jobs(jobs.list());
     phone?.broadcast({ type: 'job', job });
     // Answered (on the Mac, by voice or from the phone): the "needs your OK" notification is out of date
     if (lastStatus.get(job.id) === 'approval' && job.status !== 'approval') clearPhoneNotes([`job-${job.id}-ok`]);
@@ -1031,7 +1060,7 @@ async function startWork() {
     refreshTray();
   });
   jobs.on('event', (id, evt) => { win?.webContents.send('job-event', id, evt); phone?.broadcast({ type: 'job-event', id, evt }); });
-  jobs.on('removed', (id) => { win?.webContents.send('job-removed', id); phone?.broadcast({ type: 'job-removed', id }); refreshTray(); });
+  jobs.on('removed', (id) => { wallpaper?.jobs(jobs.list()); win?.webContents.send('job-removed', id); phone?.broadcast({ type: 'job-removed', id }); refreshTray(); });
   // Opened on one device, seen on the other: the Mac's badge clears (job-change), and so do the phone's notifications
   jobs.on('seen', (job) => clearPhoneNotes([`job-${job.id}`, `job-${job.id}-ok`]));
   jobs.on('busy', (busy) => {
@@ -1602,7 +1631,21 @@ app.whenReady().then(async () => {
   intents.init().then(refreshTray, (err) => log('intent unavailable', err.message)); // until then, everything is chat
   createListener();
   createWindow({ show: !openedAtLogin }); // at login, wait quietly in the menu bar
+  wallpaper = new Wallpaper({
+    log, readSettings, writeSettings, appDir: __dirname, supportDir: app.getPath('userData'), prefs: uiPrefs,
+    helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-desktop') : path.join(__dirname, 'native', 'build', 'ares-desktop'),
+  });
+  wallpaper.start();
+  if (!app.isPackaged && process.env.ARES_TEST_STILL) { // development: render the lock-screen still to a file, without setting it
+    const { screen } = require('electron');
+    for (const tint of [false, true]) {
+      wallpaper.renderStill(screen.getPrimaryDisplay(), tint).then((png) => { if (png) fs.writeFileSync(`${process.env.ARES_TEST_STILL}-${tint ? 'evening' : 'day'}.png`, png); log('test still', { tint, bytes: png?.length }); });
+    }
+  }
+  wallpaper.jobs(jobs.list());
   createTray();
+  // First run with the wallpaper on: ask (once) about the ARES lock-screen picture
+  if (wallpaper.opts.enabled && !wallpaper.opts.lockAsked && (app.isPackaged || process.env.ARES_ASK_LOCK)) setTimeout(() => wallpaper.setLockStill(true).then(refreshTray), 8000);
   win.webContents.once('did-finish-load', () => {
     listener.start(); checkIntegrations(); startRemote(); startPhone(); calls.start().catch((err) => log('calls start failed', err.message));
     voicemail.start();
@@ -1634,6 +1677,7 @@ app.on('will-quit', () => {
   calls?.stop();
   voicemail?.stop();
   dashboard?.stop();
+  wallpaper?.stop();
   speech?.stop();
   egress?.close();
   claude.shutdown();

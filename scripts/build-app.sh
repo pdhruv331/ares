@@ -15,6 +15,10 @@ xcrun swiftc -O -swift-version 5 native/AresListener.swift -o native/build/ares-
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker native/Info.plist
 codesign --force --sign "$SIGN" native/build/ares-listener
 
+echo "› Compiling desktop helper (wallpaper: is the desktop visible, desktop pictures)"
+xcrun swiftc -O -swift-version 5 native/AresDesktop.swift -o native/build/ares-desktop
+codesign --force --sign "$SIGN" native/build/ares-desktop
+
 echo "› Backup voice model (Kokoro, downloaded once into the support folder)"
 zsh scripts/get-voice-model.sh
 
@@ -28,6 +32,7 @@ npx electron-packager . ARES \
   --icon=assets/icon.icns \
   --extend-info=native/app-info.plist \
   --extra-resource=native/build/ares-listener \
+  --extra-resource=native/build/ares-desktop \
   --extra-resource=models/speaker-titanet-small.onnx \
   --extra-resource=models/intent \
   --ignore='^/relay(/|$)' --ignore='^/(native|android|scripts|dist|assets|models|\.env.*|\.gitignore)' \

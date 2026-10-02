@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+  <title>ARES Wallpaper</title>
+  <link rel="stylesheet" href="wallpaper.css" />
+</head>
+<!-- ARES as the desktop (and the screen saver, and the lock-screen still): the shared scene only. No panels, no input. -->
+<body>
+  <canvas id="stars" aria-hidden="true"></canvas>
+  <section class="core">
+    <canvas id="brain"></canvas>
+    <canvas id="hud"></canvas>
+  </section>
+  <div id="clock" class="clock" hidden><b></b><span></span></div>
+
+  <script src="perf.js"></script>
+  <script src="stars.js"></script>
+  <script src="neural.js"></script>
+  <script src="wallpaper.js"></script>
+  <script type="module" src="brain3d.mjs"></script>
+</body>
+</html>

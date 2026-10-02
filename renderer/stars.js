@@ -20,13 +20,14 @@
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   function resize() {
-    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const dpr = sceneDpr();
+    const density = window.SCENE_DPR === 1 ? 0.6 : 1; // the simpler scene (wallpaper on battery): fewer stars
     w = canvas.clientWidth;
     h = canvas.clientHeight;
     canvas.width = Math.round(w * dpr);
     canvas.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    stars = LAYERS.flatMap((layer) => Array.from({ length: Math.round(w * h * layer.count) }, () => ({
+    stars = LAYERS.flatMap((layer) => Array.from({ length: Math.round(w * h * layer.count * density) }, () => ({
       layer, x: Math.random() * w, y: Math.random() * h, phase: Math.random() * Math.PI * 2, rate: 0.6 + Math.random() * 1.4,
     })));
   }
@@ -60,6 +61,7 @@
 
   window.Stars = { setState: (state) => { target = ENERGY[state] || 1; } };
   new ResizeObserver(resize).observe(canvas);
+  addEventListener('scene-quality', resize);
   resize();
   requestAnimationFrame(frame);
 })();

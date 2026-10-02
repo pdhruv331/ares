@@ -28,8 +28,9 @@ const BEHAVIOUR = {
 
 function start() {
   const canvas = document.getElementById('brain');
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  // SCENE_STILL (the lock-screen still): keep the drawn frame so the page can copy it into one picture
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: Boolean(window.SCENE_STILL) });
+  renderer.setPixelRatio(sceneDpr());
   renderer.setClearColor(0x000000, 0);
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 50);
@@ -596,6 +597,7 @@ function start() {
     pulseMat.uniforms.uScale.value = scale * 0.01;
   }
   new ResizeObserver(resize).observe(canvas);
+  addEventListener('scene-quality', () => { renderer.setPixelRatio(sceneDpr()); resize(); });
   resize();
 
   const target = new THREE.Color();
@@ -687,6 +689,8 @@ function start() {
     renderer.render(scene, camera);
   }
   hud.enable3D();
+  /** For views of the scene without the app (the wallpaper): fire a few neurons, e.g. on the wake word. */
+  window.BrainFX = { fire(n = 6, strength = 1) { for (let i = 0; i < n; i++) fire(pick(), strength); fire(coreIdx, strength * 0.8); } };
   requestAnimationFrame(frame);
   window.dispatchEvent(new Event('orbs-ready'));
 }
