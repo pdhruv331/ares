@@ -135,6 +135,13 @@ function createWindow({ show }) {
 // out of its Space first, or macOS leaves a black screen behind.
 function hideWindow() { surface.hide(); }
 
+// ARES has something to say or heard her name: with the live desktop on she answers right there on the desktop
+// (nothing jumps over the user's apps); otherwise the window comes up as before. ⌥Space / the menu still summon.
+function present() {
+  if (surface.desktopOn) return;
+  showWindow();
+}
+
 // Summon: lift the desktop above the apps, or open the window (the ◉ menu's summon mode).
 function showWindow() {
   surface.show();
@@ -420,7 +427,7 @@ function createListener() {
     // Always listening: what's being said only shows as a live subtitle once it's clearly for her
     if (evt.type === 'partial' && listener.awake && !talk.fromWake && Date.now() - talk.lastReplyAt > 20_000) return;
     if (evt.type === 'wake') {
-      showWindow();
+      present();
       win.webContents.send('summoned');
     }
     if (evt.type === 'recording') return; // enrollment audio stays in the main process
@@ -1173,11 +1180,11 @@ function notifyJob(job, kind) {
     const line = job.status === 'done'
       ? `Your ${job.title} job is done. ${firstSentences(job.summary || '')}`
       : `Sorry, sir, the ${job.title} job didn't finish: ${job.error}.`;
-    if (here) { showWindow(); win.webContents.send('job-announce', { id: job.id, kind: job.status, line, open: job.status === 'done' }); }
+    if (here) { present(); win.webContents.send('job-announce', { id: job.id, kind: job.status, line, open: job.status === 'done' }); }
     if (phoneToo) pushToPhones({ title: job.status === 'done' ? `Done: ${job.title}` : `Job failed: ${job.title}`, body: job.status === 'done' ? job.summary || 'Ready.' : job.error, tag: `job-${job.id}`, job: job.id, buttons: jobButtons(job) }).catch(() => {});
   } else {
     const line = `The ${job.title} job needs your OK, sir: ${job.approval.what}. Shall I let it?`;
-    if (here) { showWindow(); win.webContents.send('job-announce', { id: job.id, kind: 'approval', line, open: true }); }
+    if (here) { present(); win.webContents.send('job-announce', { id: job.id, kind: 'approval', line, open: true }); }
     if (phoneToo) {
       // The tap is the confirmation (a paired phone, and only for this exact request); `ask` is for older apps
       const answer = (yes) => ({ title: yes ? 'Yes' : 'No', api: `/api/jobs/${job.id}/answer`, body: { yes, at: job.approval.at },
@@ -1494,7 +1501,7 @@ function createCalls() {
     callNotes.push(line);
     if (callNotes.length > 10) callNotes.shift();
     remember('ares', line, source);
-    showWindow();
+    present();
     win.webContents.send('job-announce', { line, open: false, remembered: true });
   };
   const buttons = (num) => (num ? [{ title: 'Call back', url: `tel:${num}` }, { title: 'Text', url: `sms:${num}` }] : []);
@@ -1678,7 +1685,7 @@ app.whenReady().then(async () => {
         return pushToPhones({ title: 'Timer done', body: `${name} is done, sir.`, tag: `timer-${label}`,
           buttons: [{ title: '+5 min', ask: `Set a 5 minute timer called ${label}` }] });
       }
-      showWindow();
+      present();
       win.webContents.send('timer-done', label);
     },
   });

@@ -328,7 +328,9 @@ function start() {
     const tGeo2 = new THREE.BufferGeometry();
     tGeo2.setAttribute('position', new THREE.BufferAttribute(new Float32Array(ORB_TRAIL * 3), 3));
     tGeo2.setAttribute('color', new THREE.BufferAttribute(new Float32Array(ORB_TRAIL * 3), 3));
-    const trail = new THREE.Line(tGeo2, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    // Additive light that doesn't add opacity: on a transparent window (the live desktop) an opaque dark tail would show
+    const trail = new THREE.Line(tGeo2, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, blending: THREE.CustomBlending,
+      blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor }));
     glow.renderOrder = hot.renderOrder = trail.renderOrder = 5;
     orbLayer.add(trail, glow, hot);
     const orb = {
@@ -619,7 +621,7 @@ function start() {
     bootStart ??= t;
     const boot = Math.min(1, (t - bootStart) / 1600);
     group.scale.setScalar(1 - Math.pow(1 - boot, 3));
-    group.rotation.y += dt * 0.16 * live.color.spin;
+    if (!window.SCENE_NO_SPIN) group.rotation.y += dt * 0.16 * live.color.spin; // (still as the live desktop)
 
     target.setRGB(live.color.r / 255, live.color.g / 255, live.color.b / 255);
     shared.uColor.value.copy(target);

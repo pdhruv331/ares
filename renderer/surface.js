@@ -16,6 +16,7 @@ const Surface = (() => {
     for (const s of ['desktop', 'lifted', 'sinking', 'window']) root.classList.toggle(`s-${s}`, s === next);
     drawUntil = performance.now() + 2500;
     if (next !== 'desktop') { interactive = true; held = false; }
+    window.SCENE_NO_SPIN = next === 'desktop' || next === 'sinking'; // the brain holds still as the desktop
     dispatchEvent(new CustomEvent('surface', { detail: next }));
   }
 

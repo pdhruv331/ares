@@ -1,6 +1,6 @@
 // Where the one ARES window lives (docs/live-desktop-prompt.md). With "ARES as Wallpaper" on, the window IS the desktop:
 //
-//   desktop  just above the desktop icons, below every app window, on all Spaces, transparent, click-through except
+//   desktop  above the desktop icons, just below every app window, on all Spaces, transparent, click-through except
 //            over panels and orbs (the renderer hit-tests forwarded mouse moves and asks for clicks when needed)
 //   lifted   summoned ("Hey ARES" / ⌥Space, default): the same window rises above the apps, fully interactive, and
 //            sinks back when dismissed or when another app is clicked
@@ -10,7 +10,10 @@
 // everywhere. The starry backdrop below the icons is wallpaper.js.
 const { screen } = require('electron');
 
-const ICON_LEVEL_PLUS_ONE = -2147483602; // kCGDesktopIconWindowLevel + 1 (NSNormalWindowLevel is 0)
+// Just below normal app windows (NSNormalWindowLevel is 0). Not down in the desktop band (kCGDesktopIconWindowLevel + 1):
+// macOS treats clicks there as clicks on the wallpaper ("click wallpaper to reveal desktop" sweeps the windows away and
+// the click never arrives). Transparent and click-through, so the icons below still show and still take their clicks.
+const DESKTOP_LEVEL = -1;
 const SINK_MS = 240;                     // the renderer fades the lifted glass out first
 
 class Surface {
@@ -40,8 +43,9 @@ class Surface {
     if (w.isFullScreen()) { w.once('leave-full-screen', () => this.desktop()); w.setFullScreen(false); return; }
     if (this.name === 'window') this.windowBounds = w.getBounds();
     this.name = 'desktop';
-    w.setAlwaysOnTop(true, 'normal', ICON_LEVEL_PLUS_ONE);
+    w.setAlwaysOnTop(true, 'normal', DESKTOP_LEVEL);
     w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
+    w.setHiddenInMissionControl?.(true);
     w.setResizable(false); w.setMovable(false); w.setHasShadow(false);
     w.setFocusable(false); // clicking a panel never takes the keyboard from the app you're in
     w.setBounds(this.display().workArea);
@@ -57,6 +61,7 @@ class Surface {
     this.name = 'lifted';
     w.setFocusable(true);
     w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    w.setHiddenInMissionControl?.(true);
     w.setAlwaysOnTop(true, 'floating');
     w.setBounds(this.display().workArea);
     this.setInteractive(true);
@@ -79,6 +84,7 @@ class Surface {
     this.name = 'window';
     w.setAlwaysOnTop(false);
     w.setVisibleOnAllWorkspaces(false);
+    w.setHiddenInMissionControl?.(false);
     w.setFocusable(true); w.setResizable(true); w.setMovable(true); w.setHasShadow(true);
     const d = this.display().workArea;
     const b = this.windowBounds || { width: 1100, height: 720, x: Math.round(d.x + (d.width - 1100) / 2), y: Math.round(d.y + (d.height - 720) / 2) };
