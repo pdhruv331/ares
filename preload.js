@@ -81,7 +81,7 @@ contextBridge.exposeInMainWorld('ares', {
     on: (fn) => ipcRenderer.on('surface', (_e, s) => fn(s)),
     onMode: (fn) => ipcRenderer.on('surface-mode', (_e, m) => fn(m)),
     onIcons: (fn) => ipcRenderer.on('desk-icons', (_e, list) => fn(list)),
-    interactive: (on) => ipcRenderer.send('surface-interactive', on),
+    hits: (h) => ipcRenderer.send('surface-hits', h),
     test: (what) => ipcRenderer.send('test-surface', what), // development builds only
     testHear: (evt) => ipcRenderer.send('test-hear', evt),
     testDesk: (patch) => ipcRenderer.invoke('test-desk', patch),

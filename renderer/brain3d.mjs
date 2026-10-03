@@ -513,6 +513,8 @@ function start() {
       }
     },
     has: (id) => orbs.has(id) && !['sinking', 'fading'].includes(orbs.get(id).mode),
+    /** Where the clickable orbs are on screen (for the live desktop's click-through). */
+    hits() { return w ? [...orbs.values()].filter((o) => ['orbit', 'returning'].includes(o.mode) && o.alpha >= 0.3).map((o) => { const s = screenOf(o); return { x: s.x, y: s.y, r: Math.max(16, s.r * 2) }; }) : []; },
     screenPos(id) { const o = orbs.get(id); return o && w ? screenOf(o) : null; },
     /** Opening: the orb leaves its orbit, flies towards the viewer and flares. Resolves with where the panel should grow from. */
     async launch(id) {

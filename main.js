@@ -1084,7 +1084,7 @@ ipcMain.on('brain-reset', () => resetBrain());
 ipcMain.on('window-hide', () => hideWindow());
 ipcMain.on('window-fullscreen', () => toggleFullScreen());
 ipcMain.on('window-pin', (_e, pinned) => { if (surface.name === 'window') win.setAlwaysOnTop(pinned, 'floating'); });
-ipcMain.on('surface-interactive', (_e, on) => surface.setInteractive(Boolean(on)));
+ipcMain.on('surface-hits', (_e, h) => surface.setHits(h || {}));
 ipcMain.handle('surface-state', () => ({ name: surface.name, ...(wallpaper?.mainState() || {}) }));
 // Development only: inject what the listener heard (a test can't share the mic with the installed ARES)
 ipcMain.on('test-hear', (_e, evt) => { if (!app.isPackaged) listener.emit('event', evt); });

@@ -10,6 +10,11 @@
 // everywhere. The starry backdrop below the icons is wallpaper.js.
 const { screen } = require('electron');
 
+// On every Space without Electron's process-type juggling (by default it hides and re-shows the Dock icon to do this,
+// which made macOS switch Spaces and could leave the window behind on one Space)
+const ALL_SPACES = { visibleOnFullScreen: false, skipTransformProcessType: true };
+const HIT_MS = 40; // how often the pointer is checked against ARES's clickable areas as the desktop
+
 // Just below normal app windows (NSNormalWindowLevel is 0). Not down in the desktop band (kCGDesktopIconWindowLevel + 1):
 // macOS treats clicks there as clicks on the wallpaper ("click wallpaper to reveal desktop" sweeps the windows away and
 // the click never arrives). Transparent and click-through, so the icons below still show and still take their clicks.
@@ -25,6 +30,9 @@ class Surface {
     this.name = 'window';
     this.windowBounds = null; // where the classic window was last
     this.interactive = true;
+    this.hits = { rects: [], all: false, held: false }; // the renderer's clickable areas (window coordinates)
+    this.hitTimer = null;
+    win.setVisibleOnAllWorkspaces(true, ALL_SPACES);
     win.on('blur', () => { if (this.name === 'lifted' && !this.holdLift) setTimeout(() => { if (this.name === 'lifted' && !win.isFocused()) this.sink(); }, 120); });
     for (const e of ['move', 'resize']) win.on(e, () => { if (this.name === 'window' && !win.isFullScreen()) this.windowBounds = win.getBounds(); });
   }
@@ -44,7 +52,7 @@ class Surface {
     if (this.name === 'window') this.windowBounds = w.getBounds();
     this.name = 'desktop';
     w.setAlwaysOnTop(true, 'normal', DESKTOP_LEVEL);
-    w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
+    w.setVisibleOnAllWorkspaces(true, ALL_SPACES);
     w.setHiddenInMissionControl?.(true);
     w.setResizable(false); w.setMovable(false); w.setHasShadow(false);
     w.setFocusable(false); // clicking a panel never takes the keyboard from the app you're in
@@ -52,6 +60,7 @@ class Surface {
     this.setInteractive(false);
     w.showInactive();
     this.send('desktop');
+    this.checkPointer();
   }
 
   /** Summoned: the desktop rises above the apps. */
@@ -60,7 +69,7 @@ class Surface {
     if (w.isFullScreen()) { w.focus(); return; }
     this.name = 'lifted';
     w.setFocusable(true);
-    w.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    w.setVisibleOnAllWorkspaces(true, ALL_SPACES);
     w.setHiddenInMissionControl?.(true);
     w.setAlwaysOnTop(true, 'floating');
     w.setBounds(this.display().workArea);
@@ -83,7 +92,7 @@ class Surface {
     const w = this.win;
     this.name = 'window';
     w.setAlwaysOnTop(false);
-    w.setVisibleOnAllWorkspaces(false);
+    w.setVisibleOnAllWorkspaces(false, { skipTransformProcessType: true });
     w.setHiddenInMissionControl?.(false);
     w.setFocusable(true); w.setResizable(true); w.setMovable(true); w.setHasShadow(true);
     const d = this.display().workArea;
@@ -121,7 +130,26 @@ class Surface {
   /** Summoned to the user (visible and in front)? */
   get summoned() { return this.name === 'lifted' || (this.name === 'window' && this.win.isVisible()); }
 
-  /** Desktop only: the renderer asks for clicks while the pointer is over a panel, an orb or the status area. */
+  /** The renderer's clickable areas as the desktop: { rects: [{x,y,w,h}], all (a popover is open), held (dragging) }. */
+  setHits(h) { this.hits = { rects: h.rects || [], all: Boolean(h.all), held: Boolean(h.held) }; this.checkPointer(); }
+
+  /**
+   * As the desktop the window ignores the mouse except over ARES's own things. macOS doesn't pass mouse moves to a
+   * click-through window of an app that isn't active, so the pointer is checked here instead, against the areas the
+   * renderer reports: clicks land on panels, orbs and buttons whichever app is active, and everywhere else they go
+   * to the desktop and its icons.
+   */
+  checkPointer() {
+    const desk = this.name === 'desktop' || this.name === 'sinking';
+    if (!desk) { clearInterval(this.hitTimer); this.hitTimer = null; return this.setInteractive(true); }
+    this.hitTimer ??= setInterval(() => this.checkPointer(), HIT_MS);
+    const p = screen.getCursorScreenPoint(), b = this.win.getBounds();
+    const x = p.x - b.x, y = p.y - b.y;
+    const over = this.hits.all || this.hits.held
+      || this.hits.rects.some((r) => x >= r.x - 4 && x <= r.x + r.w + 4 && y >= r.y - 4 && y <= r.y + r.h + 4);
+    if (over !== this.interactive) this.setInteractive(over);
+  }
+
   setInteractive(on) {
     if (this.name === 'desktop' || this.name === 'sinking') {
       this.interactive = on;

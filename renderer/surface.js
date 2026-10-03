@@ -15,7 +15,7 @@ const Surface = (() => {
     name = next;
     for (const s of ['desktop', 'lifted', 'sinking', 'window']) root.classList.toggle(`s-${s}`, s === next);
     drawUntil = performance.now() + 2500;
-    if (next !== 'desktop') { interactive = true; held = false; }
+    if (next !== 'desktop') { held = false; lastHits = ''; }
     window.SCENE_NO_SPIN = next === 'desktop' || next === 'sinking'; // the brain holds still as the desktop
     dispatchEvent(new CustomEvent('surface', { detail: next }));
   }
@@ -30,35 +30,38 @@ const Surface = (() => {
     return herState === 'listening' || herState === 'speaking' ? 60 : 30;
   });
 
-  // ---- Click-through: forwarded mouse moves are hit-tested; the window takes clicks only where there's something
-  // of ARES's under the pointer, and keeps them while a button is held (dragging an orb across the desktop).
-  const HIT = '.dp, .dp-card, .titlebar button, .status-panel, .comms, .comms-tab, .work, .drop-card, .work-preview, #closeHint';
-  let interactive = false;
+  // ---- Click-through: the window takes clicks only over ARES's own things. The main process checks the pointer against
+  // the areas reported here (macOS doesn't pass mouse moves to a click-through window of an inactive app). While a
+  // detail card, COMMS, the status panel or Work is open, or a button is held (dragging an orb), it takes them all.
+  const HIT = '.dp, .dp-card, .titlebar button, .comms-tab, .drop-card, #closeHint';
   let held = false;
-  // Something open over the desktop (a detail card, COMMS, the status panel, Work): the whole window takes clicks, so
-  // one click anywhere closes it, as in the app (it can't have the keyboard here, so there's no Esc)
+  // Something open over the desktop: the whole window takes clicks, so one click anywhere closes it, as in the app
+  // (it can't have the keyboard here, so there's no Esc)
   const popover = () => { // (Dash, Work and Comms are later scripts' globals, not window properties)
     try { return Boolean(Dash.card || Work.isOpen || Comms.isOpen || !document.getElementById('statusPanel').hidden); } catch { return false; }
   };
-  function wants(x, y) {
-    if (held || popover()) return true;
-    const el = document.elementFromPoint(x, y);
-    if (el?.closest(HIT)) return !el.closest('[hidden]');
-    if (el?.closest('#subs') && document.getElementById('subs').innerText.trim()) return true; // a subtitle: click opens COMMS
-    return Boolean(window.JobOrbs?.pick?.(x, y));
-  }
-  function update(x, y) {
+  let lastHits = '';
+  function reportHits() {
     if (name !== 'desktop') return;
-    const on = wants(x, y);
-    if (on === interactive) return;
-    interactive = on;
-    window.ares.surface.interactive(on);
+    const rects = [];
+    for (const el of document.querySelectorAll(HIT)) {
+      if (el.closest('[hidden]')) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width && r.height) rects.push({ x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) });
+    }
+    const subs = document.getElementById('subs');
+    if (subs.innerText.trim()) { const r = subs.getBoundingClientRect(); rects.push({ x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }); }
+    for (const o of window.JobOrbs?.hits?.() || []) rects.push({ x: Math.round(o.x - o.r), y: Math.round(o.y - o.r), w: Math.round(o.r * 2), h: Math.round(o.r * 2) });
+    const hits = { rects, all: popover(), held };
+    const key = JSON.stringify(hits);
+    if (key === lastHits) return;
+    lastHits = key;
+    window.ares.surface.hits(hits);
   }
-  addEventListener('mousemove', (e) => update(e.clientX, e.clientY), true);
-  addEventListener('pointerdown', () => { held = true; }, true);
-  addEventListener('pointerup', (e) => { held = false; update(e.clientX, e.clientY); }, true);
-  addEventListener('pointercancel', () => { held = false; }, true);
-  document.addEventListener('mouseleave', () => { if (!held) update(-1, -1); });
+  setInterval(() => { if (!mode.paused) reportHits(); }, 120);
+  addEventListener('pointerdown', () => { held = true; reportHits(); }, true);
+  addEventListener('pointerup', () => { held = false; setTimeout(reportHits, 30); }, true);
+  addEventListener('pointercancel', () => { held = false; reportHits(); }, true);
 
   window.ares.surface.on(({ name: next }) => set(next));
   let pinned = false; // measuring: a forced mode the main process doesn't override (hold(null) releases it)
@@ -79,7 +82,7 @@ const Surface = (() => {
   return {
     get name() { return name; },
     get paused() { return name === 'desktop' && mode.paused; },
-    get interactive() { return interactive; },
+    get hits() { return lastHits ? JSON.parse(lastHits) : null; },
     hold(m) { pinned = Boolean(m); if (m) { applyMode(m); if (m.state) herState = m.state; } },
     /** ARES's state (for 60 fps while she listens or speaks). */
     state(s) { herState = s; },
