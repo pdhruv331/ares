@@ -99,6 +99,10 @@ function createWindow({ show }) {
     transparent: true,
     backgroundColor: '#00000000',
     acceptFirstMouse: true, // as the desktop it's never the key window: a click on a panel must still land
+    // A non-activating panel: clicking it (a dashboard panel on the live desktop) never activates ARES, so macOS never
+    // switches Spaces to "go to" ARES (it's on every Space) and the app you're in keeps the keyboard. Lifted or as a
+    // window it still becomes the key window and takes typing; native full screen still works.
+    type: 'panel',
     fullscreenable: true,
     hasShadow: true,
     show: false,
