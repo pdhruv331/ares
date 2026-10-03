@@ -3,6 +3,7 @@
 // Nominatim + the public OSRM router, both keyless), what's playing in Spotify or Music, and the few important unread
 // emails (Claude Code's Gmail connector, read-only) for the INBOX panel.
 // Everything is pushed to the window as { type, ... } messages through `send`; snapshot() is the current state.
+const { observe: observeUsage } = require('./claude-usage');
 const fs = require('fs');
 const { spawn, execFile } = require('child_process');
 const { EventEmitter } = require('events');
@@ -171,6 +172,7 @@ class Dashboard extends EventEmitter {
         for (const line of out.split('\n')) {
           let m;
           try { m = JSON.parse(line); } catch { continue; }
+          observeUsage(m); // the plan's 5-hour/weekly limits (claude-usage.js)
           if (m.type === 'user' && m.message?.content?.some?.((c) => c.type === 'tool_result' && !c.is_error)) looked = true;
           if (m.type === 'result') result = m.result || '';
         }

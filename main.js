@@ -40,6 +40,7 @@ const { Dashboard } = require('./dashboard');
 const { Voice } = require('./voice');
 const { Voicemail } = require('./voicemail');
 const { Wallpaper } = require('./wallpaper');
+const { ClaudeUsage } = require('./claude-usage');
 const { Surface } = require('./surface');
 const { DeskMode } = require('./desk');
 const { judge: judgeAddressed } = require('./addressed');
@@ -70,6 +71,7 @@ let relay;   // the Cloudflare relay (relay.js): FCM pushes to the Android app, 
 let dashboard; // the dashboard's live data (dashboard.js): weather, calendar, leave-by, now playing
 let voicemail; // voicemails from the Twilio fallback when the phone agent can't answer (voicemail.js)
 let wallpaper; // the starry backdrop below the desktop icons, the lock-screen still (wallpaper.js)
+let claudeUsage; // the Claude plan's 5-hour/weekly limits, from Claude Code's rate-limit events (claude-usage.js)
 let desk;      // desk mode (desk.js): no wake word needed while the user is at the Mac
 let surface;   // where the ARES window lives: the live desktop, lifted above the apps, or a window (surface.js)
 let speech;    // her voice (voice.js): Katherine on ElevenLabs, the local Kokoro backup, budget mode, phrase cache, credit watch
@@ -1411,7 +1413,7 @@ ipcMain.handle('job-delete', async (_e, id) => {
 ipcMain.handle('ui-prefs', () => uiPrefs());
 // Where the user left each dashboard panel (renderer/dash.js), and the dashboard's current data
 ipcMain.on('ui-panels', (_e, panels) => { if (panels && typeof panels === 'object') writeUi({ [panelsKey()]: panels }); });
-ipcMain.handle('dash-state', () => ({ ...(dashboard?.snapshot() || {}), timers: bridge?.timers() || [], call: liveCall() }));
+ipcMain.handle('dash-state', () => ({ ...(dashboard?.snapshot() || {}), timers: bridge?.timers() || [], call: liveCall(), claude: claudeUsage?.statusLines() || [] }));
 ipcMain.handle('dash-city', (_e, city) => {
   city = String(city || '').trim().slice(0, 80);
   writeSettings({ weatherCity: city || undefined });
@@ -1652,6 +1654,14 @@ app.on('second-instance', () => showWindow());
 
 app.whenReady().then(async () => {
   log('ARES starting', { version: app.getVersion(), packaged: app.isPackaged });
+  claudeUsage = new ClaudeUsage({ file: path.join(app.getPath('userData'), 'claude-usage.json'), log });
+  claudeUsage.on('change', () => toDash({ type: 'claude', lines: claudeUsage.statusLines() }));
+  // 80% / 95% of a window: a line on screen (not spoken), the ticker, and the phone if they're away from the Mac
+  claudeUsage.on('warn', (w) => {
+    notice(w.line);
+    toDash({ type: 'activity', text: `claude ${w.label} limit: ${w.pct}% used` });
+    if (!atMac()) pushToPhones({ title: `Claude ${w.label} limit: ${w.pct}%`, body: w.line, tag: `claude-${w.window}` }).catch?.(() => {});
+  });
 
   // Tools: ARES's own MCP server (Mac controls, timers, confirmation gate), reached over a local bridge
   contacts = new Contacts(path.join(app.getPath('userData'), 'contacts.json'));
@@ -1680,6 +1690,7 @@ app.whenReady().then(async () => {
     onPhoneAction,
     onNotify,
     work: workControls(),
+    claudeUsage: () => claudeUsage.describe(),
     calls,
     onTimers: (list) => toDash({ type: 'timers', timers: list }),
     onTimerDone: (label, source) => {

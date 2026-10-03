@@ -11,7 +11,7 @@ const SAFE_WRITES = /^(create_draft|draft_)/i;
 // What counts as the user saying "yes" (must be how their latest message starts).
 const AFFIRMATIVE = /^\s*(yes|yeah|yep|yup|sure|go ahead|do it|send it|book it|delete it|move it|confirm(ed)?|please do|ok(ay)?|absolutely|correct|that'?s right|affirmative|go for it)\b/i;
 
-function startBridge({ onTimerDone, onTimers = () => {}, onPhoneAction, onNotify, findContact, memory, teachPhrase, work, calls, log }) {
+function startBridge({ onTimerDone, onTimers = () => {}, onPhoneAction, onNotify, findContact, memory, teachPhrase, work, calls, claudeUsage, log }) {
   const token = crypto.randomBytes(24).toString('hex');
   const timers = new Map(); // label -> { handle, endsAt }
   let lastUserText = '';
@@ -63,6 +63,7 @@ function startBridge({ onTimerDone, onTimers = () => {}, onPhoneAction, onNotify
       timersChanged();
       return { message: `Timer "${label}" set for ${describe(ms)}.` };
     },
+    '/claude-usage': () => ({ message: claudeUsage ? claudeUsage() : 'Claude usage tracking is not available.' }),
     '/timers': () => ({
       message: timers.size
         ? [...timers].map(([l, t]) => `${l}: ${describe(t.paused ? t.left : t.endsAt - Date.now())} left${t.paused ? ' (paused)' : ''}`).join('; ')

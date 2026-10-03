@@ -49,6 +49,7 @@ const Dash = (() => {
   // Status: "● all systems ok", or amber with a short reason when something breaks. Click for the full list.
   const health = {}; // key -> reason ('' = fine)
   let voiceInfo = [];  // which voice she's using and the credits left (not problems: shown in the panel, never amber)
+  let claudeInfo = []; // the Claude plan's 5-hour and weekly limits (claude-usage.js), amber from 80%
   let integrations = null;
   const GOOGLE = { calendar: 'Calendar', gmail: 'Gmail', drive: 'Drive' };
   // What's broken, and the one click toward fixing it
@@ -87,6 +88,15 @@ const Dash = (() => {
         b.addEventListener('click', () => window.ares.dash.act(x.url ? 'url' : 'fix', x.url ? { url: x.url } : { key: x.fix }));
         row.appendChild(b);
       }
+      box.appendChild(row);
+    }
+    for (const line of claudeInfo) {
+      const row = document.createElement('div');
+      row.className = 'fix-row';
+      row.innerHTML = '<span></span>';
+      row.firstChild.textContent = line;
+      const pct = Number(/(\d+)% used/.exec(line)?.[1]);
+      if (!(pct >= 80)) row.style.color = 'var(--muted)';
       box.appendChild(row);
     }
     for (const line of voiceInfo) {
@@ -1463,6 +1473,7 @@ const Dash = (() => {
       case 'activity': activityAt = Date.now(); say(msg.text, 'work'); break;
       case 'health': setHealth(msg.key, msg.ok, msg.reason); break;
       case 'voice': voiceInfo = [msg.line, msg.credits].filter(Boolean); if (!$('statusPanel').hidden) renderFixes(); break;
+      case 'claude': claudeInfo = msg.lines || []; if (!$('statusPanel').hidden) renderFixes(); break;
     }
     reconcile();
   });
@@ -1506,6 +1517,7 @@ const Dash = (() => {
     window.ares.dash.state().then((s) => {
       setWeather(s.weather);
       Object.assign(data, { events: s.events || [], leave: s.leave, music: s.music, timers: s.timers || [], call: s.call, emails: s.inbox || [] });
+      claudeInfo = s.claude || [];
       reconcile();
     });
   });

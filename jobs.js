@@ -2,6 +2,7 @@
 // the background, so ARES stays free to chat. Each job has its own folder under <userData>/work/<id>/ and
 // its own Claude session (so follow-ups can --resume it). Jobs and results survive restarts (work/jobs.json).
 // Subscription only: ANTHROPIC_API_KEY is stripped from every worker's environment.
+const { observe: observeUsage } = require('./claude-usage');
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const crypto = require('crypto');
@@ -465,6 +466,7 @@ class Jobs extends EventEmitter {
         if (!line) continue;
         let msg;
         try { msg = JSON.parse(line); } catch { continue; }
+        observeUsage(msg); // the plan's 5-hour/weekly limits (claude-usage.js)
         if (msg.type === 'assistant') {
           for (const block of msg.message?.content || []) {
             if (block.type === 'tool_use' && block.name === 'TodoWrite') {

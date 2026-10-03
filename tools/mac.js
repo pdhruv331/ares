@@ -77,6 +77,11 @@ tool('set_timer', 'Start a timer. ARES announces it out loud when it finishes.',
 
 tool('list_timers', 'List running timers.', {}, async () => (await bridge('/timers', {})).message);
 
+// ---- Claude plan limits ---------------------------------------------------------------
+tool('claude_usage', "How much of the user's Claude subscription limits is used and left: the 5-hour window and the weekly window, "
+  + 'with reset times. Says whether each number is exact (reported by Claude Code) or an estimate. Use for "how much of my Claude limit is left?".',
+  {}, async () => (await bridge('/claude-usage', {})).message);
+
 tool('cancel_timer', 'Cancel a running timer by its label (or all timers).',
   { label: z.string().optional() },
   async ({ label }) => (await bridge('/timer/cancel', { label })).message);

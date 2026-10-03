@@ -1,5 +1,6 @@
 // ARES's reasoning core: Claude via the Claude Code CLI in headless mode (`claude -p`),
 // so it runs on the user's existing Claude subscription with no API charges.
+const { observe: observeUsage } = require('./claude-usage');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -110,6 +111,7 @@ function spawnBrain() {
       if (!line || proc !== child) continue; // ignore a process that's been replaced
       let msg;
       try { msg = JSON.parse(line); } catch { continue; }
+      observeUsage(msg); // the plan's 5-hour/weekly limits (claude-usage.js)
       if (msg.type === 'control_response' && msg.response?.subtype === 'error') {
         console.error('Claude Code control error:', msg.response.error); // e.g. a model switch refused
         if (/^model-/.test(msg.response.request_id || '')) current = null; // unknown: switch again next turn
