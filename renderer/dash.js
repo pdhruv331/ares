@@ -125,9 +125,16 @@ const Dash = (() => {
     panel.hidden = !panel.hidden;
     if (panel.hidden) return;
     renderFixes();
+    // Hang it from the pill, wherever the pill is (on the live desktop it sits top-left, away from the icons):
+    // left-aligned under a pill on the left half, right-aligned under one on the right, always inside the window
+    const pill = $('statusBtn').getBoundingClientRect(), frame = panel.offsetParent.getBoundingClientRect();
+    const pw = panel.offsetWidth, onLeft = pill.left + pill.width / 2 < frame.left + frame.width / 2;
+    const left = onLeft ? pill.left - frame.left : pill.right - frame.left - pw;
+    Object.assign(panel.style, { left: `${clamp(left, 14, frame.width - pw - 14)}px`, right: 'auto', top: `${Math.round(pill.bottom - frame.top + 10)}px` });
     window.dispatchEvent(new Event('status-open'));
     // The same unfold as a detail card: a line from the pill, then the full list
-    if (!reduce()) panel.animate([{ clipPath: 'inset(0 0 calc(100% - 2px) 60%)', filter: 'brightness(2)' }, { clipPath: 'inset(0 0 calc(100% - 2px) 0)', offset: 0.35 },
+    const from = onLeft ? 'inset(0 60% calc(100% - 2px) 0)' : 'inset(0 0 calc(100% - 2px) 60%)';
+    if (!reduce()) panel.animate([{ clipPath: from, filter: 'brightness(2)' }, { clipPath: 'inset(0 0 calc(100% - 2px) 0)', offset: 0.35 },
       { clipPath: 'inset(0 0 0 0)', filter: 'brightness(1)' }], { duration: 380, easing: 'cubic-bezier(.3,.7,.4,1)' });
   });
   document.addEventListener('click', (e) => { if (!$('statusPanel').contains(e.target)) $('statusPanel').hidden = true; });
