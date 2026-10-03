@@ -20,14 +20,13 @@ const Surface = (() => {
     dispatchEvent(new CustomEvent('surface', { detail: next }));
   }
 
-  // ---- Frame pacing on the desktop: paused when covered, full screen, locked or asleep; 30 fps, 60 while she listens
-  // or speaks, 18 on battery, a still frame in Low Power Mode. Lifted or as a window, Perf's normal rules apply.
+  // ---- Frame pacing on the desktop: paused when covered, full screen, locked or asleep (nothing drawn at all); 60 fps on
+  // mains power, 30 on battery, a still frame in Low Power Mode. Lifted or as a window, Perf's normal rules apply.
   Perf.setPolicy(() => {
     if (name !== 'desktop') return undefined;
     if (mode.paused) return 0;
     if (mode.still) return performance.now() < drawUntil ? 30 : 0;
-    if (mode.battery) return 18;
-    return herState === 'listening' || herState === 'speaking' ? 60 : 30;
+    return mode.battery ? 30 : 60;
   });
 
   // ---- Click-through: the window takes clicks only over ARES's own things. The main process checks the pointer against

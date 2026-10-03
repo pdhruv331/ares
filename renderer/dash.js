@@ -260,9 +260,18 @@ const Dash = (() => {
     }
     walls = rs.filter((r) => r.x + r.w > 0 && r.y + r.h > 0 && r.x < W && r.y < H);
     wallsVersion++;
-    // The top bar's clock, status and WORK button step left of icons in the top-right corner (never over an icon)
-    const topIcons = walls.filter((r) => r.y < 0);
-    document.querySelector('.titlebar-right').style.marginRight = topIcons.length ? `${Math.max(0, W - Math.min(...topIcons.map((r) => r.x)) - 4)}px` : '';
+    placeTopBar();
+  }
+  // As the desktop the top bar's clock, status and WORK button sit on the left beside the ARES name, out of the way of
+  // desktop icons (macOS puts them top-right). Only if icons sit top-left instead do they go right (and never over one).
+  function placeTopBar() {
+    const bar = document.querySelector('.titlebar');
+    const right = document.querySelector('.titlebar-right');
+    const top = walls.filter((r) => r.y < 0);
+    const desk = surfaceName !== 'window';
+    const leftBusy = top.some((r) => r.x < W * 0.45);
+    bar.classList.toggle('desk-left', desk && !leftBusy);
+    right.style.marginRight = desk && leftBusy && top.some((r) => r.x > W * 0.55) ? `${Math.max(0, W - Math.min(...top.filter((r) => r.x > W * 0.55).map((r) => r.x)) - 4)}px` : '';
   }
   const hitsWall = (x, y, w, h, pad = 0) => walls.some((r) => x < r.x + r.w + pad && r.x < x + w + pad && y < r.y + r.h + pad && r.y < y + h + pad);
   const circleWallOverlap = (cx, cy, r) => walls.reduce((sum, q) => {
@@ -272,7 +281,7 @@ const Dash = (() => {
   /** Move (and if it must, shrink) the brain to the clearest spot near the middle; the halo and job orbs come with it. */
   function placeBrain() {
     let best = { dx: 0, dy: 0, s: 1, score: walls.length ? Infinity : 0 };
-    if (!walls.length) document.querySelector('.titlebar-right').style.marginRight = '';
+    if (!walls.length) placeTopBar();
     if (walls.length) {
       const R0 = Math.min(W, H) * 0.44;
       for (const s of [1, 0.9, 0.8, 0.7, 0.62, 0.55]) {

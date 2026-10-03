@@ -7,8 +7,10 @@
 // The listener's own always-listening mode does the hearing (on-device); main.js decides what gets answered.
 const EventEmitter = require('events');
 
-// Mic users that aren't a call or the user talking to something else: ARES herself, and macOS's audio bookkeeping
-const NOT_A_CALL = [/^com\.dhruv\.ares/, /^historicalaudiod$/, /^com\.github\.Electron/, /^corespeechd$/, /^com\.apple\.corespeechd$/];
+// Mic users that aren't a call: ARES herself, macOS's audio bookkeeping, and macOS's speech recognition (CoreSpeech and
+// friends), which is what ARES's own listener hears through (and Siri's "Hey Siri")
+const NOT_A_CALL = [/^com\.dhruv\.ares/, /^historicalaudiod$/, /^com\.github\.Electron/, /corespeech/i, /speechrecognition/i,
+  /^com\.apple\.(siri|assistantd|SpeechRecognitionCore|speech)/i, /^(localspeechrecognition|speechrecognitiond|assistantd)$/];
 const CALL_APPS = { 'us.zoom.xos': 'Zoom', 'com.apple.FaceTime': 'FaceTime', avconferenced: 'FaceTime', 'com.microsoft.teams2': 'Teams',
   'com.microsoft.teams': 'Teams', 'com.google.Chrome': 'Chrome (Meet?)', 'com.apple.Safari': 'Safari', 'com.tinyspeck.slackmacgap': 'Slack',
   'com.hnc.Discord': 'Discord', 'net.whatsapp.WhatsApp': 'WhatsApp', 'com.apple.mobilephone': 'Phone', 'com.apple.TelephonyUtilities': 'Phone' };
@@ -56,7 +58,7 @@ class DeskMode extends EventEmitter {
     else if (!this.voiceId.enrolled) reason = 'needs Voice ID';
     else if (this.locked) reason = 'locked';
     else if (idle > o.idleMin * 60) reason = 'idle';
-    else if (this.mic.length) reason = `on a call (${CALL_APPS[this.mic[0]] || this.mic[0]})`;
+    else if (this.mic.length) reason = CALL_APPS[this.mic[0]] ? `on a call (${CALL_APPS[this.mic[0]]})` : `${this.mic[0]} is using the mic`;
     else if (this.quiet) reason = 'told to go quiet';
     const active = reason === 'at the Mac';
     if (active === this.state.active && reason === this.state.reason) return;

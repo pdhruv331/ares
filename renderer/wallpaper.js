@@ -10,7 +10,7 @@
   const core = document.querySelector('.core');
 
   // ---- Frame rate --------------------------------------------------------------------------------------
-  // 30 fps; 60 only while she's listening or speaking; 18 and a simpler scene on battery; nothing at all while
+  // 60 fps on mains, 30 and a simpler scene on battery; nothing at all while
   // paused (covered, full-screen app, locked, display asleep). Low Power Mode holds a still frame, after the
   // first couple of seconds have drawn one.
   const mode = { paused: false, still: false, battery: false, fps: 30 };
@@ -20,8 +20,8 @@
     if (MODE === 'still') return 60;
     if (mode.paused) return 0;
     if (mode.still) return performance.now() < drawUntil ? 30 : 0;
-    if (mode.battery) return 18;
-    return state === 'listening' || state === 'speaking' ? 60 : mode.fps;
+    if (MODE === 'saver') return mode.battery ? 20 : 30; // the screen saver stays light
+    return mode.battery ? 30 : 60;
   });
   function setMode(m) {
     const wasBattery = mode.battery;

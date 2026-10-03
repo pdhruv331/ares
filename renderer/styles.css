@@ -558,3 +558,5 @@ html.s-sinking .panels, html.s-sinking .console { transition: opacity 0.2s; }
 .ear { font-size: 9px; letter-spacing: 0.2em; color: var(--muted); border: 1px solid rgba(93, 135, 151, 0.35); border-radius: 9px; padding: 2px 7px 1px; margin-left: 6px; }
 .ear.open { color: var(--cyan); border-color: var(--cyan-dim); box-shadow: 0 0 8px rgba(62, 230, 255, 0.18); }
 .ear.muted { color: var(--amber); border-color: rgba(255, 181, 71, 0.4); }
+/* The live desktop: the top bar's status group sits beside the ARES name, clear of desktop icons (dash.js placeTopBar) */
+.titlebar.desk-left { justify-content: flex-start; gap: 22px; }
