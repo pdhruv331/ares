@@ -265,13 +265,13 @@ class Theme {
   get aresFront() { return this.selfIds.includes(this.frontId); }
   /**
    * The titles across the bar's left half, as many as fit before the notch; the rest go under a last "»" menu.
-   * Widths are worked out from the bar's monospaced font (7 pt a character at 11.5 pt, plus 12 pt of padding).
+   * Widths are worked out from the bar's monospaced font (about 6.7 pt a character at 11.5 pt, plus 12 pt of padding).
    */
   async layoutMenus(titles) {
     const r = await this.bar.query('ares.status');
     const rect = r && Object.values(r.bounding_rects || {})[0];
     const start = rect && rect.origin[0] > 0 ? rect.origin[0] + rect.size[0] + 5 : 236 + Math.max(0, String(this.bar.state.status.text).length - 14) * 7;
-    const width = (t, i) => String(t).length * 7 + 12 + (i === 0 ? 10 : 0);
+    const width = (t, i) => String(t).length * 6.7 + 12 + (i === 0 ? 10 : 0);
     const room = this.notchLeft - 8 - start;
     let used = 0, fit = 0;
     for (; fit < titles.length && fit < MENUS; fit++) {
@@ -339,8 +339,13 @@ class Theme {
     const key = `${app}|${menuPath}`;
     const render = (items) => {
       const entries = back ? [{ label: '‹ Back', run: back, keepOpen: true }, { sep: true }] : [];
+      let prev = null;
       items.forEach((it, k) => {
-        if (it.sep) { if (entries.length && !entries[entries.length - 1].sep) entries.push({ sep: true }); return; }
+        if (it.sep) { if (entries.length && !entries[entries.length - 1].sep) entries.push({ sep: true }); prev = null; return; }
+        // macOS's hidden ⌥ alternates (they replace the item above only while ⌥ is held) and repeats: not shown
+        const base = (key) => key.replace(/[⌃⌥⇧]/g, '');
+        if (prev && (it.t === prev.t || (it.key.includes('⌥') && !prev.key.includes('⌥') && base(it.key) === base(prev.key)))) return;
+        prev = it;
         const itemPath = `${menuPath}.${k}`;
         entries.push({ label: it.t, mark: it.mark, key: it.key, enabled: it.e, sub: it.sub,
           run: it.sub ? () => this.appMenu(owner, menuId, itemPath, () => this.appMenu(owner, menuId, menuPath, back)) : () => run(this.helper, ['menu-press', app, itemPath]).catch(() => {}),
