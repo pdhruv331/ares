@@ -23,7 +23,8 @@ const which = (name) => BREW.map((d) => path.join(d, name)).find((p) => fs.exist
 const MENUS = 14; // menu title slots in the bar
 const ROWS = 32;  // rows made once per drop-down (filled and shown, never created while the pointer moves)
 // Everything with a drop-down: the ARES mark, the status pill, WORK, and the menu titles
-const OWNERS = ['ares.mark', 'ares.status', 'ares.jobs', ...Array.from({ length: MENUS }, (_, i) => `menu.${i}`)];
+// (The status pill and WORK have drop-downs ARES draws herself: theme-drop.js)
+const OWNERS = ['ares.mark', ...Array.from({ length: MENUS }, (_, i) => `menu.${i}`)];
 
 // ARES palette (0xAARRGGBB)
 const C = {
@@ -156,7 +157,7 @@ sketchybar --add item ares.mark left --set ares.mark icon='◉' icon.font='${fon
 sketchybar --add item ares.status left --set ares.status icon='●' icon.font='${font('Bold', 8.0)}' label='all systems ok' \\
   label.color=${C.text} background.color=${C.cyanFaint} background.border_color=${C.cyanDim} background.border_width=1 \\
   background.drawing=on icon.padding_left=10 label.padding_right=10 click_script="${click('menu?i=status')}" script=${P('menu.sh')} \\
-  ${popupStyle} --subscribe ares.status mouse.entered mouse.exited mouse.exited.global
+  --subscribe ares.status mouse.entered mouse.exited
 sketchybar --add item ares.call left --set ares.call drawing=off icon='●' icon.font='${font('Bold', 9.0)}' icon.color=${C.green} \\
   label.color=${C.green} background.color=${C.greenDim} background.drawing=on icon.padding_left=10 label.padding_right=10 \\
   click_script="${click('open?view=call')}"
@@ -180,7 +181,7 @@ sketchybar --add item ares.voice right --set ares.voice icon='◌' icon.color=${
 sketchybar --add item ares.jobs right --set ares.jobs icon='●' icon.font='${font('Bold', 9.0)}' icon.color=${C.muted} label='WORK' \\
   label.color=${C.muted} background.color=${C.none} background.border_color=${C.cyanFaint} background.border_width=1 background.drawing=on \\
   icon.padding_left=10 label.padding_right=10 click_script="${click('menu?i=work')}" script=${P('menu.sh')} \\
-  ${popupStyle} popup.align=right --subscribe ares.jobs mouse.entered mouse.exited mouse.exited.global
+  --subscribe ares.jobs mouse.entered mouse.exited
 # The watchdog (never drawn)
 sketchybar --add item ares.watch right --set ares.watch drawing=off updates=on update_freq=15 script=${P('watch.sh')}
 

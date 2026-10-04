@@ -23,6 +23,7 @@ const { Dock } = require('./theme-dock');
 const { Icons } = require('./theme-icons');
 const { Notify } = require('./theme-notify');
 const { AppThemes } = require('./theme-apps');
+const { Drop } = require('./theme-drop');
 
 const SE = (what) => `tell application "System Events" to tell ${what}`;
 // Flipped through System Events (so the change shows at once); the preference keys underneath are saved too and
@@ -37,6 +38,7 @@ const SCRIPTS = {
 const CYAN_HIGHLIGHT = '0.243137 0.901961 1.000000 Other';
 const SOUND = path.join(os.homedir(), 'Library', 'Sounds', 'ARES.aiff');
 const ARES_MENUS = ['ares', 'listen', 'voice', 'work', 'view', 'phone']; // the bar's titles while ARES is in front
+const DROPS = ['status', 'work']; // the bar items whose drop-downs ARES draws herself (theme-drop.js)
 const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 class Theme {
@@ -60,6 +62,7 @@ class Theme {
     this.dock = new Dock({ dir: this.dir, helper: o.helper, log: o.log, appDir: o.appDir, onSummon: () => o.onOpen('summon'),
       onAccessibility: () => this.askAccessibility(), onFront: (id) => this.front(id),
       readOpts: () => this.opts.dock, saveOpts: (p) => this.save({ dock: { ...this.opts.dock, ...p } }) });
+    this.drop = new Drop({ log: o.log, appDir: o.appDir, onAct: (a) => this.dropAct(a) }); // status + WORK, drawn by ARES
     this.popups = {}; // menuId -> [{ run }]: what each line of an open drop-down does
     this.hoverSeq = 0;
     this.icons = new Icons({ dir: this.dir, helper: o.helper, originals: this.originals, log: o.log, appDir: o.appDir });
@@ -108,6 +111,7 @@ class Theme {
     await step('dock', () => this.dock.start());
     if (!this.live) { this.dock.stop(); return; }
     await step('notifications', () => { if (this.opts.notifications) this.notify.start(); });
+    await step('drop-downs', () => this.drop.start());
     await step('icons', () => this.icons.watch());
     this.updateOrb();
     await step('dock settings', () => this.resumeDock());
@@ -122,6 +126,7 @@ class Theme {
     if (!quitting) this.onLive?.(false); // quitting: ARES's window is already gone
     this.dock.stop();
     this.notify.stop();
+    this.drop.stop();
     this.icons.unwatch();
     this.server?.close();
     this.server = null;
@@ -315,6 +320,8 @@ class Theme {
   }
   hover(i) {
     clearTimeout(this.hoverTimer);
+    if (DROPS.includes(i)) return this.dropHover(i);
+    this.drop.hide();
     if (this.openId === String(i)) return; // already open
     const seq = ++this.hoverSeq;
     const filled = this.entriesFor(i).then((entries) => {
@@ -330,12 +337,17 @@ class Theme {
       this.bar.show(this.ownerOf(i));
     }, this.openId ? 0 : 120);
   }
-  unhover(i) { if (this.openId !== String(i)) { this.hoverSeq++; clearTimeout(this.hoverTimer); } }
+  unhover(i) {
+    if (DROPS.includes(i)) { if (this.dropKind !== i || !this.drop.isOpen) { this.hoverSeq++; clearTimeout(this.hoverTimer); } return; }
+    if (this.openId !== String(i)) { this.hoverSeq++; clearTimeout(this.hoverTimer); }
+  }
   closed(i) { if (this.openId === String(i)) this.openId = null; }
   /** A click on a title: open it now (hover may already have; then it simply stays open). */
   async openMenu(i) {
     clearTimeout(this.hoverTimer);
     this.hoverSeq++;
+    if (DROPS.includes(i)) return this.dropOpen(i, true);
+    this.drop.hide();
     if (this.openId === String(i)) return;
     this.show(i, await this.entriesFor(i));
   }
@@ -414,7 +426,62 @@ class Theme {
     }
   }
 
-  // ---- The status pill and WORK as drop-downs ----------------------------------------------------------------------
+  // ---- The status pill and WORK: drawn by ARES (theme-drop.js) --------------------------------------------------------
+  async dropHover(i) {
+    if (this.drop.isOpen && this.dropKind === i) return;
+    const seq = ++this.hoverSeq;
+    const filled = this.dropFill(i);
+    this.hoverTimer = setTimeout(async () => {
+      await filled;
+      if (seq !== this.hoverSeq) return;
+      this.bar.closePopups(); this.openId = null;
+      this.drop.show();
+    }, this.openId || this.drop.isOpen ? 0 : 120);
+  }
+  async dropOpen(i) {
+    await this.dropFill(i);
+    this.bar.closePopups(); this.openId = null;
+    this.drop.show();
+  }
+  /** Fill the drop-down for i ('status' | 'work') under its bar item, ready to show. */
+  async dropFill(i) {
+    const r = await this.bar.query(i === 'status' ? 'ares.status' : 'ares.jobs');
+    const rect = r && Object.values(r.bounding_rects || {})[0];
+    const anchor = rect && rect.origin[0] > 0
+      ? { x: rect.origin[0], w: rect.size[0], h: this.menubarHeight || 33, align: i === 'work' ? 'right' : 'left' }
+      : { x: i === 'work' ? (this.notchLeft || 700) + 200 : 110, w: 120, h: this.menubarHeight || 33, align: i === 'work' ? 'right' : 'left' };
+    this.dropKind = i;
+    this.drop.fill(i, i === 'status' ? await this.statusData() : this.workData(), anchor);
+    clearInterval(this.dropTimer);
+    // While the status drop-down is open: live CPU and memory every 2 s
+    if (i === 'status') this.dropTimer = setInterval(async () => { if (this.drop.isOpen && this.dropKind === 'status') this.drop.update('status', await this.statusData()); else clearInterval(this.dropTimer); }, 2000);
+  }
+  async statusData() {
+    const d = this.statusDetail || {};
+    return { problems: d.problems || [], claude: d.claude || [], voice: d.voice || [], integrations: d.integrations || [],
+      system: await this.systemStats().catch(() => null) };
+  }
+  workData() {
+    const list = this.jobList || [];
+    const slim = (j) => ({ id: j.id, title: j.title, status: j.status, ask: j.status === 'approval' ? j.approval?.what : '' });
+    const active = list.filter((j) => ['running', 'queued', 'approval'].includes(j.status));
+    const recent = list.filter((j) => !active.includes(j) && !j.dismissed).sort((a, b) => (b.finished || b.created || 0) - (a.finished || a.created || 0)).slice(0, 6);
+    return { active: active.map(slim), recent: recent.map(slim) };
+  }
+  /** A click in the drop-down. */
+  dropAct(a) {
+    this.log('theme drop act', { type: a?.type });
+    switch (a?.type) {
+      case 'fix': { const p = a.problem || {}; return this.dashAct(p.url ? 'url' : 'fix', p.url ? { url: p.url } : { key: p.fix }); }
+      case 'recheck': return this.dashAct('fix', { key: 'recheck' });
+      case 'answer': return this.jobAnswer?.(a.id, Boolean(a.yes));
+      case 'job': this.drop.hide(); return this.onOpen(`job:${a.id}`);
+      case 'work': this.drop.hide(); return this.openFromBar('work');
+      case 'folder': { this.drop.hide(); const f = this.menuSections().work.find((x) => /Work Folder/.test(x.label || '')); return f?.click(); }
+    }
+  }
+
+  // ---- The status pill and WORK as SketchyBar drop-downs (no longer used for hover; kept for the "»"-style fallback) --
   async statusEntries() {
     const d = this.statusDetail || {};
     const out = [];
@@ -594,10 +661,12 @@ class Theme {
     if (!s || typeof s !== 'object') return;
     this.lastStatus = s;
     this.statusDetail = s; // problems, Claude limits, voice, integrations: the status drop-down
+    if (this.drop?.isOpen && this.dropKind === 'status') this.statusData().then((d) => this.drop.update('status', d));
     if (this.live) this.bar.status({ ok: Boolean(s.ok), text: String(s.text || '') });
   }
   jobs(list) {
     this.jobList = list;
+    if (this.drop?.isOpen && this.dropKind === 'work') this.drop.update('work', this.workData());
     const working = list.filter((j) => ['running', 'queued'].includes(j.status)).length;
     const approval = list.filter((j) => j.status === 'approval').length;
     if (this.live) this.bar.jobs({ working, approval });

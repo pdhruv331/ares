@@ -1925,7 +1925,7 @@ app.whenReady().then(async () => {
     log, readSettings, writeSettings, supportDir: app.getPath('userData'), appDir: __dirname, onOpen: openView, brainVisible,
     menuSections, onMenuAction: () => refreshTray(), selfIds: ['com.dhruv.ares', 'com.github.Electron'],
     onLive: () => { if (win && !win.isDestroyed()) win.webContents.send('ui-prefs', uiPrefs()); }, // never while quitting
-    systemStats, dashAct,
+    systemStats, dashAct, jobAnswer: (id, yes) => jobs.answer(id, yes), // the WORK drop-down's Approve / Decline (a click: the owner)
     helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(__dirname, 'native', 'build', 'ares-theme'),
   });
   wallpaper.on('desk', () => theme.updateOrb());
