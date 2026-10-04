@@ -75,6 +75,11 @@ contextBridge.exposeInMainWorld('ares', {
   onListener: (fn) => ipcRenderer.on('listener-event', (_e, evt) => fn(evt)),
   log: (...parts) => ipcRenderer.send('log', ...parts),
   scene: (msg) => ipcRenderer.send('scene', msg), // to the wallpaper (renderer/scene-link.js)
+  // The ARES theme (theme.js): the status pill for its menu bar, and the views its bar, dock and notifications open
+  theme: {
+    status: (s) => ipcRenderer.send('theme-status', s),
+    onOpen: (fn) => ipcRenderer.on('theme-open', (_e, view) => fn(view)),
+  },
   // Where this window lives (surface.js): the live desktop, lifted above the apps, or a window
   surface: {
     state: () => ipcRenderer.invoke('surface-state'),

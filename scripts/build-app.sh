@@ -19,6 +19,10 @@ echo "› Compiling desktop helper (wallpaper: is the desktop visible, desktop p
 xcrun swiftc -O -swift-version 5 native/AresDesktop.swift -o native/build/ares-desktop
 codesign --force --sign "$SIGN" native/build/ares-desktop
 
+echo "› Compiling theme helper (ARES OS theme: app icons, custom icons, running apps, preferences)"
+xcrun swiftc -O -swift-version 5 native/AresTheme.swift -o native/build/ares-theme
+codesign --force --sign "$SIGN" native/build/ares-theme
+
 echo "› Backup voice model (Kokoro, downloaded once into the support folder)"
 zsh scripts/get-voice-model.sh
 
@@ -33,6 +37,7 @@ npx electron-packager . ARES \
   --extend-info=native/app-info.plist \
   --extra-resource=native/build/ares-listener \
   --extra-resource=native/build/ares-desktop \
+  --extra-resource=native/build/ares-theme \
   --extra-resource=models/speaker-titanet-small.onnx \
   --extra-resource=models/intent \
   --ignore='^/relay(/|$)' --ignore='^/(native|android|scripts|dist|assets|models|\.env.*|\.gitignore)' \

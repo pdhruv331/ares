@@ -123,6 +123,7 @@ const Dash = (() => {
     pill.classList.toggle('warn', list.length > 0);
     $('statusText').textContent = list.length ? `${list[0]}${list.length > 1 ? ` +${list.length - 1}` : ''}` : 'all systems ok';
     pill.title = list.length ? list.join('\n') : 'All systems ok';
+    window.ares.theme?.status({ ok: !list.length, text: $('statusText').textContent });
   }
   function setHealth(key, ok, reason = '') {
     const was = health[key] || '';
@@ -148,6 +149,15 @@ const Dash = (() => {
       { clipPath: 'inset(0 0 0 0)', filter: 'brightness(1)' }], { duration: 380, easing: 'cubic-bezier(.3,.7,.4,1)' });
   });
   document.addEventListener('click', (e) => { if (!$('statusPanel').contains(e.target)) $('statusPanel').hidden = true; });
+  // The ARES theme's menu bar and notifications: open the status list, the Work panel or the latest call
+  window.ares.theme?.onOpen((view) => {
+    if (view === 'status' && $('statusPanel').hidden) $('statusBtn').click();
+    else if (view === 'work' && !document.body.classList.contains('work-open')) $('workBtn').click();
+    else if (view === 'call') {
+      const p = panels.get('call') || [...panels.values()].reverse().find((x) => x.id.startsWith('callsum:') || x.id.startsWith('inbox:call-'));
+      if (p) openCard(p);
+    }
+  });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('statusPanel').hidden) { $('statusPanel').hidden = true; e.stopImmediatePropagation(); } }, true);
   window.ares.onIntegrations((s) => { integrations = s; renderStatus(); });
   window.ares.integrations().then((s) => { integrations = s; renderStatus(); });

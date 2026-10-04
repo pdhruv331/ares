@@ -7,7 +7,8 @@
 //                                 mic = the other processes using microphone input right now (bundle ID, or executable name),
 //                                 so desk mode can pause during calls. Only who, never any audio.
 //                                 onScreen = false while a full-screen app (or another Space) is in front on that display;
-//                                 covered = how much of the window ordinary app windows hide (0…1).
+//                                 covered = how much of the window ordinary app windows hide (0…1); centre = the same for
+//                                 the middle of the display, where the ARES brain sits (the ARES theme's dock orb).
 //   ares-desktop wallpaper-get    The desktop picture of every screen: [{"id":1,"name":"…","url":"file:///…","scaling":3,"clip":false}]
 //   ares-desktop wallpaper-set <screenID> <file URL or path> [scaling] [clip 0|1]
 //                                 Sets one screen's desktop picture (NSWorkspace.setDesktopImageURL).
@@ -116,15 +117,18 @@ final class Watcher {
       // notched MacBook, everything below the notch).
       let a = usable(r)
       let cols = 48, rows = 30
-      var hidden = 0
+      var hidden = 0, mid = 0, midHidden = 0
       for i in 0..<cols {
         for j in 0..<rows {
           let p = CGPoint(x: a.minX + (CGFloat(i) + 0.5) * a.width / CGFloat(cols), y: a.minY + (CGFloat(j) + 0.5) * a.height / CGFloat(rows))
-          if apps.contains(where: { $0.contains(p) }) { hidden += 1 }
+          let isMid = i >= cols * 3 / 8 && i < cols * 5 / 8 && j >= rows / 3 && j < rows * 2 / 3
+          if isMid { mid += 1 }
+          if apps.contains(where: { $0.contains(p) }) { hidden += 1; if isMid { midHidden += 1 } }
         }
       }
       let covered = (Double(hidden) / Double(cols * rows) * 100).rounded() / 100
-      windows[String(id)] = ["onScreen": true, "covered": covered]
+      let centre = (Double(midHidden) / Double(max(mid, 1)) * 100).rounded() / 100
+      windows[String(id)] = ["onScreen": true, "covered": covered, "centre": centre]
     }
     let session = CGSessionCopyCurrentDictionary() as? [String: Any]
     let locked = (session?["CGSSessionScreenIsLocked"] as? Bool) ?? false

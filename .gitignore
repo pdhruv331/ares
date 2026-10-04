@@ -46,3 +46,6 @@ comms-today.json
 .DS_Store
 *.swp
 docs/voice-samples/
+
+# Finder custom folder icon (the ARES theme gives this folder one)
+Icon?

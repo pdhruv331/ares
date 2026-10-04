@@ -40,6 +40,7 @@ const { Dashboard } = require('./dashboard');
 const { Voice } = require('./voice');
 const { Voicemail } = require('./voicemail');
 const { Wallpaper } = require('./wallpaper');
+const { Theme } = require('./theme');
 const { ClaudeUsage } = require('./claude-usage');
 const { ClaudeSessions } = require('./claude-sessions');
 const { ClaudeControl } = require('./claude-control');
@@ -77,6 +78,7 @@ let claudeCtl;   // the user's Claude Code sessions: list, summaries, hooks, rep
 let claudeUsage; // the Claude plan's 5-hour/weekly limits, from Claude Code's rate-limit events (claude-usage.js)
 let desk;      // desk mode (desk.js): no wake word needed while the user is at the Mac
 let surface;   // where the ARES window lives: the live desktop, lifted above the apps, or a window (surface.js)
+let theme;     // the ARES OS theme (theme.js): the menu bar, window glow, dock, icons, notifications and system look
 let speech;    // her voice (voice.js): Katherine on ElevenLabs, the local Kokoro backup, budget mode, phrase cache, credit watch
 
 /** A message for the window's dashboard (renderer/dash.js). */
@@ -123,7 +125,7 @@ function createWindow({ show }) {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   surface = new Surface({ win, log, opts: () => ({ enabled: wallpaper?.opts.enabled ?? readSettings().wallpaper?.enabled !== false, summon: readSettings().summon || 'lift' }),
-    onChange: (name) => { wallpaper?.mainSurface(name, win); win.webContents.send('ui-prefs', uiPrefs()); setTimeout(() => dashboard?.setVisible(win.isVisible()), 50); } });
+    onChange: (name) => { wallpaper?.mainSurface(name, win); theme?.surface(name); win.webContents.send('ui-prefs', uiPrefs()); setTimeout(() => dashboard?.setVisible(win.isVisible()), 50); } });
   win.once('ready-to-show', () => { if (surface.desktopOn) surface.desktop(); else if (show) win.show(); });
 
   // Closing the window hides it; the assistant keeps running in the menu bar.
@@ -219,6 +221,7 @@ function refreshTray() {
     { label: 'Toggle Full Screen  (⌃⌘F)', click: toggleFullScreen },
     { type: 'separator' },
     ...wallpaperMenu(),
+    ...(theme ? theme.menu(refreshTray) : []),
     { type: 'separator' },
     {
       label: 'Voice ID (only answer to you)',
@@ -266,6 +269,23 @@ function refreshTray() {
     },
     { label: 'Quit ARES', click: () => { app.isQuitting = true; app.quit(); } },
   ]));
+}
+
+/** The ARES theme's views, opened from its menu bar, dock and notifications. */
+function openView(view) {
+  showWindow();
+  if (view === 'summon') return;
+  const id = /^job:(.+)$/.exec(view)?.[1];
+  setTimeout(() => { if (id) win.webContents.send('job-show', id); else win.webContents.send('theme-open', view); }, 350);
+}
+
+/** Is the wallpaper brain on screen (the ARES window as the desktop, its middle not covered)? */
+function brainVisible() {
+  if (!wallpaper?.opts.enabled) return false;
+  const m = wallpaper.main, d = wallpaper.desk;
+  if (!m || m.name !== 'desktop' || d.locked || d.asleep) return false;
+  const w = m.wid ? d.windows?.[m.wid] : null;
+  return Boolean(w && w.onScreen && (w.centre ?? w.covered) < 0.6 && w.covered < 0.985);
 }
 
 /** ARES as the desktop: the live wallpaper, its options, and the lock-screen picture. */
@@ -418,7 +438,8 @@ function createDesk() {
 const talk = { lastReplyAt: 0, askedQuestion: false, fromWake: false };
 ipcMain.on('reply-done', (_e, asked) => { talk.lastReplyAt = Date.now(); talk.askedQuestion = Boolean(asked); });
 ipcMain.on('listener-awake', (_e, on) => setAwake(on));
-ipcMain.on('scene', (_e, msg) => wallpaper?.scene(msg));
+ipcMain.on('scene', (_e, msg) => { wallpaper?.scene(msg); theme?.scene(msg); });
+ipcMain.on('theme-status', (_e, s) => theme?.status(s));
 ipcMain.on('wp-ready', (e) => wallpaper?.onReady(e.sender));
 
 // ---- Wake word -----------------------------------------------------------------
@@ -1158,6 +1179,7 @@ async function startWork() {
   jobs.on('change', (job) => {
     win?.webContents.send('job-change', job);
     wallpaper?.jobs(jobs.list());
+    theme?.jobs(jobs.list());
     phone?.broadcast({ type: 'job', job });
     // Answered (on the Mac, by voice or from the phone): the "needs your OK" notification is out of date
     if (lastStatus.get(job.id) === 'approval' && job.status !== 'approval') clearPhoneNotes([`job-${job.id}-ok`]);
@@ -1165,7 +1187,7 @@ async function startWork() {
     refreshTray();
   });
   jobs.on('event', (id, evt) => { win?.webContents.send('job-event', id, evt); phone?.broadcast({ type: 'job-event', id, evt }); });
-  jobs.on('removed', (id) => { wallpaper?.jobs(jobs.list()); win?.webContents.send('job-removed', id); phone?.broadcast({ type: 'job-removed', id }); refreshTray(); });
+  jobs.on('removed', (id) => { wallpaper?.jobs(jobs.list()); theme?.jobs(jobs.list()); win?.webContents.send('job-removed', id); phone?.broadcast({ type: 'job-removed', id }); refreshTray(); });
   // Opened on one device, seen on the other: the Mac's badge clears (job-change), and so do the phone's notifications
   jobs.on('seen', (job) => clearPhoneNotes([`job-${job.id}`, `job-${job.id}-ok`]));
   jobs.on('busy', (busy) => {
@@ -1220,7 +1242,11 @@ function claudeQuietNow() {
 function deliverClaudeAlert(a) {
   toDash({ type: 'activity', text: `claude: ${a.title}` });
   const here = atMac();
-  if (here && !a.quietOnMac) notice(a.line);
+  if (here && !a.quietOnMac) {
+    notice(a.line);
+    theme?.toast({ kind: a.kind === 'finished' ? 'work' : 'needs', label: 'CLAUDE CODE', tag: a.kind.toUpperCase(), value: a.title, detail: a.body,
+      urgent: a.kind === 'permission' || a.kind === 'input' });
+  }
   if (here && !readSettings().workAlwaysPhone) return;
   if (claudeQuietNow()) { heldAlerts.push(a); log('claude alert held', { kind: a.kind }); return; }
   pushToPhones({ title: a.title, body: a.body, tag: a.tag, buttons: a.buttons }).catch(() => {});
@@ -1249,11 +1275,20 @@ function notifyJob(job, kind) {
     const line = job.status === 'done'
       ? `Your ${what} is done. ${firstSentences(job.summary || '')}`
       : `Sorry, sir, the ${what} didn't finish: ${job.error}.`;
-    if (here) { present(); win.webContents.send('job-announce', { id: job.id, kind: job.status, line, open: job.status === 'done' }); }
+    if (here) {
+      present();
+      win.webContents.send('job-announce', { id: job.id, kind: job.status, line, open: job.status === 'done' });
+      theme?.toast({ kind: job.status === 'done' ? 'work' : 'needs', label: job.status === 'done' ? 'JOB DONE' : 'JOB FAILED', tag: job.kind === 'code' ? 'CLAUDE' : 'WORK',
+        value: job.title, detail: job.status === 'done' ? firstSentences(job.summary || '') : job.error, action: { type: 'job', id: job.id } });
+    }
     if (phoneToo) pushToPhones({ title: job.status === 'done' ? `Done: ${job.title}` : `Job failed: ${job.title}`, body: job.status === 'done' ? job.summary || 'Ready.' : job.error, tag: `job-${job.id}`, job: job.id, buttons: jobButtons(job) }).catch(() => {});
   } else {
     const line = `The ${job.title} job needs your OK, sir: ${job.approval.what}. Shall I let it?`;
-    if (here) { present(); win.webContents.send('job-announce', { id: job.id, kind: 'approval', line, open: true }); }
+    if (here) {
+      present();
+      win.webContents.send('job-announce', { id: job.id, kind: 'approval', line, open: true });
+      theme?.toast({ kind: 'needs', label: 'NEEDS YOUR OK', tag: 'WORK', value: job.title, detail: job.approval.what, urgent: true, action: { type: 'job', id: job.id } });
+    }
     if (phoneToo) {
       // The tap is the confirmation (a paired phone, and only for this exact request); `ask` is for older apps
       const answer = (yes) => ({ title: yes ? 'Yes' : 'No', api: `/api/jobs/${job.id}/answer`, body: { yes, at: job.approval.at },
@@ -1580,10 +1615,12 @@ function createCalls() {
     remember('ares', line, source);
     present();
     win.webContents.send('job-announce', { line, open: false, remembered: true });
+    theme?.toast({ kind: 'call', label: 'CALLS', tag: 'ARES LINE', value: firstSentences(line, 1), detail: line.slice(firstSentences(line, 1).length).trim(), action: { type: 'call' } });
   };
   const buttons = (num) => (num ? [{ title: 'Call back', url: `tel:${num}` }, { title: 'Text', url: `sms:${num}` }] : []);
   c.on('result', ({ call, line }) => {
     toDash({ type: 'call-done', name: call.name, line, id: call.id });
+    theme?.call(liveCall());
     const here = atMac();
     log('call result', { id: call.id, here });
     if (here) tell(line);
@@ -1594,7 +1631,7 @@ function createCalls() {
     }
   });
   c.on('change', () => phone?.broadcast({ type: 'calls' }));
-  c.on('live', () => toDash({ type: 'call', call: liveCall() }));
+  c.on('live', () => { toDash({ type: 'call', call: liveCall() }); theme?.call(liveCall()); });
   c.on('inbound', ({ call, title, body, line, callback, pushed }) => {
     const here = atMac();
     log('call inbound', { id: call.id, urgent: call.urgent, spam: call.spam, here, pushed });
@@ -1741,6 +1778,7 @@ app.whenReady().then(async () => {
   memory.add = (fact) => { const saved = addFact(fact); toDash({ type: 'memory', fact: saved }); return saved; }; // the REMEMBERED flash
   dashboard = new Dashboard({ log, cli: claude.CLI, dir: path.join(app.getPath('userData'), 'dashboard'), settings: readSettings, country: app.getLocaleCountryCode() });
   dashboard.on('update', toDash);
+  dashboard.on('update', (m) => { if (m.type === 'weather') theme?.weather(m.weather); });
   speech = createSpeech();
   speech.start();
   relay = new Relay({ log, firebaseFile: path.join(app.getPath('userData'), 'google-services.json') });
@@ -1774,6 +1812,7 @@ app.whenReady().then(async () => {
       }
       present();
       win.webContents.send('timer-done', label);
+      theme?.toast({ kind: 'day', label: 'TIMER', tag: 'DONE', value: label && label !== 'timer' ? `Your ${label} timer is done.` : 'Your timer is done.', urgent: true });
     },
   });
   const mcpConfigPath = path.join(app.getPath('userData'), 'mcp.json');
@@ -1822,6 +1861,15 @@ app.whenReady().then(async () => {
   wallpaper.jobs(jobs.list());
   createDesk();
   createWindow({ show: !openedAtLogin }); // at login, wait quietly in the menu bar
+  theme = new Theme({
+    log, readSettings, writeSettings, supportDir: app.getPath('userData'), appDir: __dirname, onOpen: openView, brainVisible,
+    helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(__dirname, 'native', 'build', 'ares-theme'),
+  });
+  wallpaper.on('desk', () => theme.updateOrb());
+  theme.jobs(jobs.list());
+  theme.weather(dashboard?.snapshot().weather);
+  theme.start().catch((err) => log('theme start failed', err.message));
+  if (!app.isPackaged && process.env.ARES_TEST_THEME) theme.test(process.env.ARES_TEST_THEME.split(',')); // development: parts, no settings
   createTray();
   // First run with the wallpaper on: ask (once) about the ARES lock-screen picture
   if (wallpaper.opts.enabled && !wallpaper.opts.lockAsked && (app.isPackaged || process.env.ARES_ASK_LOCK)) setTimeout(() => wallpaper.setLockStill(true).then(refreshTray), 8000);
@@ -1858,6 +1906,7 @@ app.on('will-quit', () => {
   voicemail?.stop();
   dashboard?.stop();
   wallpaper?.stop();
+  theme?.quit();
   desk?.stop();
   speech?.stop();
   egress?.close();
