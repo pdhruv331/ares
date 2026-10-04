@@ -52,3 +52,23 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
 - Dev-only test hooks (ignored when packaged): `window.ares.surface.test('show'|'window'|'hide')`,
   `testHear({type:'command', text, addressed:false, trusted})`, `testDesk({mic, idleMin})`, `Surface.hold({...})`.
   The dev instance can't share the mic with the installed ARES, so inject speech instead.
+
+## Claude Code remote control (docs/claude-control-prompt.md)
+
+- `claude-sessions.js` reads Claude Code's files read-only: transcripts (head/tail only, they get huge), the live
+  registry `~/.claude/sessions/<pid>.json` (busy/idle, which client) and the desktop app's titles. `claude-control.js`
+  does hooks, replies, new sessions and Remote Control; `redact.js` cleans anything that leaves the Mac.
+- Never write into a session another client has open (the desktop app keeps every Code session's process alive).
+  Closed sessions continue with `claude -p --resume`; open ones get a fork only when the user asks.
+- Sessions ARES runs are jobs of kind `code` (jobs.js `runCode`/`gateCode`, sandbox `writeCodeProfile`/`classifyCode`).
+  They and every other ARES Claude process use `--setting-sources ''`, so the user's global hooks never fire for ARES.
+- Global hooks: `node scripts/claude-hooks.js` shows the settings.json diff, `--write` applies, `--remove` undoes.
+  They run `~/Library/Application Support/ares/claude-hook.sh` (copied from tools/), which posts to ARES using
+  claude-hook.url/.headers (written at launch, removed on quit) and always exits 0. Not async: async hooks are
+  killed when a `-p` session exits.
+- Remote Control from ARES: `script -q /dev/null claude --remote-control <name> [task]` with stdin from /dev/null
+  (a pipe makes `script` fail). Needs the folder trusted in Claude Code. Don't run `claude remote-control --help`:
+  it starts the server.
+- Testing: the dev instance's hook files live in its own ARES_USER_DATA, so real hooks only reach the installed app;
+  test with `claude -p … --settings '{"hooks":{"Stop":[…"<harness>/claude-hook.sh"…]}}'`. Set ARES_CODE_MODEL=haiku
+  for test code sessions. Don't start test sessions in the user's real projects.
