@@ -123,8 +123,16 @@ const Dash = (() => {
     pill.classList.toggle('warn', list.length > 0);
     $('statusText').textContent = list.length ? `${list[0]}${list.length > 1 ? ` +${list.length - 1}` : ''}` : 'all systems ok';
     pill.title = list.length ? list.join('\n') : 'All systems ok';
-    window.ares.theme?.status({ ok: !list.length, text: $('statusText').textContent });
+    reportStatus();
   }
+  /** Everything in the status panel, for the ARES bar's status drop-down (theme.js). */
+  function reportStatus() {
+    const integrations = [...document.querySelectorAll('.integrations li')].map((li) => ({
+      text: li.textContent.replace(/\s+/g, ' ').trim(), state: li.classList.contains('online') ? 'online' : li.classList.contains('pending') ? 'pending' : 'off' }));
+    window.ares.theme?.status({ ok: !problems().length, text: $('statusText').textContent, problems: problemList(), claude: claudeInfo, voice: voiceInfo, integrations });
+  }
+  // The integrations list changes on its own (connections come and go): keep the bar's copy current
+  new MutationObserver(() => reportStatus()).observe(document.querySelector('.integrations'), { subtree: true, attributes: true, attributeFilter: ['class'], childList: true, characterData: true });
   function setHealth(key, ok, reason = '') {
     const was = health[key] || '';
     health[key] = ok ? '' : reason || 'error';
@@ -1490,8 +1498,8 @@ const Dash = (() => {
       case 'emails': data.emails = msg.emails || []; if (data.emails.length) blip('needs'); break;
       case 'activity': activityAt = Date.now(); say(msg.text, 'work'); break;
       case 'health': setHealth(msg.key, msg.ok, msg.reason); break;
-      case 'voice': voiceInfo = [msg.line, msg.credits].filter(Boolean); if (!$('statusPanel').hidden) renderFixes(); break;
-      case 'claude': claudeInfo = msg.lines || []; if (!$('statusPanel').hidden) renderFixes(); break;
+      case 'voice': voiceInfo = [msg.line, msg.credits].filter(Boolean); if (!$('statusPanel').hidden) renderFixes(); reportStatus(); break;
+      case 'claude': claudeInfo = msg.lines || []; if (!$('statusPanel').hidden) renderFixes(); reportStatus(); break;
     }
     reconcile();
   });
@@ -1538,6 +1546,7 @@ const Dash = (() => {
       setWeather(s.weather);
       Object.assign(data, { events: s.events || [], leave: s.leave, music: s.music, timers: s.timers || [], call: s.call, emails: s.inbox || [] });
       claudeInfo = s.claude || [];
+      reportStatus();
       reconcile();
     });
   });

@@ -21,6 +21,9 @@ const { spawn, execFile, execFileSync } = require('child_process');
 const BREW = ['/opt/homebrew/bin', '/usr/local/bin'];
 const which = (name) => BREW.map((d) => path.join(d, name)).find((p) => fs.existsSync(p)) || null;
 const MENUS = 14; // menu title slots in the bar
+const ROWS = 32;  // rows made once per drop-down (filled and shown, never created while the pointer moves)
+// Everything with a drop-down: the ARES mark, the status pill, WORK, and the menu titles
+const OWNERS = ['ares.mark', 'ares.status', 'ares.jobs', ...Array.from({ length: MENUS }, (_, i) => `menu.${i}`)];
 
 // ARES palette (0xAARRGGBB)
 const C = {
@@ -87,10 +90,17 @@ fi
       'front.sh': `#!/bin/zsh
 [[ "$SENDER" == "front_app_switched" ]] && sketchybar --set "$NAME" label="$(echo "$INFO" | tr a-z A-Z | sed 's/./& /g;s/ $//')"
 `,
+      // A drop-down row lights up under the pointer, right here in SketchyBar (no round trip to ARES)
+      'row.sh': `#!/bin/zsh
+case "$SENDER" in
+  mouse.entered) sketchybar --set "$NAME" background.drawing=on label.color=0xffffffff ;;
+  mouse.exited) sketchybar --set "$NAME" background.drawing=off label.color=${C.text} ;;
+esac
+`,
       'close.sh': '#!/bin/zsh\n[[ "$SENDER" == "mouse.exited.global" ]] && sketchybar --set "$NAME" popup.drawing=off\n',
       // A menu title: hovering opens it (ARES waits a moment, so passing over doesn't), leaving the title and its menu closes it
       'menu.sh': `#!/bin/zsh
-I=\${NAME#menu.}; [[ "$NAME" == "ares.mark" ]] && I=mark
+I=\${NAME#menu.}; [[ "$NAME" == "ares.mark" ]] && I=mark; [[ "$NAME" == "ares.status" ]] && I=status; [[ "$NAME" == "ares.jobs" ]] && I=work
 case "$SENDER" in
   mouse.entered) curl -s -m 2 '${url}/hover?i='"$I" >/dev/null & ;;
   mouse.exited) curl -s -m 2 '${url}/unhover?i='"$I" >/dev/null & ;;
@@ -122,6 +132,13 @@ exec ${q(this.offlineFile)}
     // A mirrored icon is a picture of the real one (still there, under the bar): a click has ARES press the real one
     const aliases = (this.aliases() || []).map((a, k) => `sketchybar --add alias ${q(a)} right --set ${q(a)} alias.color=${C.cyan} padding_left=0 padding_right=0 \\
   click_script="${click(`extra?k=${k}`)}"`).join('\n');
+    const pool = OWNERS.map((o) => {
+      const rows = Array.from({ length: ROWS }, (_, k) => `${o}.p.${k}`);
+      return `sketchybar ${rows.map((r) => `--add item ${r} popup.${o}`).join(' ')} \\
+  ${rows.map((r) => `--set ${r} drawing=off icon.width=18 icon.font='${font('Bold', 10.0)}' icon.color=${C.cyan} label.font='${font('Regular', 11.0)}' \\
+    padding_left=6 padding_right=10 background.height=22 background.corner_radius=4 background.color=0x2e3ee6ff background.drawing=off \\
+    --subscribe ${r} mouse.entered mouse.exited`).join(' \\\n  ')}`;
+    }).join('\n');
     const rc = `#!/bin/zsh
 # Written by ARES (theme-bar.js). The ARES items are live-fed by ARES itself; the rest are SketchyBar's own.
 export PATH="${path.dirname(this.sketchybar)}:$PATH"
@@ -138,7 +155,8 @@ sketchybar --add item ares.mark left --set ares.mark icon='◉' icon.font='${fon
   ${popupStyle} --subscribe ares.mark mouse.entered mouse.exited mouse.exited.global
 sketchybar --add item ares.status left --set ares.status icon='●' icon.font='${font('Bold', 8.0)}' label='all systems ok' \\
   label.color=${C.text} background.color=${C.cyanFaint} background.border_color=${C.cyanDim} background.border_width=1 \\
-  background.drawing=on icon.padding_left=10 label.padding_right=10 click_script="${click('open?view=status')}"
+  background.drawing=on icon.padding_left=10 label.padding_right=10 click_script="${click('menu?i=status')}" script=${P('menu.sh')} \\
+  ${popupStyle} --subscribe ares.status mouse.entered mouse.exited mouse.exited.global
 sketchybar --add item ares.call left --set ares.call drawing=off icon='●' icon.font='${font('Bold', 9.0)}' icon.color=${C.green} \\
   label.color=${C.green} background.color=${C.greenDim} background.drawing=on icon.padding_left=10 label.padding_right=10 \\
   click_script="${click('open?view=call')}"
@@ -161,9 +179,13 @@ sketchybar --add item ares.voice right --set ares.voice icon='◌' icon.color=${
   label.font='${font('Semibold', 9.5)}' click_script="${click('open?view=summon')}"
 sketchybar --add item ares.jobs right --set ares.jobs icon='●' icon.font='${font('Bold', 9.0)}' icon.color=${C.muted} label='WORK' \\
   label.color=${C.muted} background.color=${C.none} background.border_color=${C.cyanFaint} background.border_width=1 background.drawing=on \\
-  icon.padding_left=10 label.padding_right=10 click_script="${click('open?view=work')}"
+  icon.padding_left=10 label.padding_right=10 click_script="${click('menu?i=work')}" script=${P('menu.sh')} \\
+  ${popupStyle} popup.align=right --subscribe ares.jobs mouse.entered mouse.exited mouse.exited.global
 # The watchdog (never drawn)
 sketchybar --add item ares.watch right --set ares.watch drawing=off updates=on update_freq=15 script=${P('watch.sh')}
+
+# The drop-down rows, made once (ARES only fills them in and shows them)
+${pool}
 
 sketchybar --update
 `;
@@ -247,36 +269,41 @@ sketchybar --update
     this.raw(props);
   }
   /**
-   * Fill a drop-down and open it. entries: [{ label, mark, key, enabled, header, sep, sub }]; `owner` is 'menu.<i>' or
-   * 'ares.mark'; each entry clicks /pick?m=<menuId>&k=<index>.
+   * Fill a drop-down's rows (they already exist) and, with show, open it. entries: [{ label, mark, key, enabled, header,
+   * info, sep, sub, color }]; `owner` is the item it hangs from; each live row clicks /pick?m=<menuId>&k=<index>.
    */
-  popup(owner, menuId, entries) {
-    const args = ['--remove', `/${owner.replace('.', '\\.')}\\.p\\..*/`];
-    for (let i = 0; i < MENUS; i++) if (`menu.${i}` !== owner) args.push('--set', `menu.${i}`, 'popup.drawing=off');
-    if (owner !== 'ares.mark') args.push('--set', 'ares.mark', 'popup.drawing=off');
-    entries.slice(0, 48).forEach((e, k) => {
+  popup(owner, menuId, entries, show = true) {
+    const rows = entries.slice(0, ROWS);
+    const text = (e) => `${e.header ? spaced(e.label) : String(e.label).trim()}${e.sub ? '  ›' : ''}${e.key ? `    ${e.key}` : ''}`;
+    const width = Math.max(180, ...rows.filter((e) => !e.sep).map((e) => Math.round(text(e).length * 6.6 + 46)));
+    const args = [];
+    rows.forEach((e, k) => {
       const name = `${owner}.p.${k}`;
-      args.push('--add', 'item', name, `popup.${owner}`);
       if (e.sep) {
-        args.push('--set', name, 'icon.drawing=off', 'label.drawing=off', 'width=230', 'background.height=1', `background.color=${C.cyanFaint}`,
-          'background.drawing=on', 'padding_left=8', 'padding_right=8', 'background.padding_left=0');
+        args.push('--set', name, 'drawing=on', 'icon.drawing=off', 'label.drawing=off', `width=${width}`, 'background.height=1',
+          `background.color=${C.cyanFaint}`, 'background.drawing=on', 'script=', 'click_script=');
         return;
       }
-      const dim = e.enabled === false || e.header;
-      args.push('--set', name, `icon=${e.mark || ' '}`, `icon.color=${C.cyan}`, 'icon.width=18', 'icon.font=.SF NS Mono:Bold:10.0',
-        `label=${e.header ? spaced(e.label) : e.label}${e.sub ? '  ›' : ''}${e.key ? `    ${e.key}` : ''}`,
-        `label.color=${e.header ? C.cyan : dim ? C.muted : C.text}`, `label.font=.SF NS Mono:${e.header ? 'Bold:8.5' : 'Regular:11.0'}`,
-        'padding_left=6', 'padding_right=12', 'background.drawing=off',
-        `click_script=${dim ? '' : `curl -s -m 2 '${this.url()}/pick?m=${menuId}&k=${k}' >/dev/null`}`);
+      const live = e.enabled !== false && !e.header && !e.info && Boolean(e.run);
+      const color = e.color ? C[e.color] : e.header ? C.cyan : live || e.info ? C.text : C.muted;
+      args.push('--set', name, 'drawing=on', 'icon.drawing=on', `icon=${e.mark || ' '}`, `icon.color=${e.color ? C[e.color] : C.cyan}`, 'label.drawing=on',
+        `label=${text(e)}`, `label.color=${color}`, `label.font=.SF NS Mono:${e.header ? 'Bold:8.5' : 'Regular:11.0'}`, `width=${width}`,
+        'background.height=22', 'background.color=0x2e3ee6ff', 'background.drawing=off',
+        `script=${live ? path.join(this.dir, 'row.sh') : ''}`,
+        `click_script=${live ? `curl -s -m 2 '${this.url()}/pick?m=${menuId}&k=${k}' >/dev/null` : ''}`);
     });
-    args.push('--set', owner, 'popup.drawing=on');
+    for (let k = rows.length; k < ROWS; k++) args.push('--set', `${owner}.p.${k}`, 'drawing=off');
+    if (show) args.push(...this.showArgs(owner));
     this.raw(args);
   }
-  closePopups() {
-    const args = ['--set', 'ares.mark', 'popup.drawing=off'];
-    for (let i = 0; i < MENUS; i++) args.push('--set', `menu.${i}`, 'popup.drawing=off');
-    this.raw(args);
+  /** Open a filled drop-down (and close any other). */
+  show(owner) { this.raw(this.showArgs(owner)); }
+  showArgs(owner) {
+    const args = [];
+    for (const o of OWNERS) if (o !== owner) args.push('--set', o, 'popup.drawing=off');
+    return [...args, '--set', owner, 'popup.drawing=on'];
   }
+  closePopups() { this.raw(OWNERS.flatMap((o) => ['--set', o, 'popup.drawing=off'])); }
 
   // ---- State from ARES ----------------------------------------------------------------------------------------
   status({ ok, text }) {
@@ -368,4 +395,4 @@ sketchybar --update
   }
 }
 
-module.exports = { Bar, which, C, MENUS };
+module.exports = { Bar, which, C, MENUS, ROWS };

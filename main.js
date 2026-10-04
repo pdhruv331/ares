@@ -242,6 +242,8 @@ function menuSections() {
         click: (item) => { voiceId.setEnabled(item.checked); refreshTray(); win.webContents.send('voiceid-changed', voiceId.status()); },
       },
       { label: voiceId.enrolled ? 'Retrain Voice ID…' : 'Set Up Voice ID…', click: () => { showWindow(); win.webContents.send('voiceid-enroll'); } },
+      { type: 'separator' },
+      ...deskMenu(),
     ],
     view: [
       { label: `Show / Hide  (${HOTKEY.replace('Alt', '⌥')})`, click: toggleWindow },
@@ -339,8 +341,6 @@ function wallpaperMenu() {
       { label: 'Lift the Wallpaper', type: 'radio', checked: (readSettings().summon || 'lift') === 'lift', click: act(() => writeSettings({ summon: 'lift' })) },
       { label: 'Open ARES Window', type: 'radio', checked: readSettings().summon === 'window', click: act(() => writeSettings({ summon: 'window' })) },
     ] },
-    { type: 'separator' },
-    ...deskMenu(),
   ];
 }
 
@@ -350,9 +350,13 @@ function deskMenu() {
   const o = desk.opts, st = desk.state;
   const idle = (m) => ({ label: `${m} minutes`, type: 'radio', checked: o.idleMin === m, click: () => { desk.set({ idleMin: m }); refreshTray(); } });
   return [
-    { label: 'Desk Mode (no wake word while I\'m at the Mac)', type: 'checkbox', checked: o.enabled, click: (item) => { desk.set({ enabled: item.checked }); refreshTray(); } },
-    { label: '   ⚠ Your voice isn\'t matching lately: Retrain Voice ID…', visible: o.enabled && voiceId.drifting, click: () => { showWindow(); win.webContents.send('voiceid-enroll'); } },
-    { label: o.enabled ? `   ${st.active ? 'Listening: only your voice, only when you talk to her' : `Paused: ${st.reason}`}` : '   Off', enabled: false },
+    { label: 'Desk Mode (no wake word while I\'m at the Mac)', type: 'checkbox', checked: o.enabled, click: (item) => {
+      desk.set({ enabled: item.checked });
+      if (!item.checked && manualAwake) setAwake(false, 'desk off'); // off = back to the wake word, not still listening
+      refreshTray();
+    } },
+    { label: '⚠ Your voice isn\'t matching lately: Retrain Voice ID…', visible: o.enabled && voiceId.drifting, click: () => { showWindow(); win.webContents.send('voiceid-enroll'); } },
+    { label: o.enabled ? (st.active ? 'Listening: only your voice, only when you talk to her' : `Paused: ${st.reason}`) : 'Desk mode is off', enabled: false },
     { label: 'Desk Mode Idle Timeout', enabled: o.enabled, submenu: [2, 5, 10, 15].map(idle) },
   ];
 }
@@ -982,7 +986,8 @@ function memoryUsed() {
   });
 }
 
-ipcMain.handle('system-stats', async () => {
+ipcMain.handle('system-stats', () => systemStats());
+async function systemStats() {
   const cpus = os.cpus();
   const load = os.loadavg()[0] / cpus.length;
   return {
@@ -993,7 +998,7 @@ ipcMain.handle('system-stats', async () => {
     host: os.hostname().replace(/\.local$/, ''),
     user: os.userInfo().username,
   };
-});
+}
 // v3 only accepts stability 0 (creative), 0.5 (natural) or 1 (robust)
 function voiceSettings() {
   const base = { similarity_boost: 0.8, speed: ELEVEN.speed };
@@ -1587,7 +1592,9 @@ ipcMain.handle('dash-home', (_e, address) => {
 // Click for details (renderer/dash.js): what the detail cards can do directly. These only touch ARES's own state
 // (timers, music, memory, files on this Mac) or open a page; anything that sends or changes something elsewhere
 // (texting, calling back, drafting a reply) goes through a normal turn, so the brain's "yes" gate applies.
-ipcMain.handle('dash-act', async (_e, action, arg = {}) => {
+ipcMain.handle('dash-act', (_e, action, arg = {}) => dashAct(action, arg));
+/** The dashboard's (and the ARES bar's status drop-down's) actions: timers, music, links, the status pill's fixes… */
+async function dashAct(action, arg = {}) {
   switch (action) {
     case 'timer': return bridge?.timerAction(String(arg.label), arg.op, 300) || false;
     case 'remind': bridge?.remind(String(arg.label || 'reminder').slice(0, 60), Number(arg.seconds) || 600); return true;
@@ -1637,7 +1644,8 @@ ipcMain.handle('dash-act', async (_e, action, arg = {}) => {
     }
   }
   return false;
-});
+}
+
 ipcMain.handle('job-open', (_e, id, file) => {
   const target = file ? workFiles.resolveJobFile(jobs, id, file) : jobs.get(id) && jobs.folder(id);
   if (!target) return false;
@@ -1916,7 +1924,8 @@ app.whenReady().then(async () => {
   theme = new Theme({
     log, readSettings, writeSettings, supportDir: app.getPath('userData'), appDir: __dirname, onOpen: openView, brainVisible,
     menuSections, onMenuAction: () => refreshTray(), selfIds: ['com.dhruv.ares', 'com.github.Electron'],
-    onLive: () => win?.webContents.send('ui-prefs', uiPrefs()),
+    onLive: () => { if (win && !win.isDestroyed()) win.webContents.send('ui-prefs', uiPrefs()); }, // never while quitting
+    systemStats, dashAct,
     helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(__dirname, 'native', 'build', 'ares-theme'),
   });
   wallpaper.on('desk', () => theme.updateOrb());

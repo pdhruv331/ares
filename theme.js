@@ -36,6 +36,7 @@ const SCRIPTS = {
 };
 const CYAN_HIGHLIGHT = '0.243137 0.901961 1.000000 Other';
 const SOUND = path.join(os.homedir(), 'Library', 'Sounds', 'ARES.aiff');
+const ARES_MENUS = ['ares', 'listen', 'voice', 'work', 'view', 'phone']; // the bar's titles while ARES is in front
 const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 class Theme {
@@ -60,6 +61,7 @@ class Theme {
       onAccessibility: () => this.askAccessibility(), onFront: (id) => this.front(id),
       readOpts: () => this.opts.dock, saveOpts: (p) => this.save({ dock: { ...this.opts.dock, ...p } }) });
     this.popups = {}; // menuId -> [{ run }]: what each line of an open drop-down does
+    this.hoverSeq = 0;
     this.icons = new Icons({ dir: this.dir, helper: o.helper, originals: this.originals, log: o.log, appDir: o.appDir });
     this.notify = new Notify({ helper: o.helper, log: o.log, appDir: o.appDir, onAct: (a) => this.act(a) });
     this.apps = new AppThemes({ dir: this.dir, helper: o.helper, originals: this.originals, log: o.log });
@@ -113,7 +115,7 @@ class Theme {
     if (quitting) this.bar.offline(); // the bar stays (clock, battery, Wi-Fi), the Mac's own Dock and menu bar come back
     else { this.bar.stop(); this.bar.stopBorders(); }
     try { fs.rmSync(path.join(this.dir, 'ares.pid'), { force: true }); } catch {}
-    this.onLive?.(false);
+    if (!quitting) this.onLive?.(false); // quitting: ARES's window is already gone
     this.dock.stop();
     this.notify.stop();
     this.icons.unwatch();
@@ -122,7 +124,7 @@ class Theme {
   }
   /** ARES is quitting: the windows go; the bar and the glow stay (they're the Mac's look), the bar says offline, and
    *  the Apple Dock is the user's own again until ARES is back. */
-  quit() { this.stopLive({ quitting: true }); }
+  quit() { this.quitting = true; this.stopLive({ quitting: true }); }
 
   // ---- The switch ----------------------------------------------------------------------------------------------
   async setEnabled(on) {
@@ -253,12 +255,13 @@ class Theme {
     if (!this.live || id === this.frontId) return;
     this.frontId = id;
     this.menuCache = new Map(); // the front app's menus, as last read (shown at once; refreshed in the background)
-    if (this.selfIds.includes(id)) return this.layoutMenus(['ARES', 'LISTEN', 'VOICE', 'WORK', 'VIEW', 'PHONE']);
+    if (this.selfIds.includes(id)) return this.layoutMenus(ARES_MENUS.map((m) => m.toUpperCase()));
     const r = await run(this.helper, ['menubar', id]).then(JSON.parse, () => ({ menus: [] }));
     if (r.trusted !== this.axTrusted) this.log('theme accessibility', { trusted: r.trusted }); // menus, windows and badges need it
     this.axTrusted = r.trusted;
     if (this.frontId !== id) return;
     await this.layoutMenus(r.menus);
+    if (r.menus.length) this.prefetchMenus(id, r.menus.length);
     // No menus (no Accessibility yet): at least the app's name, without waiting for SketchyBar's next switch event
     if (!r.menus.length && r.name) this.bar.raw(['--set', 'front', `label=${r.name.toUpperCase().split('').join(' ')}`]);
   }
@@ -284,82 +287,181 @@ class Theme {
     this.overflowFrom = fit < titles.length ? fit : null;
     this.bar.menus(this.overflowFrom === null ? titles : [...titles.slice(0, fit), '»']);
   }
-  /** ARES's menu sections as drop-down lines (one level of submenu shown inline under its heading). */
-  aresEntries(name) {
-    const out = [];
-    const walk = (items, depth) => {
-      for (const it of items || []) {
-        if (!it || it.visible === false) continue;
-        if (it.type === 'separator') { if (out.length && !out[out.length - 1].sep) out.push({ sep: true }); continue; }
-        if (it.submenu) { out.push({ label: it.label, header: true }); walk(it.submenu, depth + 1); continue; }
-        const mark = (it.type === 'checkbox' || it.type === 'radio') && it.checked ? (it.type === 'radio' ? '•' : '✓') : '';
-        out.push({ label: it.label, mark, enabled: it.enabled !== false && Boolean(it.click),
-          run: () => it.click?.({ checked: it.type === 'checkbox' ? !it.checked : true }) });
+  // Drop-downs. Each one has its rows made once in SketchyBar (theme-bar.js); opening one only fills and shows them.
+  // Hovering a title fills its rows straight away and shows them after a short pause, so they appear complete at once.
+  ownerOf(i) { return { mark: 'ares.mark', status: 'ares.status', work: 'ares.jobs' }[i] || `menu.${i}`; }
+  /** Fill and open drop-down i (also: a submenu in it, or back). */
+  show(i, entries) {
+    this.popups[i] = entries;
+    this.openId = String(i);
+    this.bar.popup(this.ownerOf(i), i, entries, true);
+  }
+  /** What drop-down i holds right now (the front app's menus come from the cache, refreshed in the background). */
+  async entriesFor(i) {
+    if (i === 'mark') return this.aresList(this.menuSections().ares, i);
+    if (i === 'status') return this.statusEntries();
+    if (i === 'work') return this.workEntries();
+    const n = Number(i);
+    if (!(n >= 0 && n < MENUS)) return [];
+    if (this.overflowFrom !== null && n === this.overflowFrom) return this.overflowEntries(i);
+    if (this.aresFront) return this.aresList(this.menuSections()[ARES_MENUS[n]], i);
+    if (!this.frontId) return [];
+    if (!this.axTrusted) return [{ label: 'Show this app\'s menus: allow Accessibility for ARES…', run: () => this.askAccessibility() }];
+    return this.appEntries(i, String(n));
+  }
+  hover(i) {
+    clearTimeout(this.hoverTimer);
+    if (this.openId === String(i)) return; // already open
+    const seq = ++this.hoverSeq;
+    const filled = this.entriesFor(i).then((entries) => {
+      if (seq !== this.hoverSeq) return null;
+      this.popups[i] = entries;
+      this.bar.popup(this.ownerOf(i), i, entries, false); // filled now, shown when the pause is over
+      return entries;
+    }).catch(() => null);
+    // A pause before the first menu opens (so passing over the bar doesn't open them); none when switching between menus
+    this.hoverTimer = setTimeout(async () => {
+      if (!(await filled) || seq !== this.hoverSeq) return;
+      this.openId = String(i);
+      this.bar.show(this.ownerOf(i));
+    }, this.openId ? 0 : 120);
+  }
+  unhover(i) { if (this.openId !== String(i)) { this.hoverSeq++; clearTimeout(this.hoverTimer); } }
+  closed(i) { if (this.openId === String(i)) this.openId = null; }
+  /** A click on a title: open it now (hover may already have; then it simply stays open). */
+  async openMenu(i) {
+    clearTimeout(this.hoverTimer);
+    this.hoverSeq++;
+    if (this.openId === String(i)) return;
+    this.show(i, await this.entriesFor(i));
+  }
+  /**
+   * ARES's own menu items (Electron menu templates) as rows. A submenu is one row with "›" that opens in place (with
+   * "‹ Back"), so long menus like VIEW stay short.
+   */
+  aresList(items, i, back = null) {
+    const out = back ? [{ label: '‹ Back', run: back, keepOpen: true }, { sep: true }] : [];
+    for (const it of items || []) {
+      if (!it || it.visible === false) continue;
+      if (it.type === 'separator') { if (out.length && !out[out.length - 1].sep) out.push({ sep: true }); continue; }
+      if (it.submenu) {
+        out.push({ label: it.label, sub: true, keepOpen: true, enabled: it.enabled !== false,
+          run: () => this.show(i, this.aresList(it.submenu, i, () => this.show(i, this.aresList(items, i, back)))) });
+        continue;
       }
-    };
-    walk(this.menuSections()[name], 0);
+      const mark = (it.type === 'checkbox' || it.type === 'radio') && it.checked ? (it.type === 'radio' ? '•' : '✓') : '';
+      out.push({ label: it.label, mark, enabled: it.enabled !== false && Boolean(it.click), info: it.enabled === false,
+        run: it.click ? () => it.click({ checked: it.type === 'checkbox' ? !it.checked : true }) : null });
+    }
     while (out.length && out[out.length - 1].sep) out.pop();
     return out;
   }
-  /** Hover: opens after a short pause (passing over a title doesn't), switching straight between menus once one is open. */
-  hover(i) {
-    clearTimeout(this.hoverTimer);
-    if (this.openId === String(i)) return; // that one's already open
-    this.hoverTimer = setTimeout(() => this.openMenu(i), this.openId ? 0 : 120);
-  }
-  unhover(i) { if (this.openId !== String(i)) clearTimeout(this.hoverTimer); }
-  closed(i) { if (this.openId === String(i)) this.openId = null; }
-  async openMenu(i) {
-    clearTimeout(this.hoverTimer);
-    this.openId = String(i);
-    if (i === 'mark') return this.showPopup('ares.mark', 'mark', [...this.aresEntries('ares')]);
-    const n = Number(i);
-    if (!(n >= 0 && n < MENUS)) return;
-    if (this.overflowFrom !== null && n === this.overflowFrom) return this.overflowMenu(`menu.${n}`, String(n));
-    if (this.aresFront) return this.showPopup(`menu.${n}`, String(n), this.aresEntries(['ares', 'listen', 'voice', 'work', 'view', 'phone'][n]));
-    if (!this.frontId) return;
-    if (!this.axTrusted) return this.showPopup(`menu.${n}`, String(n), [{ label: 'Show this app\'s menus: allow Accessibility for ARES…', run: () => this.askAccessibility() }]);
-    await this.appMenu(`menu.${n}`, String(n), String(n));
-  }
-  /** "»": the titles that didn't fit before the notch; each opens its own menu in the same drop-down. */
-  overflowMenu(owner, menuId) {
+  /** "»": the titles that didn't fit before the notch; each opens its own menu in place. */
+  overflowEntries(i) {
     const rest = this.allTitles.slice(this.overflowFrom);
-    const list = () => this.overflowMenu(owner, menuId);
-    this.showPopup(owner, menuId, rest.map((t, k) => ({ label: t, sub: true, keepOpen: true,
-      run: () => (this.aresFront
-        ? this.showPopup(owner, menuId, [{ label: '‹ Back', run: list, keepOpen: true }, { sep: true }, ...this.aresEntries(['ares', 'listen', 'voice', 'work', 'view', 'phone'][this.overflowFrom + k])])
-        : this.appMenu(owner, menuId, String(this.overflowFrom + k), list)) })));
+    const list = () => this.show(i, this.overflowEntries(i));
+    return rest.map((t, k) => ({ label: t, sub: true, keepOpen: true,
+      run: async () => this.show(i, this.aresFront
+        ? this.aresList(this.menuSections()[ARES_MENUS[this.overflowFrom + k]], i, list)
+        : await this.appEntries(i, String(this.overflowFrom + k), list)) }));
   }
   /**
-   * One of the front app's menus (or a submenu: path "2.5"), read through Accessibility. What was read last time shows
-   * at once, and is re-read in the background (ticks and greyed items change). back: re-shows the menu this came from.
+   * One of the front app's menus (or a submenu: path "2.5"), read through Accessibility. What was read last time is
+   * used at once and re-read in the background (ticks and greyed items change); back: re-shows the menu this came from.
    */
-  async appMenu(owner, menuId, menuPath, back = null) {
+  async appEntries(i, menuPath, back = null) {
     const app = this.frontId;
     const key = `${app}|${menuPath}`;
-    const render = (items) => {
+    const toEntries = (items) => {
       const entries = back ? [{ label: '‹ Back', run: back, keepOpen: true }, { sep: true }] : [];
       let prev = null;
       items.forEach((it, k) => {
         if (it.sep) { if (entries.length && !entries[entries.length - 1].sep) entries.push({ sep: true }); prev = null; return; }
         // macOS's hidden ⌥ alternates (they replace the item above only while ⌥ is held) and repeats: not shown
-        const base = (key) => key.replace(/[⌃⌥⇧]/g, '');
+        const base = (x) => x.replace(/[⌃⌥⇧]/g, '');
         if (prev && (it.t === prev.t || (it.key.includes('⌥') && !prev.key.includes('⌥') && base(it.key) === base(prev.key)))) return;
         prev = it;
         const itemPath = `${menuPath}.${k}`;
-        entries.push({ label: it.t, mark: it.mark, key: it.key, enabled: it.e, sub: it.sub,
-          run: it.sub ? () => this.appMenu(owner, menuId, itemPath, () => this.appMenu(owner, menuId, menuPath, back)) : () => run(this.helper, ['menu-press', app, itemPath]).catch(() => {}),
-          keepOpen: it.sub });
+        entries.push({ label: it.t, mark: it.mark, key: it.key, enabled: it.e, sub: it.sub, keepOpen: it.sub,
+          run: it.sub
+            ? async () => this.show(i, await this.appEntries(i, itemPath, async () => this.show(i, await this.appEntries(i, menuPath, back))))
+            : () => run(this.helper, ['menu-press', app, itemPath]).catch(() => {}) });
       });
-      this.showPopup(owner, menuId, entries);
+      return entries;
     };
+    const read = () => run(this.helper, ['menu-items', app, menuPath]).then(JSON.parse, () => ({ items: [] })).then(({ items = [] }) => {
+      this.menuCache?.set(key, items);
+      return items;
+    });
     const cached = this.menuCache?.get(key);
-    if (cached) render(cached);
-    const { items = [] } = await run(this.helper, ['menu-items', app, menuPath]).then(JSON.parse, () => ({}));
-    this.menuCache?.set(key, items);
-    if (this.frontId !== app || this.openId !== menuId) return; // moved on meanwhile
-    if (!cached || JSON.stringify(cached) !== JSON.stringify(items)) render(items);
+    if (!cached) return toEntries(await read());
+    read().then((items) => { // fresh ticks: repaint if it changed while open
+      if (JSON.stringify(items) !== JSON.stringify(cached) && this.frontId === app && this.openId === String(i) && !back) this.show(i, toEntries(items));
+    });
+    return toEntries(cached);
   }
+  /** Read the front app's top-level menus ahead (after a switch), so the first hover doesn't wait on Accessibility. */
+  async prefetchMenus(app, count) {
+    for (let n = 0; n < count && this.frontId === app; n++) {
+      const key = `${app}|${n}`;
+      if (this.menuCache?.has(key)) continue;
+      const { items = [] } = await run(this.helper, ['menu-items', app, String(n)]).then(JSON.parse, () => ({}));
+      if (this.frontId === app) this.menuCache?.set(key, items);
+    }
+  }
+
+  // ---- The status pill and WORK as drop-downs ----------------------------------------------------------------------
+  async statusEntries() {
+    const d = this.statusDetail || {};
+    const out = [];
+    const problems = d.problems || [];
+    if (!problems.length) out.push({ label: 'all systems ok', mark: '●', info: true });
+    for (const p of problems) {
+      out.push({ label: p.text, mark: '●', color: 'amber', info: true });
+      if (p.fix || p.url) out.push({ label: `   ${p.label || 'FIX'}${p.hint ? ` (${p.hint})` : ''}`, run: () => this.dashAct(p.url ? 'url' : 'fix', p.url ? { url: p.url } : { key: p.fix }) });
+    }
+    const lines = (title, list, amberOver80 = false) => {
+      if (!list?.length) return;
+      out.push({ sep: true }, { label: title, header: true });
+      for (const line of list) out.push({ label: line, info: true, ...(amberOver80 && Number(/(\d+)% used/.exec(line)?.[1]) >= 80 && { color: 'amber' }) });
+    };
+    lines('Claude', d.claude, true);
+    lines('Voice', d.voice);
+    if (d.integrations?.length) {
+      out.push({ sep: true }, { label: 'Integrations', header: true });
+      for (const it of d.integrations) out.push({ label: it.text, mark: it.state === 'off' ? '○' : '●', info: true, ...(it.state === 'pending' && { color: 'amber' }) });
+    }
+    const st = await this.systemStats().catch(() => null);
+    if (st) {
+      const up = `${Math.floor(st.uptime / 86400)}d ${Math.floor(st.uptime / 3600) % 24}h ${Math.floor(st.uptime / 60) % 60}m`;
+      out.push({ sep: true }, { label: 'System', header: true },
+        { label: `${st.user}@${st.host}`, info: true },
+        { label: `CPU ${Math.round(st.cpu * 100)}%   ·   Memory ${Math.round((st.memUsed || 0) / Math.max(1, st.memTotalGB) * 100)}%`, info: true },
+        { label: `Up ${up}`, info: true });
+    }
+    out.push({ sep: true }, { label: 'Recheck', run: () => this.dashAct('fix', { key: 'recheck' }) },
+      { label: 'Open the Status Panel', run: () => this.openFromBar('status') });
+    return out;
+  }
+  workEntries() {
+    const MARK = { running: ['◐', 'violet'], queued: ['○', null], approval: ['!', 'amber'], done: ['✓', null], failed: ['✕', 'amber'], cancelled: ['–', null] };
+    const list = this.jobList || [];
+    const active = list.filter((j) => ['running', 'queued', 'approval'].includes(j.status));
+    const recent = list.filter((j) => !active.includes(j) && !j.dismissed).sort((a, b) => (b.finished || b.created || 0) - (a.finished || a.created || 0)).slice(0, 5);
+    const row = (j) => {
+      const [mark, color] = MARK[j.status] || ['·', null];
+      return { label: `${j.title}${j.status === 'approval' ? '  · needs your OK' : ''}`, mark, ...(color && { color }), run: () => this.onOpen(`job:${j.id}`) };
+    };
+    const out = [];
+    if (active.length) out.push({ label: 'Working', header: true }, ...active.map(row));
+    if (recent.length) out.push(...(out.length ? [{ sep: true }] : []), { label: 'Recent', header: true }, ...recent.map(row));
+    if (!out.length) out.push({ label: 'No jobs yet', info: true });
+    const folder = this.menuSections().work.find((x) => /Work Folder/.test(x.label || ''));
+    out.push({ sep: true }, { label: 'Open the Work Panel', run: () => this.openFromBar('work') },
+      ...(folder ? [{ label: folder.label, run: folder.click }] : []));
+    return out;
+  }
+
   /** A mirrored menu-bar icon was clicked: press the real one (it's still there, under the bar). */
   extra(k) {
     const name = this.aliasNames?.[Number(k)];
@@ -367,13 +469,10 @@ class Theme {
     const [owner, ...rest] = name.split(',');
     run(this.helper, ['extra-press', owner, rest.join(',')]).catch((err) => this.log('theme extra press failed', { name, error: err.message }));
   }
-  showPopup(owner, menuId, entries) {
-    this.popups[menuId] = entries;
-    this.bar.popup(owner, menuId, entries);
-  }
   pick(menuId, k) {
     const e = this.popups[menuId]?.[Number(k)];
     if (!e?.run) return;
+    this.log('theme menu pick', { menu: menuId, item: String(e.label).trim().slice(0, 60) });
     if (!e.keepOpen) { this.bar.closePopups(); this.openId = null; }
     Promise.resolve(e.run()).catch((err) => this.log('theme menu action failed', err.message)).finally(() => { if (!e.keepOpen) this.onMenuAction?.(); });
   }
@@ -486,8 +585,14 @@ class Theme {
     else if (msg.type === 'attention') this.bar.attention(msg.on);
     this.dock.scene(msg);
   }
-  status(s) { if (s && typeof s === 'object') { this.lastStatus = s; if (this.live) this.bar.status({ ok: Boolean(s.ok), text: String(s.text || '') }); } }
+  status(s) {
+    if (!s || typeof s !== 'object') return;
+    this.lastStatus = s;
+    this.statusDetail = s; // problems, Claude limits, voice, integrations: the status drop-down
+    if (this.live) this.bar.status({ ok: Boolean(s.ok), text: String(s.text || '') });
+  }
   jobs(list) {
+    this.jobList = list;
     const working = list.filter((j) => ['running', 'queued'].includes(j.status)).length;
     const approval = list.filter((j) => j.status === 'approval').length;
     if (this.live) this.bar.jobs({ working, approval });
