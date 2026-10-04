@@ -195,6 +195,8 @@ class HandEngine {
       if (this.pinch && this.pinch.side === h.side && this.pinch.phase !== 'wait') return true;
       return h.pose === 'pinch' && this.onTarget(this.pointFor(h.f));
     });
+    this.lastHands = hands.map((h) => ({ side: h.side, pose: h.pose, valid: valid.includes(h) })); // (for the preview)
+    this.lastBox = hands[0] ? boxFor(this.sizeEma ?? hands[0].f.size, aspect, o, this.boxCentre) : null;
     for (const h of hands) { // pose history (also for hands that don't count: a pose must re-form after it)
       h.slot.prevPose = h.slot.pose;
       h.slot.pose = h.pose;

@@ -375,6 +375,7 @@ function handsMenu() {
     { label: 'Hand Gestures (camera, while I\'m at the Mac)', type: 'checkbox', checked: o.enabled, click: (item) => { vision.set({ enabled: item.checked }); refreshTray(); } },
     { label: line, enabled: false },
     { label: 'Hands Move the Mac\'s Pointer (click anything)', type: 'checkbox', checked: o.mac, enabled: o.enabled, click: (item) => { vision.set({ mac: item.checked }); refreshTray(); } },
+    { label: 'Show What the Camera Sees (tuning window)', type: 'checkbox', checked: st.preview, enabled: o.enabled, click: (item) => { vision.preview(item.checked); refreshTray(); } },
   ];
   if (st.permission === 'denied') items.push({ label: 'Allow the camera in System Settings › Privacy › Camera…', click: () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Camera') });
   if (!app.isPackaged) { // record joint streams (never video) for scripts/test-hands.js

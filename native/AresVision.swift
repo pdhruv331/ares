@@ -20,6 +20,10 @@
 //   {"type":"error","code":"denied|nocamera|config","message":"…"}
 // Commands (lines on stdin, or on the socket):
 //   start | stop | rate <fps> | res low|high | filter <minCutoff> <beta> | floor <confidence> | status | quit
+//   preview on|off      a floating window showing what the camera sees, with the joints drawn on it (tuning). The
+//                       frames still never leave this process: ARES only sends back what to draw over them:
+//   overlay <json>      {"state","hands":[{"side","pose","valid"}],"box":[x,y,w,h],"cursor":[x,y],"acts":["…"]}
+//   Events: {"type":"preview","on":false} when the window is closed by hand.
 //
 // Launch: ARES starts this as a real app through LaunchServices (`open -a "ARES Vision.app" --args --serve <socket>`), and the
 // helper connects back to that UNIX socket and talks the line protocol over it. Why: macOS grants the camera to an app it can
@@ -27,6 +31,7 @@
 // the helper exits as soon as ARES hangs up.
 //
 // Bench (no camera): ares-vision --bench <frames> <low|high> [image]   Vision cost per frame on a still image.
+import AppKit
 import AVFoundation
 import CoreGraphics
 import CoreImage
@@ -120,6 +125,7 @@ final class HandsTask: VisionTask {
   var request: VNRequest { hand }
   var floor: Float = 0.3
   var minCutoff = 1.2, beta = 0.02
+  var lastJoints: [[CGPoint?]] = []  // the last frame's filtered joints (mirrored, normalised), for the preview
   // Filters per hand slot ("left"/"right"/"?0"/"?1") × 21 joints × x,y
   private var filters: [String: [OneEuro]] = [:]
   private var lastSeen: [String: Double] = [:]
@@ -135,6 +141,7 @@ final class HandsTask: VisionTask {
     let obs = hand.results ?? []
     var out: [String] = []   // written by hand: compact, fixed 4 decimals
     var used = Set<String>()
+    var drawn: [[CGPoint?]] = []
     for (i, o) in obs.enumerated() {
       guard let pts = try? o.recognizedPoints(.all) else { continue }
       var side = "?"
@@ -151,17 +158,103 @@ final class HandsTask: VisionTask {
       lastSeen[slot] = ts
       let fs = filters[slot]!
       var j: [String] = []
+      var pts2: [CGPoint?] = []
       for (k, name) in HandsTask.joints.enumerated() {
-        guard let p = pts[name], p.confidence >= floor else { j.append("null"); continue }
+        guard let p = pts[name], p.confidence >= floor else { j.append("null"); pts2.append(nil); continue }
         let x = fs[k * 2].filter(1 - Double(p.location.x), ts)      // mirrored
         let y = fs[k * 2 + 1].filter(1 - Double(p.location.y), ts)  // top-left origin
         j.append(String(format: "[%.4f,%.4f,%.2f]", x, y, p.confidence))
+        pts2.append(CGPoint(x: x, y: y))
       }
+      drawn.append(pts2)
       out.append(String(format: "{\"side\":\"%@\",\"c\":%.2f,\"j\":[%@]}", side, o.confidence, j.joined(separator: ",")))
     }
+    lastJoints = drawn
     return "\"hands\":[" + out.joined(separator: ",") + "]"
   }
 }
+
+// ---- Preview window (tuning): the frame, the joints, and what ARES made of them ----------------------------------
+final class PreviewView: NSView {
+  var image: CGImage?
+  var joints: [[CGPoint?]] = []
+  var overlay: [String: Any] = [:]
+  override var isFlipped: Bool { true }
+  static let bones: [(Int, Int)] = [(0,1),(1,2),(2,3),(3,4),(0,5),(5,6),(6,7),(7,8),(0,9),(9,10),(10,11),(11,12),(0,13),(13,14),(14,15),(15,16),(0,17),(17,18),(18,19),(19,20),(5,9),(9,13),(13,17)]
+  override func draw(_ dirty: NSRect) {
+    guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+    NSColor.black.setFill(); bounds.fill()
+    let W = bounds.width, H = bounds.height
+    if let img = image {
+      // mirrored, so it reads like a mirror (joints are already mirrored)
+      ctx.saveGState()
+      ctx.translateBy(x: W, y: H); ctx.scaleBy(x: -1, y: -1)
+      ctx.draw(img, in: CGRect(x: 0, y: 0, width: W, height: H))
+      ctx.restoreGState()
+    }
+    let cyan = NSColor(calibratedRed: 0.24, green: 0.9, blue: 1, alpha: 1)
+    let P = { (p: CGPoint) in CGPoint(x: p.x * W, y: p.y * H) }
+    // the interaction box and where the hand maps inside it
+    if let b = overlay["box"] as? [Double], b.count == 4 {
+      let r = CGRect(x: b[0] * W, y: b[1] * H, width: b[2] * W, height: b[3] * H)
+      ctx.setStrokeColor(cyan.withAlphaComponent(0.7).cgColor); ctx.setLineWidth(1); ctx.setLineDash(phase: 0, lengths: [4, 3]); ctx.stroke(r); ctx.setLineDash(phase: 0, lengths: [])
+      if let c = overlay["cursor"] as? [Double], c.count == 2 {
+        let p = CGPoint(x: r.minX + c[0] * r.width, y: r.minY + c[1] * r.height)
+        ctx.setFillColor(NSColor.white.cgColor); ctx.fillEllipse(in: CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8))
+      }
+    }
+    let handInfo = overlay["hands"] as? [[String: Any]] ?? []
+    for (i, h) in joints.enumerated() {
+      let info = i < handInfo.count ? handInfo[i] : [:]
+      let valid = (info["valid"] as? Bool) ?? true
+      let col = valid ? cyan : NSColor.systemRed
+      ctx.setStrokeColor(col.withAlphaComponent(0.9).cgColor); ctx.setLineWidth(2)
+      for (a, b) in PreviewView.bones { if let pa = h[a], let pb = h[b] { ctx.move(to: P(pa)); ctx.addLine(to: P(pb)); ctx.strokePath() } }
+      ctx.setFillColor(NSColor.white.cgColor)
+      for p in h.compactMap({ $0 }) { let q = P(p); ctx.fillEllipse(in: CGRect(x: q.x - 2.5, y: q.y - 2.5, width: 5, height: 5)) }
+      if let w = h[0] {
+        let label = "\(info["side"] as? String ?? "?") · \(info["pose"] as? String ?? "")\(valid ? "" : " (ignored)")"
+        (label as NSString).draw(at: CGPoint(x: P(w).x + 8, y: P(w).y + 4), withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold), .foregroundColor: col])
+      }
+    }
+    var lines = ["state: \(overlay["state"] as? String ?? "–")"]
+    for a in (overlay["acts"] as? [String] ?? []) { lines.append(a) }
+    var y: CGFloat = 8
+    for (i, l) in lines.enumerated() {
+      (l as NSString).draw(at: CGPoint(x: 8, y: y), withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: i == 0 ? 13 : 11, weight: i == 0 ? .bold : .regular), .foregroundColor: i == 0 ? cyan : NSColor.white.withAlphaComponent(0.85)])
+      y += i == 0 ? 18 : 14
+    }
+  }
+}
+
+final class Preview: NSObject, NSWindowDelegate {
+  var window: NSWindow?
+  let view = PreviewView()
+  let ci = CIContext()
+  var on: Bool { window != nil }
+  func show() {
+    if window == nil {
+      let w = NSWindow(contentRect: NSRect(x: 60, y: 120, width: 480, height: 360), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+      w.title = "ARES Vision — what the camera sees"
+      w.level = .floating
+      w.isReleasedWhenClosed = false
+      w.contentView = view
+      w.delegate = self
+      w.contentAspectRatio = NSSize(width: 4, height: 3)
+      window = w
+    }
+    window?.orderFrontRegardless()
+  }
+  func hide() { window?.close(); window = nil }
+  func windowWillClose(_ n: Notification) { window = nil; emit(["type": "preview", "on": false]) }
+  /** From the capture queue. */
+  func frame(_ px: CVPixelBuffer, joints: [[CGPoint?]]) {
+    guard on, let cg = ci.createCGImage(CIImage(cvPixelBuffer: px), from: CGRect(x: 0, y: 0, width: CVPixelBufferGetWidth(px), height: CVPixelBufferGetHeight(px))) else { return }
+    DispatchQueue.main.async { self.view.image = cg; self.view.joints = joints; self.view.needsDisplay = true }
+  }
+  func overlay(_ o: [String: Any]) { DispatchQueue.main.async { self.view.overlay = o; self.view.needsDisplay = true } }
+}
+let preview = Preview()
 
 func round4(_ v: Double) -> Double { (v * 10000).rounded() / 10000 }
 
@@ -294,6 +387,7 @@ final class Camera: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     frames += 1
     let key = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
     let parts = tasks.map { $0.publish(ts: ts) }
+    if preview.on, let h = tasks.compactMap({ $0 as? HandsTask }).first { preview.frame(px, joints: h.lastJoints) }
     emitLine(String(format: "{\"type\":\"hands\",\"ts\":%.0f,\"key\":%.2f,", ts, key) + parts.joined(separator: ",") + "}")
     // The frame is dropped here: never kept, written or sent anywhere
     if ts - statsAt > 5000 {
@@ -362,6 +456,9 @@ func handle(_ line: String) {
     case "start": camera.start()
     case "stop": camera.stop()
     case "quit": camera.stop(); exit(0)
+    case "preview": if parts.count > 1 && parts[1] == "on" { preview.show() } else { preview.hide() }
+    case "overlay":
+      if let d = line.dropFirst(8).data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { preview.overlay(o) }
     case "rate": if parts.count > 1, let f = Double(parts[1]) { camera.setRate(f) }
     case "res": if parts.count > 1 { camera.setRes(parts[1] == "high" ? "high" : "low") }
     case "filter": if parts.count > 2, let a = Double(parts[1]), let b = Double(parts[2]) { camera.queue.async { hands.tune(minCutoff: a, beta: b) } }
@@ -415,4 +512,6 @@ if let i = args.firstIndex(of: "--serve"), args.count > i + 1 {
 }
 
 emit(["type": "ready"])
-RunLoop.main.run()
+let nsapp = NSApplication.shared
+nsapp.setActivationPolicy(.accessory)
+nsapp.run()

@@ -84,6 +84,8 @@ class Vision extends EventEmitter {
   }
   get available() { return fs.existsSync(this.helper); }
 
+  /** The tuning window in the helper: what the camera sees, with ARES's reading of it drawn over. */
+  preview(on) { this.previewOn = Boolean(on); this.send(`preview ${on ? 'on' : 'off'}`); if (on && !this.child) this.check(); this.emit('state', this.state); }
   /** off | watching | engaged, and why it's off. */
   get state() { return { state: this.engine.state, camera: this.camera, why: this.why, permission: this.permission, stats: this.stats, recording: this.rec?.name || null }; }
 
@@ -150,6 +152,7 @@ class Vision extends EventEmitter {
       s.on('error', () => gone('socket error'));
       for (const cmd of conn.queued || []) this.send(cmd);
       conn.queued = null;
+      if (this.previewOn) this.send('preview on');
     });
     conn.server.on('error', (err) => { this.log('hands', { why: `socket: ${err.message}` }); gone('socket'); });
     conn.server.listen(sock, () => {
@@ -207,6 +210,7 @@ class Vision extends EventEmitter {
         this.emit('state', this.state);
         break;
       case 'stats': this.stats = { fps: m.fps, ms: m.ms, at: Date.now() }; this.emit('stats', this.stats); break;
+      case 'preview': this.previewOn = Boolean(m.on); this.emit('state', this.state); break;
       case 'error': this.log('hands error', m); this.why = m.message; this.emit('state', this.state); break;
       case 'hands': this.frame(m); break;
       default: break;
@@ -223,6 +227,14 @@ class Vision extends EventEmitter {
     }
     const before = this.engine.state;
     const acts = this.engine.feed({ ts: m.ts, aspect, key: m.key, face: m.face, hands: m.hands });
+    if (this.previewOn) {
+      const e = this.engine, bx = e.lastBox;
+      for (const a of acts) if (a.type !== 'cursor' && a.type !== 'move' && !(a.type === 'zoom' && a.phase === 'update')) {
+        (this.recentActs ||= []).push(`${new Date().toLocaleTimeString([], { hour12: false })} ${a.type}${a.state ? ':' + a.state : ''}${a.dir ? ':' + a.dir : ''}${a.click ? ':click' : ''}${a.phase ? ':' + a.phase : ''}`);
+        if (this.recentActs.length > 8) this.recentActs.shift();
+      }
+      this.send('overlay ' + JSON.stringify({ state: e.state, hands: e.lastHands || [], box: bx ? [bx.x / aspect, bx.y, bx.w / aspect, bx.h] : null, cursor: e.cursor ? [e.cursor.x, e.cursor.y] : null, acts: this.recentActs || [] }));
+    }
     if (!acts.length) return;
     this.applyCamera(acts);
     this.dispatch(acts);
