@@ -77,7 +77,8 @@ function features(hand, aspect = 4 / 3) {
   const spread = dist(im, lm) / size; // knuckles across: ~0.6+ facing the camera, small side-on
   const twoTip = u[J.INDEX_TIP] && u[J.MIDDLE_TIP] ? mid(u[J.INDEX_TIP], u[J.MIDDLE_TIP]) : null;
   const thumbUp = u[J.THUMB_TIP] ? (im.y - u[J.THUMB_TIP].y) / size : null;
-  return { size, palm, palmN: { x: palm.x / aspect, y: palm.y }, fingers, pinch, thumbOut, spread, twoTip, thumbUp, aspect };
+  const tip = u[J.INDEX_TIP] || u[J.INDEX_PIP] || im; // the pointer: the index fingertip (a palm is too coarse to point with)
+  return { size, palm, palmN: { x: palm.x / aspect, y: palm.y }, tip, tipN: { x: tip.x / aspect, y: tip.y }, fingers, pinch, thumbOut, spread, twoTip, thumbUp, aspect };
 }
 
 const STRAIGHT = 1.45, CURLED = 1.2;
@@ -195,7 +196,7 @@ class HandEngine {
       if (this.pinch && this.pinch.side === h.side && this.pinch.phase !== 'wait') return true;
       return h.pose === 'pinch' && this.onTarget(this.pointFor(h.f));
     });
-    this.lastHands = hands.map((h) => ({ side: h.side, pose: h.pose, valid: valid.includes(h), palm: h.f.palmN, size: h.f.size })); // (for the preview and calibration)
+    this.lastHands = hands.map((h) => ({ side: h.side, pose: h.pose, valid: valid.includes(h), palm: h.f.palmN, tip: h.f.tipN, size: h.f.size })); // (for the preview and calibration)
     this.lastBox = hands[0] ? boxFor(this.sizeEma ?? hands[0].f.size, aspect, o, this.boxCentre) : null;
     for (const h of hands) { // pose history (also for hands that don't count: a pose must re-form after it)
       h.slot.prevPose = h.slot.pose;
@@ -212,7 +213,7 @@ class HandEngine {
           this.state = 'engaged';
           this.primary = h.side;
           this.sizeEma = h.f.size;
-          this.boxCentre = { x: h.f.palm.x, y: h.f.palm.y + h.f.size * 0.4 }; // a touch below the palm: hands drop as they relax
+          this.boxCentre = { x: h.f.tip.x, y: h.f.tip.y + h.f.size * 0.6 }; // a little below the fingertip: hands drop as they relax
           h.slot.armed = false; // the palm that engaged has to drop before a palm counts again
           h.slot.openSince = null;
           out.push({ type: 'state', state: 'engaged' }, { type: 'camera', ...this.camera() });
@@ -282,9 +283,9 @@ class HandEngine {
     return s;
   }
 
-  /** The cursor: the palm's centre (steady through a pinch), through the interaction box. */
+  /** The cursor: the index fingertip, through the interaction box (a pinch anchors where the tip was). */
   pointFor(f) {
-    return toDisplay(f.palm, boxFor(this.sizeEma ?? f.size, f.aspect, this.o, this.boxCentre));
+    return toDisplay(f.tip, boxFor(this.sizeEma ?? f.size, f.aspect, this.o, this.boxCentre));
   }
 
   twoFinger(h, now, out) {

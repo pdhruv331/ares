@@ -87,7 +87,7 @@ class Vision extends EventEmitter {
   // ---- Calibration: the user shows where the screen's top-left and bottom-right corners are (open palm, held 1 s each)
   calibrate() {
     this.cal = { step: 0, since: 0, at: null, points: [] };
-    this.calNote?.('Calibrating: hold an open palm where the TOP-LEFT corner of the screen feels right…');
+    this.calNote?.('Calibrating: open hand, index fingertip where the TOP-LEFT corner of the screen feels right…');
     if (!this.previewOn) this.preview(true);
     this.emit('state', this.state);
   }
@@ -97,7 +97,7 @@ class Vision extends EventEmitter {
     const h = (this.engine.lastHands || []).find((x) => x.pose === 'open');
     const now = Date.now();
     if (!h) { c.since = 0; return; }
-    if (!c.since || Math.hypot(h.palm.x - c.at.x, h.palm.y - c.at.y) > h.size * 0.3) { c.since = now; c.at = h.palm; return; }
+    if (!c.since || Math.hypot(h.tip.x - c.at.x, h.tip.y - c.at.y) > h.size * 0.3) { c.since = now; c.at = h.tip; return; }
     if (now - c.since < 1000) return;
     c.points.push({ ...c.at });
     c.since = 0;
