@@ -6,6 +6,10 @@
 //                                       (the Dock's own badges, through the Accessibility API; {} without permission).
 //   ares-theme app-icon <size> <out.png> <path>…   Each file's Finder icon as a PNG (<out> gets -<n> before .png for n > 0)
 //   ares-theme set-icon <path> <png | ->           A custom Finder icon for a file or folder ("-" removes it)
+//   ares-theme pointer                  Long-running: the Mac's pointer from stdin lines (hand gestures, vision.js):
+//                                       "move <x> <y>" (screen px, top-left origin) | "down" | "up" | "scroll <px>".
+//                                       Posts CGEvents (needs Accessibility, which ARES has): a pinch is a real click
+//                                       anywhere, Finder, the ARES bar, any app.
 //   ares-theme quit <bundleID>          Asks an app to quit (NSRunningApplication.terminate)
 //   ares-theme activate <bundleID> <app path>   Open or switch to an app the way a Dock click does: Launch Services
 //                                       (which switches Spaces), then, with Accessibility, frontmost + its window raised
@@ -326,6 +330,35 @@ case "appearance-changed":
 
 case "focus":
   emit(["focus": focusState()])
+
+case "pointer":
+  var at = CGPoint(x: 0, y: 0), held = false
+  let src = CGEventSource(stateID: .combinedSessionState)
+  func post(_ type: CGEventType, _ p: CGPoint) {
+    guard let e = CGEvent(mouseEventSource: src, mouseType: type, mouseCursorPosition: p, mouseButton: .left) else { return }
+    e.post(tap: CGEventTapLocation.cghidEventTap)
+  }
+  emit(["ok": true, "trusted": AXIsProcessTrusted()])
+  while let line = readLine() {
+    let a = line.split(separator: " ").map(String.init)
+    guard let cmd = a.first else { continue }
+    switch cmd {
+    case "move":
+      guard a.count > 2, let x = Double(a[1]), let y = Double(a[2]) else { continue }
+      at = CGPoint(x: x, y: y)
+      post(held ? .leftMouseDragged : .mouseMoved, at)
+    case "down": held = true; post(.leftMouseDown, at)
+    case "up": held = false; post(.leftMouseUp, at)
+    case "scroll":
+      guard a.count > 1, let dy = Double(a[1]) else { continue }
+      if let e = CGEvent(scrollWheelEvent2Source: src, units: .pixel, wheelCount: 1, wheel1: Int32(dy.rounded()), wheel2: 0, wheel3: 0) {
+        e.location = at
+        e.post(tap: CGEventTapLocation.cghidEventTap)
+      }
+    default: break
+    }
+  }
+  if held { post(.leftMouseUp, at) } // ARES went away mid-drag: let go
 
 case "ax":
   emit(["trusted": AXIsProcessTrusted()])

@@ -211,9 +211,9 @@ const Hands = (() => {
         dispatchEvent(new CustomEvent('hands', { detail: state }));
         break;
       case 'cursor': if (a.lost) hideCursor(); else showCursor(a, a.pose); break;
-      case 'down': down(a); break;
+      case 'down': if (a.mac) tick(660); else down(a); break;
       case 'move': move(a); break;
-      case 'up': up(a, a); break;
+      case 'up': if (a.mac) tick(520); else up(a, a); break;
       case 'swipe': tick(a.dir === 'down' ? 440 : 720); swipe(a.dir); break;
       case 'scroll': scroll(a.dy); break;
       case 'zoom': if (a.phase === 'start') { zoomStart(a); } else if (a.phase === 'update') zoomUpdate(a); else zoomEnd(a); break;

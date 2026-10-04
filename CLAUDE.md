@@ -112,6 +112,10 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   helper + engine and holds the camera rules (switch on, desk mode active, no Low Power Mode; lid in the helper); `renderer/hands.js`
   turns actions into the SAME pointer events and Dash/Comms calls the mouse uses (no second copy of the interactions).
 - Thresholds live in settings `hands.tune` (see `DEFAULTS` in hands.js). The switch is `hands.enabled`, default off.
+- Mac mode (`hands.mac`, default on): the hand drives the Mac's own pointer through `ares-theme pointer` (CGEvents, under ARES's
+  Accessibility grant): a pinch is a real click/drag anywhere, two-finger drift a real scroll; ARES's panels get it through the
+  normal mouse path. Swipes, zoom and the palm stay ARES's own. Off: the window gets synthetic pointer events (scene only).
+- The camera stays on through "go quiet" (that's about listening); it follows the rest of desk mode's conditions.
 - Tests: `node scripts/test-hands.js [-v]` replays synthetic clips (`scripts/hands-synth.js`) and any recorded clips in
   `<support>/hands/clips`; every positive must fire, no negative may. Record clips from the ◉ menu (dev only, joints only).
   In a harness, `Hands.test(clip)` in the window replays a clip through the live engine (`vision.replay`; the camera rules hold

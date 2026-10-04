@@ -13,7 +13,8 @@ const EventEmitter = require('events');
 const { HandEngine } = require('./hands');
 
 class Vision extends EventEmitter {
-  /** opts: { helper, log, readSettings, writeSettings, supportDir, powerMonitor, desk, lowPower: () => bool, devBuild } */
+  /** opts: { helper, pointerHelper, screen, bounds: () => window bounds, log, readSettings, writeSettings, supportDir, powerMonitor, desk,
+   *          lowPower: () => bool, devBuild } */
   constructor(opts) {
     super();
     Object.assign(this, opts);
@@ -35,7 +36,45 @@ class Vision extends EventEmitter {
 
   get opts() {
     const h = this.readSettings().hands || {};
-    return { enabled: Boolean(h.enabled), tune: h.tune || {} };
+    return { enabled: Boolean(h.enabled), mac: h.mac !== false, tune: h.tune || {} };
+  }
+
+  // ---- Mac mode (default): the hand moves the Mac's own pointer, a pinch is a real click and drag, two-finger drift a real
+  // scroll, anywhere on screen (Finder, the ARES bar, apps, and ARES's own panels through the normal mouse path). Swipes,
+  // zoom and the palm stay ARES's own. Off: the window gets synthetic pointer events instead (ARES's scene only).
+  pointer(cmd) {
+    if (!this.ptr) {
+      if (!this.pointerHelper || !fs.existsSync(this.pointerHelper)) return;
+      const p = spawn(this.pointerHelper, ['pointer'], { stdio: ['pipe', 'pipe', 'ignore'] });
+      p.stdout.on('data', (d) => { try { const m = JSON.parse(String(d).trim().split('\n')[0]); if (m.trusted === false) this.log('hands', { pointer: 'no Accessibility' }); } catch {} });
+      p.on('exit', () => { if (this.ptr === p) this.ptr = null; });
+      this.ptr = p;
+    }
+    try { this.ptr.stdin.write(cmd + '\n'); } catch {}
+  }
+  pointerStop() { if (this.ptr) { try { this.ptr.stdin.end(); } catch {} this.ptr = null; } }
+
+  /** Engine actions → the Mac's pointer (Mac mode) and the window. Points are display fractions; the window gets them
+   *  relative to itself (the ring and brackets), the pointer gets screen pixels. */
+  dispatch(actions) {
+    if (!this.opts.mac) return this.emit('actions', actions);
+    const D = this.screen.getPrimaryDisplay().bounds, b = this.bounds?.() || D;
+    const toScreen = (a) => ({ x: Math.round(D.x + a.x * D.width), y: Math.round(D.y + a.y * D.height) });
+    const toWin = (a) => { const s = toScreen(a); return { ...a, x: (s.x - b.x) / b.width, y: (s.y - b.y) / b.height }; };
+    const out = [];
+    for (const a of actions) {
+      switch (a.type) {
+        case 'cursor': if (!a.lost) { const s = toScreen(a); if (!this.zooming) this.pointer(`move ${s.x} ${s.y}`); out.push(toWin(a)); } else out.push(a); break;
+        case 'down': { const s = toScreen(a); this.pointer(`move ${s.x} ${s.y}`); this.pointer('down'); out.push({ ...toWin(a), mac: true }); break; }
+        case 'move': { const s = toScreen(a); this.pointer(`move ${s.x} ${s.y}`); break; }
+        case 'up': { const s = toScreen(a); if (!a.cancel) this.pointer(`move ${s.x} ${s.y}`); this.pointer('up'); out.push({ ...toWin(a), mac: true }); break; }
+        case 'scroll': this.pointer(`scroll ${Math.round(a.dy * 500)}`); break;
+        case 'zoom': this.zooming = a.phase !== 'end'; out.push({ ...a, ...(a.x != null ? toWin(a) : {}), a: a.a && toWin(a.a), b: a.b && toWin(a.b) }); break;
+        case 'state': if (a.state !== 'engaged') { this.pointer('up'); this.pointerStop(); } out.push(a); break;
+        default: out.push(a);
+      }
+    }
+    if (out.length) this.emit('actions', out);
   }
   tuneOpts() { return this.opts.tune; }
   set(patch) {
@@ -54,7 +93,8 @@ class Vision extends EventEmitter {
     if (!o.enabled) return 'off';
     if (!this.available) return 'helper missing';
     if (this.permission === 'denied') return 'camera access denied';
-    if (!this.desk.state.active) return `desk mode: ${this.desk.state.reason}`;
+    // Desk mode's conditions (unlocked, not idle, no call, the switch on); "go quiet" is about listening, not the camera
+    if (!this.desk.state.active && this.desk.state.reason !== 'told to go quiet') return `desk mode: ${this.desk.state.reason}`;
     if (this.lowPower()) return 'Low Power Mode';
     return 'on';
   }
@@ -86,7 +126,7 @@ class Vision extends EventEmitter {
       if (this.child !== conn) return; // replaced already (a stop and a new start)
       this.child = null;
       this.camera = { on: false };
-      this.emit('actions', this.engine.stop());
+      this.dispatch(this.engine.stop());
       this.emit('state', this.state);
       if (this.why !== 'on') return;
       if (++this.restarts > 4) { this.why = `helper crashed (${why})`; this.log('hands', { why: this.why }); this.emit('state', this.state); return; }
@@ -125,12 +165,13 @@ class Vision extends EventEmitter {
     const acts = this.engine.start();
     this.applyCamera(acts);
     this.send('start');
-    this.emit('actions', acts);
+    this.dispatch(acts);
     this.emit('state', this.state);
   }
 
   stop() {
-    if (this.engine.state !== 'off') this.emit('actions', this.engine.stop());
+    if (this.engine.state !== 'off') this.dispatch(this.engine.stop());
+    this.pointerStop();
     if (!this.child) return;
     const c = this.child;
     this.send('quit'); // the helper releases the camera and exits; hanging up below makes sure of it
@@ -162,7 +203,7 @@ class Vision extends EventEmitter {
       case 'permission': this.permission = m.status; if (m.status === 'denied') this.check(); this.emit('state', this.state); break;
       case 'camera':
         this.camera = m;
-        if (!m.on && m.why === 'lid') { this.why = 'lid closed'; this.emit('actions', this.engine.stop()); setTimeout(() => this.check(), 5000); }
+        if (!m.on && m.why === 'lid') { this.why = 'lid closed'; this.dispatch(this.engine.stop()); setTimeout(() => this.check(), 5000); }
         this.emit('state', this.state);
         break;
       case 'stats': this.stats = { fps: m.fps, ms: m.ms, at: Date.now() }; this.emit('stats', this.stats); break;
@@ -184,7 +225,7 @@ class Vision extends EventEmitter {
     const acts = this.engine.feed({ ts: m.ts, aspect, key: m.key, face: m.face, hands: m.hands });
     if (!acts.length) return;
     this.applyCamera(acts);
-    this.emit('actions', acts);
+    this.dispatch(acts);
     if (this.engine.state !== before) { this.log('hands', { state: this.engine.state }); this.emit('state', this.state); }
   }
 
@@ -218,7 +259,7 @@ class Vision extends EventEmitter {
   /** Feed a clip (as from scripts/hands-synth.js or a recording) through the live engine, at its own pace. */
   replay(clip, { realtime = true } = {}) {
     if (!this.devBuild) return;
-    if (this.engine.state === 'off') { this.engine.reset('watching'); this.emit('actions', [{ type: 'state', state: 'watching' }]); }
+    if (this.engine.state === 'off') { this.engine.reset('watching'); this.dispatch([{ type: 'state', state: 'watching' }]); }
     const frames = clip.frames || [];
     const t0 = frames[0]?.ts ?? 0, start = Date.now();
     this.replaying = true;
@@ -228,7 +269,7 @@ class Vision extends EventEmitter {
       while (i < frames.length && (!realtime || frames[i].ts - t0 <= Date.now() - start)) {
         const f = frames[i++];
         const acts = this.engine.feed({ aspect: clip.aspect || 4 / 3, ...f });
-        if (acts.length) { this.applyCamera(acts); this.emit('actions', acts); }
+        if (acts.length) { this.applyCamera(acts); this.dispatch(acts); }
       }
       if (i < frames.length) setTimeout(step, 8);
       else { this.emit('state', this.state); this.replayIdle = setTimeout(() => { this.replaying = false; this.check(); }, 30_000); } // the camera rules return after a quiet half minute
@@ -239,6 +280,7 @@ class Vision extends EventEmitter {
   quit() {
     clearInterval(this.timer);
     this.rec = null;
+    this.pointerStop();
     const c = this.child;
     if (c) { this.send('quit'); this.child = null; try { c.sock?.destroy(); } catch {} try { c.server?.close(); } catch {} }
     try { fs.unlinkSync(path.join(this.supportDir, 'vision.sock')); } catch {}
