@@ -51,6 +51,11 @@ class AresService : Service() {
         fun apiIntent(c: Context, api: String, body: String, id: Int): PendingIntent = PendingIntent.getService(
             c, Notes.nextId(), Intent(c, AresService::class.java).setAction(ACTION_API).putExtra("api", api).putExtra("body", body).putExtra("id", id),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        /** A notification button you type into (Reply): the text goes to ARES after `prefix` ("Reply to the … session: "). */
+        fun replyIntent(c: Context, prefix: String, id: Int): PendingIntent = PendingIntent.getService(
+            c, Notes.nextId(), Intent(c, AresService::class.java).setAction(ACTION_REPLY).putExtra("prefix", prefix).putExtra("id", id),
+            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        fun replyInput(label: String = "Reply…"): RemoteInput = RemoteInput.Builder(KEY_TEXT).setLabel(label).build()
         fun restart(c: Context) { if (Ares.paired(c)) runCatching { c.startForegroundService(Intent(c, AresService::class.java).setAction(ACTION_RECONNECT)) } }
     }
 
@@ -90,7 +95,10 @@ class AresService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!Ares.paired(this)) { stopSelf(); return START_NOT_STICKY }
         when (intent?.action) {
-            ACTION_REPLY -> RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_TEXT)?.toString()?.let(::askInBackground)
+            ACTION_REPLY -> RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_TEXT)?.toString()?.takeIf { it.isNotBlank() }?.let { text ->
+                intent.getIntExtra("id", 0).takeIf { it != 0 }?.let(nm::cancel) // a Reply on an alert: that alert is answered
+                askInBackground((intent.getStringExtra("prefix") ?: "") + text)
+            }
             ACTION_ASK -> {
                 nm.cancel(intent.getIntExtra("id", 0)) // the notification whose button this was
                 intent.getStringExtra(KEY_TEXT)?.let(::askInBackground)
@@ -229,7 +237,7 @@ class AresService : Service() {
 
     /** A notification button that acts through the Mac's job API. Only a problem (or Send to Mac's answer) is shown. */
     private fun callApi(api: String, body: String) {
-        if (!api.startsWith("/api/jobs/")) return
+        if (!api.startsWith("/api/jobs/") && !api.startsWith("/api/claude/")) return
         thread(name = "ares-job-api") {
             val r = runCatching { client.post(api, JSONObject(body)) }.getOrElse { JSONObject().put("error", "Couldn't reach your Mac.") }
             val line = when {

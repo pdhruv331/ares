@@ -85,18 +85,22 @@ object Notes {
         }))
         // Buttons arrive as an array (live line) or as a JSON string (Firebase data messages are all strings)
         val buttons = m.optJSONArray("buttons") ?: m.optString("buttons").takeIf { it.startsWith("[") }?.let { runCatching { JSONArray(it) }.getOrNull() }
-        for (i in 0 until (buttons?.length() ?: 0).coerceAtMost(2)) {
+        for (i in 0 until (buttons?.length() ?: 0).coerceAtMost(3)) {
             val btn = buttons!!.getJSONObject(i)
             val title = btn.optString("title", "Open")
             val url = btn.optString("url")
             val ask = btn.optString("ask")
             val openJob = btn.optString("job")
             val api = btn.optString("api")
+            val reply = btn.optString("reply")
             when {
                 // Open: the job in the app. Yes / No, Send to Mac: straight to the Mac's job API, no brain turn;
                 // tapping it is the answer (the Mac only accepts it for the exact request that's waiting)
                 openJob.isNotBlank() -> b.addAction(Notification.Action.Builder(null, title, activity(c, WorkActivity.intent(c, openJob))).build())
-                api.startsWith("/api/jobs/") -> b.addAction(Notification.Action.Builder(null, title, AresService.apiIntent(c, api, btn.optJSONObject("body")?.toString() ?: "{}", id)).build())
+                // Reply: typed on the notification, sent to ARES as "<reply prefix><what you typed>"
+                reply.isNotBlank() -> b.addAction(Notification.Action.Builder(null, title, AresService.replyIntent(c, reply, id))
+                    .addRemoteInput(AresService.replyInput()).setAllowGeneratedReplies(false).build())
+                api.startsWith("/api/jobs/") || api.startsWith("/api/claude/") -> b.addAction(Notification.Action.Builder(null, title, AresService.apiIntent(c, api, btn.optJSONObject("body")?.toString() ?: "{}", id)).build())
                 url.isNotBlank() && safe(url) -> b.addAction(Notification.Action.Builder(null, title,
                     activity(c, Intent(if (url.startsWith("tel:")) Intent.ACTION_DIAL else Intent.ACTION_VIEW, Uri.parse(url)))).build())
                 ask.isNotBlank() -> b.addAction(Notification.Action.Builder(null, title, AresService.askIntent(c, ask, id)).build())

@@ -242,6 +242,9 @@ function refreshTray() {
     { type: 'separator' },
     { label: jobs?.active.length ? `Work: ${jobs.running.length} running, ${jobs.active.length - jobs.running.length} queued` : 'Work: no jobs running', enabled: false },
     { label: 'Open Work Folder…', click: () => shell.openPath(jobs.dir) },
+    { label: claudeCtl?.hooksInstalled() ? 'Claude Code alerts: connected' : 'Claude Code alerts: hooks not installed', enabled: false },
+    { label: 'Quiet Hours for Claude Alerts (11 pm–7 am)', type: 'checkbox', checked: readSettings().claudeQuiet !== false,
+      click: (item) => { writeSettings({ claudeQuiet: item.checked ? { from: 23, to: 7 } : false }); refreshTray(); } },
     { type: 'separator' },
     ...voiceMenu(),
     { label: 'Reduce Motion', type: 'checkbox', checked: Boolean(readSettings().reduceMotion), click: (item) => { writeSettings({ reduceMotion: item.checked }); win?.webContents.send('ui-prefs', uiPrefs()); wallpaper?.prefs(); refreshTray(); } },
@@ -717,7 +720,8 @@ async function pushToPhones({ title, body, buttons = [], tag, job }) {
   const keys = vapid();
   webpush.setVapidDetails('mailto:ares@localhost', keys.publicKey, keys.privateKey);
   const devices = readSettings().phoneDevices || [];
-  const payload = JSON.stringify({ title, body, tag, job, buttons: buttons.slice(0, 2) });
+  // The browser app shows two buttons; the Android app three (Reply is the third, typed on the notification)
+  const payload = JSON.stringify({ title, body, tag, job, buttons: buttons.filter((b) => !b.reply).slice(0, 2) });
   if (tag) pushedTags.add(tag);
   let sent = 0;
   let changed = false;
@@ -732,9 +736,9 @@ async function pushToPhones({ title, body, buttons = [], tag, job }) {
     }
   }
   if (changed) writeSettings({ phoneDevices: devices });
-  const live = phone?.notifyNative({ title, body, tag, job, buttons: buttons.slice(0, 2) }) || 0; // the Android app, if connected
+  const live = phone?.notifyNative({ title, body, tag, job, buttons: buttons.slice(0, 3) }) || 0; // the Android app, if connected
   // ...and through Firebase via the relay, which reaches it off Tailscale and with the app asleep
-  const viaFcm = relay?.ready && (readSettings().phoneDevices || []).some((d) => d.fcm) ? await relay.notify({ title, body, tag, job, buttons: buttons.slice(0, 2) }) : 0;
+  const viaFcm = relay?.ready && (readSettings().phoneDevices || []).some((d) => d.fcm) ? await relay.notify({ title, body, tag, job, buttons: buttons.slice(0, 3) }) : 0;
   sent += Math.max(live, viaFcm);
   log('push', { title, sent, fcm: viaFcm });
   return sent;
@@ -1190,6 +1194,35 @@ function startClaudeControl() {
     },
   });
   claudeCtl = new ClaudeControl({ log, sessions, jobs });
+  claudeCtl.startHooks(app.getPath('userData'), path.join(__dirname, 'tools', 'claude-hook.sh'));
+  claudeCtl.on('alert', deliverClaudeAlert);
+  setInterval(releaseHeldAlerts, 60_000);
+}
+
+// A Claude session finished or needs them: a quiet line on screen at the Mac, a push when they're away.
+// Quiet hours (default 11 pm to 7 am) hold phone pushes and send one round-up when they end.
+const heldAlerts = [];
+function claudeQuietNow() {
+  const q = readSettings().claudeQuiet ?? { from: 23, to: 7 };
+  if (!q) return false;
+  const h = new Date().getHours();
+  return q.from > q.to ? h >= q.from || h < q.to : h >= q.from && h < q.to;
+}
+function deliverClaudeAlert(a) {
+  toDash({ type: 'activity', text: `claude: ${a.title}` });
+  const here = atMac();
+  if (here && !a.quietOnMac) notice(a.line);
+  if (here && !readSettings().workAlwaysPhone) return;
+  if (claudeQuietNow()) { heldAlerts.push(a); log('claude alert held', { kind: a.kind }); return; }
+  pushToPhones({ title: a.title, body: a.body, tag: a.tag, buttons: a.buttons }).catch(() => {});
+}
+function releaseHeldAlerts() {
+  if (!heldAlerts.length || claudeQuietNow()) return;
+  const held = heldAlerts.splice(0);
+  if (atMac()) return notice(`While it was quiet: ${held.map((a) => a.title).join('; ')}.`);
+  if (held.length === 1) return pushToPhones({ title: held[0].title, body: held[0].body, tag: held[0].tag, buttons: held[0].buttons }).catch(() => {});
+  pushToPhones({ title: `Claude: ${held.length} updates overnight`, body: held.map((a) => a.title).join('\n'), tag: 'claude-quiet',
+    buttons: [{ title: 'Sessions', ask: 'What are my Claude sessions doing?' }] }).catch(() => {});
 }
 
 /** Is the user at the Mac right now? Active in the last ~2 minutes and the screen isn't locked. */
@@ -1802,6 +1835,7 @@ app.on('will-quit', () => {
   phone?.stop();
   intents?.dispose();
   jobs?.shutdown();
+  claudeCtl?.stopHooks();
   calls?.stop();
   voicemail?.stop();
   dashboard?.stop();
