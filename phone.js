@@ -226,6 +226,7 @@ class PhoneServer extends EventEmitter {
     if (req.method === 'GET' && url.pathname === '/api/history') return json(200, { ok: true, history: this.history() });
 
     if (url.pathname === '/api/jobs' || url.pathname.startsWith('/api/jobs/')) return this.jobRoute(req, res, url, json);
+    if (url.pathname.startsWith('/api/claude/')) return this.claudeRoute(req, res, url, json);
 
     if (req.method === 'POST' && url.pathname === '/api/stt') {
       const audio = await this.body(req);
@@ -273,6 +274,24 @@ class PhoneServer extends EventEmitter {
       const b = JSON.parse((await this.body(req, 4096)).toString() || '{}');
       return json(200, { ok: true, message: calls.cancelScheduled(String(b.id || '')) });
     }
+    return res.writeHead(404).end();
+  }
+
+  // ---- Claude Code sessions (claude-control.js), from the phone ------------------------------------------
+  // Only short, redacted summaries: transcripts never leave the Mac.
+  async claudeRoute(req, res, url, json) {
+    const ctl = this.claude?.();
+    if (!ctl) return json(503, { ok: false, error: 'Claude session control is still starting up.' });
+    const parts = url.pathname.split('/').slice(3).map(decodeURIComponent); // sessions | sessions/<id>/summary …
+    const body = async () => { try { return JSON.parse((await this.body(req, 16384)).toString() || '{}'); } catch { return {}; } };
+    try {
+      if (req.method === 'GET' && parts[0] === 'sessions' && !parts[1]) return json(200, { ok: true, sessions: ctl.list() });
+      if (req.method === 'GET' && parts[0] === 'sessions' && parts[2] === 'summary') return json(200, { ok: true, ...(await ctl.status({ session: parts[1] })) });
+      if (ctl.phoneRoute) {
+        const out = await ctl.phoneRoute(req.method, parts, req.method === 'POST' ? await body() : {}, this.device(req));
+        if (out) return json(out.status || 200, out);
+      }
+    } catch (err) { return json(400, { ok: false, error: err.message }); }
     return res.writeHead(404).end();
   }
 

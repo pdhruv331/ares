@@ -82,6 +82,14 @@ tool('claude_usage', "How much of the user's Claude subscription limits is used 
   + 'with reset times. Says whether each number is exact (reported by Claude Code) or an estimate. Use for "how much of my Claude limit is left?".',
   {}, async () => (await bridge('/claude-usage', {})).message);
 
+// ---- The user's Claude Code sessions ---------------------------------------------------------
+tool('claude_sessions', "The user's Claude Code sessions (in the Claude app, the terminal, or run by ARES): with no session, a list of "
+  + 'recent ones and what each is doing (working, needs permission, waiting, finished, errored, and where it is open). With a session '
+  + '(its name, folder, words from it, or id), a short summary of what it did, where it is now and what it is waiting on. '
+  + 'Use for "what are my Claude sessions doing?" and "how\'s the wallpaper session going?". ARES jobs are marked [ARES job].',
+  { session: z.string().optional() },
+  async ({ session }) => (await bridge('/claude/sessions', { session })).message);
+
 tool('cancel_timer', 'Cancel a running timer by its label (or all timers).',
   { label: z.string().optional() },
   async ({ label }) => (await bridge('/timer/cancel', { label })).message);

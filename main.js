@@ -41,6 +41,8 @@ const { Voice } = require('./voice');
 const { Voicemail } = require('./voicemail');
 const { Wallpaper } = require('./wallpaper');
 const { ClaudeUsage } = require('./claude-usage');
+const { ClaudeSessions } = require('./claude-sessions');
+const { ClaudeControl } = require('./claude-control');
 const { Surface } = require('./surface');
 const { DeskMode } = require('./desk');
 const { judge: judgeAddressed } = require('./addressed');
@@ -71,6 +73,7 @@ let relay;   // the Cloudflare relay (relay.js): FCM pushes to the Android app, 
 let dashboard; // the dashboard's live data (dashboard.js): weather, calendar, leave-by, now playing
 let voicemail; // voicemails from the Twilio fallback when the phone agent can't answer (voicemail.js)
 let wallpaper; // the starry backdrop below the desktop icons, the lock-screen still (wallpaper.js)
+let claudeCtl;   // the user's Claude Code sessions: list, summaries, hooks, replies (claude-control.js)
 let claudeUsage; // the Claude plan's 5-hour/weekly limits, from Claude Code's rate-limit events (claude-usage.js)
 let desk;      // desk mode (desk.js): no wake word needed while the user is at the Mac
 let surface;   // where the ARES window lives: the live desktop, lifted above the apps, or a window (surface.js)
@@ -810,6 +813,7 @@ function startPhone() {
     pushKey: () => vapid().publicKey,
     apkDir: process.env.ARES_APK_DIR || path.join(os.homedir(), 'Library', 'Application Support', 'ARES', 'android'),
     work: jobs && phoneWork(),
+    claude: () => claudeCtl,
     calls,
     firebase: () => relay.firebase(),
     log,
@@ -1170,6 +1174,22 @@ async function startWork() {
   powerMonitor.on('user-did-become-active', () => setTimeout(macPresent, 1500));
   jobs.on('approval', (job) => notifyJob(job, 'approval'));
   jobs.pump(); // jobs left over from last time (queued, or running when ARES quit)
+  startClaudeControl();
+}
+
+// ---- Claude Code remote control (claude-control.js) -----------------------------------------------------
+function startClaudeControl() {
+  const sessions = new ClaudeSessions({
+    log,
+    oneShot: claude.oneShot,
+    file: path.join(app.getPath('userData'), 'claude-hooks.json'),
+    // Sessions ARES runs itself are jobs: their title, state and folder come from there
+    aresJob: (sessionId) => {
+      const j = jobs.jobs.find((x) => x.sessionId === sessionId);
+      return j && { id: j.id, title: j.title, status: j.status, approval: j.approval, error: j.error, folder: j.folder || jobs.folder(j.id), running: jobs.active.includes(j) };
+    },
+  });
+  claudeCtl = new ClaudeControl({ log, sessions, jobs });
 }
 
 /** Is the user at the Mac right now? Active in the last ~2 minutes and the screen isn't locked. */
@@ -1691,6 +1711,7 @@ app.whenReady().then(async () => {
     onNotify,
     work: workControls(),
     claudeUsage: () => claudeUsage.describe(),
+    claude: () => claudeCtl,
     calls,
     onTimers: (list) => toDash({ type: 'timers', timers: list }),
     onTimerDone: (label, source) => {
