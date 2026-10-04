@@ -1,7 +1,9 @@
 // The ARES window as the live desktop (surface.js in the main process). One page, three looks:
 //   desktop  transparent over the desktop icons (the starry backdrop is below them), no typing box, no window buttons;
 //            clicks pass through to Finder except over panels, orbs and the status area; paced like the wallpaper
-//   lifted   summoned above the apps: the dark glass fades in, fully interactive; fades out again when it sinks
+//   lifted   summoned above the apps: the dark glass fades in, fully interactive; fades out again when it sinks.
+//            BLENDED (the ARES OS theme): no glass, no window chrome, click-through except over her things; lifted
+//            for one panel (html.panel-lift, data-lift = work | status | call | job), only that panel shows
 //   window   the classic window
 const Surface = (() => {
   const root = document.documentElement;
@@ -10,7 +12,12 @@ const Surface = (() => {
   let herState = 'idle';
   let drawUntil = 0;
 
-  function set(next) {
+  let blend = false;
+  function set(next, extra = {}) {
+    blend = Boolean(extra.blend);
+    root.classList.toggle('blend', blend);
+    root.classList.toggle('panel-lift', next === 'lifted' && Boolean(extra.panel));
+    if (next === 'lifted' && extra.panel) root.dataset.lift = extra.panel; else delete root.dataset.lift;
     if (next === name) return;
     name = next;
     for (const s of ['desktop', 'lifted', 'sinking', 'window']) root.classList.toggle(`s-${s}`, s === next);
@@ -33,6 +40,8 @@ const Surface = (() => {
   // the areas reported here (macOS doesn't pass mouse moves to a click-through window of an inactive app). While a
   // detail card, COMMS, the status panel or Work is open, or a button is held (dragging an orb), it takes them all.
   const HIT = '.dp, .dp-card, .titlebar button, .comms-tab, .drop-card, #closeHint';
+  // Lifted and blended, she also takes clicks on what's only there when she's up: the typing box, COMMS, Work, status
+  const HIT_LIFTED = `${HIT}, .input-zone, #comms, #work, #statusPanel, #subs`;
   let held = false;
   // Something open over the desktop: the whole window takes clicks, so one click anywhere closes it, as in the app
   // (it can't have the keyboard here, so there's no Esc)
@@ -41,9 +50,10 @@ const Surface = (() => {
   };
   let lastHits = '';
   function reportHits() {
-    if (name !== 'desktop') return;
+    const lifted = name === 'lifted' && blend;
+    if (name !== 'desktop' && !lifted) return;
     const rects = [];
-    for (const el of document.querySelectorAll(HIT)) {
+    for (const el of document.querySelectorAll(lifted ? HIT_LIFTED : HIT)) {
       if (el.closest('[hidden]')) continue;
       const r = el.getBoundingClientRect();
       if (r.width && r.height) rects.push({ x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) });
@@ -62,12 +72,12 @@ const Surface = (() => {
   addEventListener('pointerup', () => { held = false; setTimeout(reportHits, 30); }, true);
   addEventListener('pointercancel', () => { held = false; reportHits(); }, true);
 
-  window.ares.surface.on(({ name: next }) => set(next));
+  window.ares.surface.on(({ name: next, blend: b, panel }) => set(next, { blend: b, panel }));
   let pinned = false; // measuring: a forced mode the main process doesn't override (hold(null) releases it)
   window.ares.surface.onMode((m) => { if (!pinned) applyMode(m); });
   // Where things stand now (the first messages may have come before this page was listening)
   addEventListener('load', () => window.ares.surface.state().then((st) => {
-    set(st.name);
+    set(st.name, { blend: st.blend, panel: st.panel });
     if (st.mode) applyMode(st.mode);
     if (st.icons) dispatchEvent(new CustomEvent('desk-icons', { detail: st.icons }));
   }));

@@ -152,6 +152,8 @@ const Dash = (() => {
   // The ARES theme's menu bar and notifications: open the status list, the Work panel or the latest call
   window.ares.theme?.onOpen((msg) => {
     const { view, anchor } = typeof msg === 'string' ? { view: msg } : msg;
+    // The ARES bar sits just above this window: things unfold out of the item that was clicked
+    if (anchor) window.ARES_BAR_ORIGIN = { x: anchor.cx ?? anchor.x, y: 0 };
     if (view === 'status') {
       if ($('statusPanel').hidden) $('statusBtn').click();
       // From the ARES bar: hang it just under the bar's pill instead of the window's own (hidden) one

@@ -238,7 +238,9 @@ class Theme {
   }
   /** The macOS menu bar's height (the ARES bar matches it exactly), and which menu-bar icons can be mirrored. */
   async measure() {
-    this.menubarHeight = await run(this.helper, ['metrics']).then((o) => JSON.parse(o).menubar, () => 37);
+    const m = await run(this.helper, ['metrics']).then(JSON.parse, () => ({}));
+    this.menubarHeight = m.menubar || 37;
+    this.notchLeft = m.left || m.width || 1512; // the bar's left half ends here (the notch)
     const items = await run(this.bar.sketchybar || '/usr/bin/false', ['--query', 'default_menu_items']).then(JSON.parse, () => null);
     this.mirrorAllowed = Array.isArray(items);
     this.aliasNames = (items || []).filter((n) => this.opts.mirror.some((owner) => n.startsWith(`${owner},`)))
@@ -250,16 +252,38 @@ class Theme {
   async front(id) {
     if (!this.live || id === this.frontId) return;
     this.frontId = id;
-    if (this.selfIds.includes(id)) return this.bar.menus(['ARES', 'LISTEN', 'VOICE', 'WORK', 'VIEW', 'PHONE']);
+    this.menuCache = new Map(); // the front app's menus, as last read (shown at once; refreshed in the background)
+    if (this.selfIds.includes(id)) return this.layoutMenus(['ARES', 'LISTEN', 'VOICE', 'WORK', 'VIEW', 'PHONE']);
     const r = await run(this.helper, ['menubar', id]).then(JSON.parse, () => ({ menus: [] }));
     if (r.trusted !== this.axTrusted) this.log('theme accessibility', { trusted: r.trusted }); // menus, windows and badges need it
     this.axTrusted = r.trusted;
     if (this.frontId !== id) return;
-    this.bar.menus(r.menus.slice(0, MENUS));
+    await this.layoutMenus(r.menus);
     // No menus (no Accessibility yet): at least the app's name, without waiting for SketchyBar's next switch event
     if (!r.menus.length && r.name) this.bar.raw(['--set', 'front', `label=${r.name.toUpperCase().split('').join(' ')}`]);
   }
   get aresFront() { return this.selfIds.includes(this.frontId); }
+  /**
+   * The titles across the bar's left half, as many as fit before the notch; the rest go under a last "»" menu.
+   * Widths are worked out from the bar's monospaced font (7 pt a character at 11.5 pt, plus 12 pt of padding).
+   */
+  async layoutMenus(titles) {
+    const r = await this.bar.query('ares.status');
+    const rect = r && Object.values(r.bounding_rects || {})[0];
+    const start = rect && rect.origin[0] > 0 ? rect.origin[0] + rect.size[0] + 5 : 236 + Math.max(0, String(this.bar.state.status.text).length - 14) * 7;
+    const width = (t, i) => String(t).length * 7 + 12 + (i === 0 ? 10 : 0);
+    const room = this.notchLeft - 8 - start;
+    let used = 0, fit = 0;
+    for (; fit < titles.length && fit < MENUS; fit++) {
+      const w = width(titles[fit], fit);
+      const needMore = fit < titles.length - 1; // something after this one: keep room for "»"
+      if (used + w + (needMore ? width('»', 1) : 0) > room && !(fit === titles.length - 1 && used + w <= room)) break;
+      used += w;
+    }
+    this.allTitles = titles;
+    this.overflowFrom = fit < titles.length ? fit : null;
+    this.bar.menus(this.overflowFrom === null ? titles : [...titles.slice(0, fit), '»']);
+  }
   /** ARES's menu sections as drop-down lines (one level of submenu shown inline under its heading). */
   aresEntries(name) {
     const out = [];
@@ -277,28 +301,66 @@ class Theme {
     while (out.length && out[out.length - 1].sep) out.pop();
     return out;
   }
+  /** Hover: opens after a short pause (passing over a title doesn't), switching straight between menus once one is open. */
+  hover(i) {
+    clearTimeout(this.hoverTimer);
+    if (this.openId === String(i)) return; // that one's already open
+    this.hoverTimer = setTimeout(() => this.openMenu(i), this.openId ? 0 : 120);
+  }
+  unhover(i) { if (this.openId !== String(i)) clearTimeout(this.hoverTimer); }
+  closed(i) { if (this.openId === String(i)) this.openId = null; }
   async openMenu(i) {
+    clearTimeout(this.hoverTimer);
+    this.openId = String(i);
     if (i === 'mark') return this.showPopup('ares.mark', 'mark', [...this.aresEntries('ares')]);
     const n = Number(i);
     if (!(n >= 0 && n < MENUS)) return;
+    if (this.overflowFrom !== null && n === this.overflowFrom) return this.overflowMenu(`menu.${n}`, String(n));
     if (this.aresFront) return this.showPopup(`menu.${n}`, String(n), this.aresEntries(['ares', 'listen', 'voice', 'work', 'view', 'phone'][n]));
     if (!this.frontId) return;
     if (!this.axTrusted) return this.showPopup(`menu.${n}`, String(n), [{ label: 'Show this app\'s menus: allow Accessibility for ARES…', run: () => this.askAccessibility() }]);
     await this.appMenu(`menu.${n}`, String(n), String(n));
   }
-  /** One of the front app's menus (or a submenu: path "2.5"), read through Accessibility. */
+  /** "»": the titles that didn't fit before the notch; each opens its own menu in the same drop-down. */
+  overflowMenu(owner, menuId) {
+    const rest = this.allTitles.slice(this.overflowFrom);
+    const list = () => this.overflowMenu(owner, menuId);
+    this.showPopup(owner, menuId, rest.map((t, k) => ({ label: t, sub: true, keepOpen: true,
+      run: () => (this.aresFront
+        ? this.showPopup(owner, menuId, [{ label: '‹ Back', run: list, keepOpen: true }, { sep: true }, ...this.aresEntries(['ares', 'listen', 'voice', 'work', 'view', 'phone'][this.overflowFrom + k])])
+        : this.appMenu(owner, menuId, String(this.overflowFrom + k), list)) })));
+  }
+  /**
+   * One of the front app's menus (or a submenu: path "2.5"), read through Accessibility. What was read last time shows
+   * at once, and is re-read in the background (ticks and greyed items change). back: re-shows the menu this came from.
+   */
   async appMenu(owner, menuId, menuPath, back = null) {
     const app = this.frontId;
+    const key = `${app}|${menuPath}`;
+    const render = (items) => {
+      const entries = back ? [{ label: '‹ Back', run: back, keepOpen: true }, { sep: true }] : [];
+      items.forEach((it, k) => {
+        if (it.sep) { if (entries.length && !entries[entries.length - 1].sep) entries.push({ sep: true }); return; }
+        const itemPath = `${menuPath}.${k}`;
+        entries.push({ label: it.t, mark: it.mark, key: it.key, enabled: it.e, sub: it.sub,
+          run: it.sub ? () => this.appMenu(owner, menuId, itemPath, () => this.appMenu(owner, menuId, menuPath, back)) : () => run(this.helper, ['menu-press', app, itemPath]).catch(() => {}),
+          keepOpen: it.sub });
+      });
+      this.showPopup(owner, menuId, entries);
+    };
+    const cached = this.menuCache?.get(key);
+    if (cached) render(cached);
     const { items = [] } = await run(this.helper, ['menu-items', app, menuPath]).then(JSON.parse, () => ({}));
-    const entries = back ? [{ label: '‹ Back', run: () => this.appMenu(owner, menuId, back.path, back.back), keepOpen: true }, { sep: true }] : [];
-    items.forEach((it, k) => {
-      if (it.sep) { if (entries.length && !entries[entries.length - 1].sep) entries.push({ sep: true }); return; }
-      const itemPath = `${menuPath}.${k}`;
-      entries.push({ label: it.t, mark: it.mark, key: it.key, enabled: it.e, sub: it.sub,
-        run: it.sub ? () => this.appMenu(owner, menuId, itemPath, { path: menuPath, back }) : () => run(this.helper, ['menu-press', app, itemPath]).catch(() => {}),
-        keepOpen: it.sub });
-    });
-    this.showPopup(owner, menuId, entries);
+    this.menuCache?.set(key, items);
+    if (this.frontId !== app || this.openId !== menuId) return; // moved on meanwhile
+    if (!cached || JSON.stringify(cached) !== JSON.stringify(items)) render(items);
+  }
+  /** A mirrored menu-bar icon was clicked: press the real one (it's still there, under the bar). */
+  extra(k) {
+    const name = this.aliasNames?.[Number(k)];
+    if (!name) return;
+    const [owner, ...rest] = name.split(',');
+    run(this.helper, ['extra-press', owner, rest.join(',')]).catch((err) => this.log('theme extra press failed', { name, error: err.message }));
   }
   showPopup(owner, menuId, entries) {
     this.popups[menuId] = entries;
@@ -307,13 +369,14 @@ class Theme {
   pick(menuId, k) {
     const e = this.popups[menuId]?.[Number(k)];
     if (!e?.run) return;
-    if (!e.keepOpen) this.bar.closePopups();
+    if (!e.keepOpen) { this.bar.closePopups(); this.openId = null; }
     Promise.resolve(e.run()).catch((err) => this.log('theme menu action failed', err.message)).finally(() => { if (!e.keepOpen) this.onMenuAction?.(); });
   }
   askAccessibility() {
     run(this.helper, ['ax-prompt']).catch(() => {});
     shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
   }
+  flash(text) { if (this.live) this.bar.flash(text); }
   /** How she's listening (the window's "ear"), for the bar's voice item. */
   ear(text) { this.bar.ear(text); }
 
@@ -450,23 +513,28 @@ class Theme {
       const server = http.createServer((req, res) => {
         const u = new URL(req.url, 'http://x');
         const [token, what] = u.pathname.split('/').filter(Boolean);
-        if (token !== this.token || !['open', 'menu', 'pick'].includes(what)) { res.writeHead(404); return res.end(); }
+        if (token !== this.token || !['open', 'menu', 'pick', 'hover', 'unhover', 'closed', 'extra'].includes(what)) { res.writeHead(404); return res.end(); }
         res.writeHead(204); res.end();
-        if (what === 'menu') return this.openMenu(u.searchParams.get('i'));
+        const i = u.searchParams.get('i');
+        if (what === 'menu') return this.openId === i ? null : this.openMenu(i); // (hover may have opened it already: a click keeps it open)
+        if (what === 'hover') return this.hover(i);
+        if (what === 'unhover') return this.unhover(i);
+        if (what === 'closed') return this.closed(i);
+        if (what === 'extra') return this.extra(u.searchParams.get('k'));
         if (what === 'pick') return this.pick(u.searchParams.get('m'), u.searchParams.get('k'));
         const view = u.searchParams.get('view') || 'summon';
-        if (view === 'status') return this.openStatus();
-        if (['summon', 'work', 'call'].includes(view)) this.onOpen(view);
+        if (['status', 'work', 'call'].includes(view)) return this.openFromBar(view);
+        if (view === 'summon') this.onOpen(view);
       });
       server.listen(0, '127.0.0.1', () => { this.server = server; resolve(); });
     });
   }
 
-  /** The status list, hung under the bar's status pill. */
-  async openStatus() {
-    const r = await this.bar.query('ares.status');
+  /** A panel opened from its bar item: it hangs from (status) or unfolds out of (Work, a call) that item. */
+  async openFromBar(view) {
+    const r = await this.bar.query({ status: 'ares.status', work: 'ares.jobs', call: 'ares.call' }[view]);
     const rect = r && Object.values(r.bounding_rects || {})[0];
-    this.onOpen('status', rect ? { x: Math.round(rect.origin[0]) } : null);
+    this.onOpen(view, rect && rect.origin[0] > 0 ? { x: Math.round(rect.origin[0]), cx: Math.round(rect.origin[0] + rect.size[0] / 2) } : null);
   }
 
   // ---- The ◉ menu ---------------------------------------------------------------------------------------------

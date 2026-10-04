@@ -124,7 +124,8 @@ function createWindow({ show }) {
   // The window only ever shows ARES itself: links open in the browser, never in here
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
-  surface = new Surface({ win, log, opts: () => ({ enabled: wallpaper?.opts.enabled ?? readSettings().wallpaper?.enabled !== false, summon: readSettings().summon || 'lift' }),
+  surface = new Surface({ win, log, opts: () => ({ enabled: wallpaper?.opts.enabled ?? readSettings().wallpaper?.enabled !== false, summon: readSettings().summon || 'lift',
+    blend: Boolean(theme?.live) }), // the ARES theme: she's part of the screen, not an app window in front of it
     onChange: (name) => { wallpaper?.mainSurface(name, win); theme?.surface(name); win.webContents.send('ui-prefs', uiPrefs()); setTimeout(() => dashboard?.setVisible(win.isVisible()), 50); } });
   win.once('ready-to-show', () => { if (surface.desktopOn) surface.desktop(); else if (show) win.show(); });
 
@@ -153,9 +154,10 @@ function present() {
   showWindow();
 }
 
-// Summon: lift the desktop above the apps, or open the window (the ◉ menu's summon mode).
-function showWindow() {
-  surface.show();
+// Summon: lift the desktop above the apps, or open the window (the ◉ menu's summon mode). panel: only to show one of
+// her panels (the ARES theme's bar, dock and notifications), which sinks back when it's closed.
+function showWindow(panel = null) {
+  surface.show(panel);
   app.focus({ steal: true });
   win.focus();
 }
@@ -298,11 +300,11 @@ function menuSections() {
 
 /** The ARES theme's views, opened from its menu bar, dock and notifications. */
 function openView(view, anchor = null) {
-  showWindow();
+  showWindow(view === 'summon' ? null : view.split(':')[0]);
   if (view === 'summon') return;
   const id = /^job:(.+)$/.exec(view)?.[1];
   // anchor: where on the screen it was opened from (the bar's status pill), in the window's coordinates
-  const at = anchor && { x: anchor.x - win.getBounds().x };
+  const at = anchor && { x: anchor.x - win.getBounds().x, cx: (anchor.cx ?? anchor.x) - win.getBounds().x };
   setTimeout(() => { if (id) win.webContents.send('job-show', id); else win.webContents.send('theme-open', { view, anchor: at }); }, 350);
 }
 
@@ -349,6 +351,7 @@ function deskMenu() {
   const idle = (m) => ({ label: `${m} minutes`, type: 'radio', checked: o.idleMin === m, click: () => { desk.set({ idleMin: m }); refreshTray(); } });
   return [
     { label: 'Desk Mode (no wake word while I\'m at the Mac)', type: 'checkbox', checked: o.enabled, click: (item) => { desk.set({ enabled: item.checked }); refreshTray(); } },
+    { label: '   ⚠ Your voice isn\'t matching lately: Retrain Voice ID…', visible: o.enabled && voiceId.drifting, click: () => { showWindow(); win.webContents.send('voiceid-enroll'); } },
     { label: o.enabled ? `   ${st.active ? 'Listening: only your voice, only when you talk to her' : `Paused: ${st.reason}`}` : '   Off', enabled: false },
     { label: 'Desk Mode Idle Timeout', enabled: o.enabled, submenu: [2, 5, 10, 15].map(idle) },
   ];
@@ -517,8 +520,14 @@ async function onCommand(evt) {
   // nothing of it goes to the brain or the log.
   const check = evt.trusted || harmless ? { ok: true, score: null } : voiceId.verify(evt.audio, { force: !addressed });
   if (manualAwake) touchAwake();
-  // In always-listening mode, other people's voices are ignored quietly rather than refused aloud.
-  if (!check.ok && !addressed) return log('voice-id', { ignored: true, score: check.score });
+  learnVoice(evt, check);
+  // In always-listening mode, other people's voices are ignored quietly rather than refused aloud. A voice close to
+  // the owner's that still didn't match shows in the ARES bar, so desk mode never just goes silent on them.
+  if (!check.ok && !addressed) {
+    if (check.score != null && check.score >= voiceId.threshold - 0.15 && (evt.text || '').trim().split(/\s+/).length >= 2) theme?.flash('NOT MATCHED');
+    if (voiceId.drifting) refreshTray();
+    return log('voice-id', { ignored: true, score: check.score });
+  }
   if (!addressed && !harmless) {
     const j = judgeAddressed(evt.text, talk);
     if (j.verdict !== 'yes') return log('overheard', { words: (evt.text || '').split(/\s+/).filter(Boolean).length, verdict: j.verdict, why: j.why });
@@ -532,6 +541,22 @@ async function onCommand(evt) {
   win.webContents.send('listener-event', { type: 'command', text: evt.text, authorized: check.ok, score: check.score, addressed, intent: r });
 }
 let lastHeard = null; // the last spoken command, and whether it's known to be the owner's
+// Keeping the voiceprint current (voiceid.js learn): push-to-talk is the owner at the keyboard; a voice that matched
+// is the owner; one just under the threshold counts only mid-conversation, within a minute of a verified exchange.
+let lastVerifiedAt = 0;
+function learnVoice(evt, check) {
+  if (!voiceId.enrolled) return;
+  const now = Date.now();
+  if (evt.trusted) {
+    lastVerifiedAt = now;
+    if (evt.audio) voiceId.learn(voiceId.embedAudio(evt.audio), 'push-to-talk');
+  } else if (check.ok && check.score != null) {
+    lastVerifiedAt = now;
+    voiceId.learn(check.emb, 'matched');
+  } else if (!check.ok && check.score != null && check.score >= voiceId.threshold - 0.08 && now - lastVerifiedAt < 60_000) {
+    voiceId.learn(check.emb, 'near-miss');
+  }
+}
 /** Was this Mac request spoken (then: did Voice ID vouch for it?) or typed at the keyboard (the owner)? */
 function macVerified(said) {
   const heard = lastHeard;
@@ -1143,7 +1168,7 @@ ipcMain.on('window-hide', () => hideWindow());
 ipcMain.on('window-fullscreen', () => toggleFullScreen());
 ipcMain.on('window-pin', (_e, pinned) => { if (surface.name === 'window') win.setAlwaysOnTop(pinned, 'floating'); });
 ipcMain.on('surface-hits', (_e, h) => surface.setHits(h || {}));
-ipcMain.handle('surface-state', () => ({ name: surface.name, ...(wallpaper?.mainState() || {}) }));
+ipcMain.handle('surface-state', () => ({ name: surface.name, blend: surface.blend, panel: surface.name === 'lifted' ? surface.panel : null, ...(wallpaper?.mainState() || {}) }));
 // Development only: inject what the listener heard (a test can't share the mic with the installed ARES)
 ipcMain.on('test-hear', (_e, evt) => { if (!app.isPackaged) listener.emit('event', evt); });
 ipcMain.handle('test-desk', (_e, patch) => {

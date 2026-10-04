@@ -3,7 +3,10 @@
 //   desktop  above the desktop icons, just below every app window, on all Spaces, transparent, click-through except
 //            over panels and orbs (the renderer hit-tests forwarded mouse moves and asks for clicks when needed)
 //   lifted   summoned ("Hey ARES" / ⌥Space, default): the same window rises above the apps, fully interactive, and
-//            sinks back when dismissed or when another app is clicked
+//            sinks back when dismissed or when another app is clicked. BLENDED (with the ARES OS theme's bar up): no
+//            glass and no window chrome, and still click-through except over ARES's own things, so she's part of the
+//            screen rather than an app in front of it. Lifted for one panel (from the bar, dock or a notification),
+//            only that panel shows, and she sinks again as soon as it closes.
 //   window   the classic separate window ("Open ARES window" summon mode, or with the wallpaper off)
 //
 // One window and one renderer throughout, so the dashboard, subtitles, orbs and conversation are the same ARES
@@ -33,15 +36,19 @@ class Surface {
     this.hits = { rects: [], all: false, held: false }; // the renderer's clickable areas (window coordinates)
     this.hitTimer = null;
     win.setVisibleOnAllWorkspaces(true, ALL_SPACES);
-    win.on('blur', () => { if (this.name === 'lifted' && !this.holdLift) setTimeout(() => { if (this.name === 'lifted' && !win.isFocused()) this.sink(); }, 120); });
+    win.on('blur', () => { if (this.name === 'lifted' && !this.holdLift) setTimeout(() => { if (this.name === 'lifted' && !win.isDestroyed() && !win.isFocused()) this.sink(); }, 120); });
+    win.on('closed', () => { clearInterval(this.hitTimer); this.hitTimer = null; }); // (quitting) nothing may touch it after this
     for (const e of ['move', 'resize']) win.on(e, () => { if (this.name === 'window' && !win.isFullScreen()) this.windowBounds = win.getBounds(); });
   }
 
   get desktopOn() { return this.opts().enabled; }
+  get blend() { return Boolean(this.opts().blend); }
+  /** Click-through except over ARES's own things: as the desktop, and lifted when blended. */
+  get passThrough() { return this.name === 'desktop' || this.name === 'sinking' || (this.name === 'lifted' && this.blend); }
   display() { return screen.getPrimaryDisplay(); }
 
   send(name) {
-    if (!this.win.isDestroyed()) this.win.webContents.send('surface', { name });
+    if (!this.win.isDestroyed()) this.win.webContents.send('surface', { name, blend: this.blend, panel: name === 'lifted' ? this.panel : null });
     this.onChange?.(name);
   }
 
@@ -51,6 +58,7 @@ class Surface {
     if (w.isFullScreen()) { w.once('leave-full-screen', () => this.desktop()); w.setFullScreen(false); return; }
     if (this.name === 'window') this.windowBounds = w.getBounds();
     this.name = 'desktop';
+    this.panel = null;
     w.setAlwaysOnTop(true, 'normal', DESKTOP_LEVEL);
     w.setVisibleOnAllWorkspaces(true, ALL_SPACES);
     w.setHiddenInMissionControl?.(true);
@@ -63,10 +71,11 @@ class Surface {
     this.checkPointer();
   }
 
-  /** Summoned: the desktop rises above the apps. */
-  lift() {
+  /** Summoned: the desktop rises above the apps. panel: lifted only to show one panel ('work', 'status', 'call', 'job'). */
+  lift(panel = null) {
     const w = this.win;
     if (w.isFullScreen()) { w.focus(); return; }
+    this.panel = this.name === 'lifted' && !this.panel ? null : panel; // already summoned in full: stays in full
     this.name = 'lifted';
     w.setFocusable(true);
     w.setVisibleOnAllWorkspaces(true, ALL_SPACES);
@@ -77,6 +86,7 @@ class Surface {
     w.show();
     w.focus();
     this.send('lifted');
+    this.checkPointer(); // blended: click-through except over her things
   }
 
   /** Back down to the desktop, after the renderer's fade. */
@@ -104,10 +114,10 @@ class Surface {
     this.send('window');
   }
 
-  /** Summon (wake word, ⌥Space, the tray). */
-  show() {
+  /** Summon (wake word, ⌥Space, the tray), or just one panel of hers (panel: see lift()). */
+  show(panel = null) {
     if (!this.desktopOn) { if (this.name !== 'window') this.window(); else { this.win.show(); this.win.focus(); } return; }
-    if (this.opts().summon === 'window') this.window(); else this.lift();
+    if (this.opts().summon === 'window' && !panel) this.window(); else this.lift(panel);
   }
 
   /** Dismiss (Esc, ✕, ⌥Space again): back to being the desktop, or hidden when the wallpaper is off. */
@@ -131,7 +141,13 @@ class Surface {
   get summoned() { return this.name === 'lifted' || (this.name === 'window' && this.win.isVisible()); }
 
   /** The renderer's clickable areas as the desktop: { rects: [{x,y,w,h}], all (a popover is open), held (dragging) }. */
-  setHits(h) { this.hits = { rects: h.rects || [], all: Boolean(h.all), held: Boolean(h.held) }; this.checkPointer(); }
+  setHits(h) {
+    const wasOpen = this.hits.all;
+    this.hits = { rects: h.rects || [], all: Boolean(h.all), held: Boolean(h.held) };
+    // Lifted for one panel, and it closed: back down to being the desktop
+    if (this.name === 'lifted' && this.panel && wasOpen && !this.hits.all) setTimeout(() => { if (this.name === 'lifted' && this.panel && !this.hits.all) this.sink(); }, 150);
+    this.checkPointer();
+  }
 
   /**
    * As the desktop the window ignores the mouse except over ARES's own things. macOS doesn't pass mouse moves to a
@@ -140,8 +156,8 @@ class Surface {
    * to the desktop and its icons.
    */
   checkPointer() {
-    const desk = this.name === 'desktop' || this.name === 'sinking';
-    if (!desk) { clearInterval(this.hitTimer); this.hitTimer = null; return this.setInteractive(true); }
+    if (this.win.isDestroyed()) { clearInterval(this.hitTimer); this.hitTimer = null; return; }
+    if (!this.passThrough) { clearInterval(this.hitTimer); this.hitTimer = null; return this.setInteractive(true); }
     this.hitTimer ??= setInterval(() => this.checkPointer(), HIT_MS);
     const p = screen.getCursorScreenPoint(), b = this.win.getBounds();
     const x = p.x - b.x, y = p.y - b.y;
@@ -151,7 +167,8 @@ class Surface {
   }
 
   setInteractive(on) {
-    if (this.name === 'desktop' || this.name === 'sinking') {
+    if (this.win.isDestroyed()) return;
+    if (this.passThrough) {
       this.interactive = on;
       this.win.setIgnoreMouseEvents(!on, { forward: true });
     } else {

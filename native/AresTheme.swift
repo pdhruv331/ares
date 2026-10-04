@@ -18,7 +18,10 @@
 //   ares-theme menu-items <bundleID> <path>   One menu's items: path "2" = the 2nd title, "2.5" = a submenu in it:
 //                                       {"items":[{"t":"New Tab","e":true,"mark":"✓","key":"⌘T","sub":false,"sep":false}]}
 //   ares-theme menu-press <bundleID> <path>   Choose a menu item ("2.5.1"): AXPress
-//   ares-theme metrics                  {"menubar":<height of the menu bar on the main screen, points>}
+//   ares-theme metrics                  {"menubar":<height of the menu bar on the main screen>,"left":<width left of the notch>,
+//                                       "width":<screen width>} (points; no notch: left = width)
+//   ares-theme extra-press <owner> <name>  Click a real menu-bar icon (Control Center, Tailscale…), found in its app's
+//                                       extras menu bar by name/identifier: {"ok":bool}
 //   ares-theme ax-prompt                Ask macOS to show the Accessibility permission prompt for ARES
 //   ares-theme appearance-changed       Tells running apps the accent/highlight colours changed
 //   ares-theme focus                    {"focus":true|false|null}: is a Focus on (null = macOS won't say, no Full Disk Access)
@@ -290,7 +293,26 @@ case "metrics":
   // or the safe-area inset while the menu bar is set to hide
   let s = NSScreen.screens.first!
   let top = s.frame.maxY - s.visibleFrame.maxY
-  emit(["menubar": top > 0 ? top : max(s.safeAreaInsets.top, NSStatusBar.system.thickness)])
+  emit(["menubar": top > 0 ? top : max(s.safeAreaInsets.top, NSStatusBar.system.thickness),
+        "left": s.auxiliaryTopLeftArea?.width ?? s.frame.width, "width": s.frame.width])
+
+case "extra-press":
+  guard args.count >= 4, AXIsProcessTrusted() else { emit(["ok": false]); exit(1) }
+  let owner = args[2], name = args[3].lowercased()
+  let apps = NSWorkspace.shared.runningApplications.filter { $0.localizedName == owner || ($0.bundleIdentifier ?? "").lowercased().contains(owner.lowercased().replacingOccurrences(of: " ", with: "")) }
+  var pressed = false
+  for app in apps where !pressed {
+    let el = AXUIElementCreateApplication(app.processIdentifier)
+    let extras = axChildren(axValue(el, "AXExtrasMenuBar").map { $0 as! AXUIElement })
+    guard !extras.isEmpty else { continue }
+    let text = { (e: AXUIElement) in [kAXIdentifierAttribute, kAXDescriptionAttribute, kAXTitleAttribute].compactMap { axString(e, $0)?.lowercased() }.joined(separator: " ") }
+    // By name; Control Center's own icon ("BentoBox") is the one whose identifier says controlcenter; else the only one
+    let pick = extras.first { text($0).contains(name) }
+      ?? (name.contains("bentobox") ? extras.first { text($0).contains("controlcenter") } : nil)
+      ?? (extras.count == 1 ? extras[0] : nil)
+    if let p = pick { pressed = AXUIElementPerformAction(p, kAXPressAction as CFString) == .success }
+  }
+  emit(["ok": pressed])
 
 case "ax-prompt":
   emit(["trusted": AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)])
@@ -359,5 +381,5 @@ case "plist-file":
   emit(["plist": xml.base64EncodedString()])
 
 default:
-  fail("usage: ares-theme apps | app-icon | set-icon | quit | appearance-changed | focus | ax | terminal-profile | pref-get | pref-set | pref-merge | plist-file | activate | windows | raise | hide | menubar | menu-items | menu-press | metrics | ax-prompt")
+  fail("usage: ares-theme apps | app-icon | set-icon | quit | appearance-changed | focus | ax | terminal-profile | pref-get | pref-set | pref-merge | plist-file | activate | windows | raise | hide | menubar | menu-items | menu-press | metrics | extra-press | ax-prompt")
 }

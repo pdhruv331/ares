@@ -565,3 +565,12 @@ html.s-sinking .panels, html.s-sinking .console { transition: opacity 0.2s; }
    window's top row keeps only the greeting (and the window controls when ARES is a window) */
 html.theme-bar .brand-mark, html.theme-bar .brand-name, html.theme-bar #ear, html.theme-bar #weather, html.theme-bar #clock,
 html.theme-bar #statusBtn, html.theme-bar #workBtn { display: none !important; }
+
+/* Blended (the ARES theme): summoned, she rises without glass or window chrome, part of the screen rather than an app */
+html.blend.s-lifted .frame::before, html.blend.s-sinking .frame::before { opacity: 0; animation: none; }
+html.blend.s-lifted .titlebar, html.blend.s-sinking .titlebar { visibility: hidden; }
+html.blend.s-lifted .frame, html.blend.s-sinking .frame { border: none; box-shadow: none; background: transparent; }
+html.blend.s-lifted #stars { opacity: 0; }
+/* Lifted for one panel (opened from the bar, the dock or a notification): only that panel */
+html.panel-lift .core, html.panel-lift .ticker, html.panel-lift .console, html.panel-lift #fx { opacity: 0 !important; pointer-events: none !important; }
+html.panel-lift:not([data-lift="call"]):not([data-lift="job"]) .panels { opacity: 0 !important; pointer-events: none !important; }

@@ -533,7 +533,12 @@ const Work = (() => {
   window.ares.uiPrefs?.().then(applyMotion);
   window.ares.onUiPrefs?.(applyMotion);
   /** Where the panel grows from when there's no orb to open: the WORK button. */
-  const buttonPoint = () => { const r = $('workBtn').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
+  // Where Work unfolds from and folds back to: its button, or (the ARES theme hides that) the bar item it was opened from
+  const buttonPoint = () => {
+    const r = $('workBtn').getBoundingClientRect();
+    if (r.width) return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    return window.ARES_BAR_ORIGIN || { x: innerWidth / 2, y: 0 };
+  };
   const settle = () => panel.getAnimations().forEach((a) => a.cancel());
   // A hidden window doesn't animate (no frames), so never wait on an animation for long
   const within = (p, ms) => Promise.race([Promise.resolve(p).catch(() => null), new Promise((r) => setTimeout(() => r(null), ms))]);

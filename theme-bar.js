@@ -88,6 +88,15 @@ fi
 [[ "$SENDER" == "front_app_switched" ]] && sketchybar --set "$NAME" label="$(echo "$INFO" | tr a-z A-Z | sed 's/./& /g;s/ $//')"
 `,
       'close.sh': '#!/bin/zsh\n[[ "$SENDER" == "mouse.exited.global" ]] && sketchybar --set "$NAME" popup.drawing=off\n',
+      // A menu title: hovering opens it (ARES waits a moment, so passing over doesn't), leaving the title and its menu closes it
+      'menu.sh': `#!/bin/zsh
+I=\${NAME#menu.}; [[ "$NAME" == "ares.mark" ]] && I=mark
+case "$SENDER" in
+  mouse.entered) curl -s -m 2 '${url}/hover?i='"$I" >/dev/null & ;;
+  mouse.exited) curl -s -m 2 '${url}/unhover?i='"$I" >/dev/null & ;;
+  mouse.exited.global) sketchybar --set "$NAME" popup.drawing=off; curl -s -m 2 '${url}/closed?i='"$I" >/dev/null & ;;
+esac
+`,
       // Back to the user's own Dock and the plain macOS menu bar while ARES isn't running
       'offline.sh': `#!/bin/zsh
 export PATH="${path.dirname(this.sketchybar || '/opt/homebrew/bin/x')}:$PATH"
@@ -109,8 +118,10 @@ exec ${q(this.offlineFile)}
     const P = (f) => `'${path.join(this.dir, f)}'`;
     const menuItems = Array.from({ length: MENUS }, (_, i) => `sketchybar --add item menu.${i} left --set menu.${i} drawing=off icon.drawing=off \\
   label.font='${font(i === 0 ? 'Bold' : 'Semibold', 11.5)}' label.color=${i === 0 ? C.cyan : C.text} padding_left=${i === 0 ? 12 : 2} padding_right=2 \\
-  click_script="${click(`menu?i=${i}`)}" script=${P('close.sh')} ${popupStyle} --subscribe menu.${i} mouse.exited.global`).join('\n');
-    const aliases = (this.aliases() || []).map((a) => `sketchybar --add alias ${q(a)} right --set ${q(a)} alias.color=${C.cyan} padding_left=0 padding_right=0`).join('\n');
+  click_script="${click(`menu?i=${i}`)}" script=${P('menu.sh')} ${popupStyle} --subscribe menu.${i} mouse.entered mouse.exited mouse.exited.global`).join('\n');
+    // A mirrored icon is a picture of the real one (still there, under the bar): a click has ARES press the real one
+    const aliases = (this.aliases() || []).map((a, k) => `sketchybar --add alias ${q(a)} right --set ${q(a)} alias.color=${C.cyan} padding_left=0 padding_right=0 \\
+  click_script="${click(`extra?k=${k}`)}"`).join('\n');
     const rc = `#!/bin/zsh
 # Written by ARES (theme-bar.js). The ARES items are live-fed by ARES itself; the rest are SketchyBar's own.
 export PATH="${path.dirname(this.sketchybar)}:$PATH"
@@ -123,16 +134,11 @@ sketchybar --default updates=when_shown icon.font='${font('Bold', 12.0)}' label.
 
 # ---- left: ARES, then the front app's menus (ARES's own while ARES is in front) ----
 sketchybar --add item ares.mark left --set ares.mark icon='◉' icon.font='${font('Bold', 14.0)}' label='A R E S' \\
-  label.color=${C.cyan} label.font='${font('Bold', 12.0)}' click_script="${click('menu?i=mark')}" script=${P('close.sh')} \\
-  ${popupStyle} --subscribe ares.mark mouse.exited.global
+  label.color=${C.cyan} label.font='${font('Bold', 12.0)}' click_script="${click('menu?i=mark')}" script=${P('menu.sh')} \\
+  ${popupStyle} --subscribe ares.mark mouse.entered mouse.exited mouse.exited.global
 sketchybar --add item ares.status left --set ares.status icon='●' icon.font='${font('Bold', 8.0)}' label='all systems ok' \\
   label.color=${C.text} background.color=${C.cyanFaint} background.border_color=${C.cyanDim} background.border_width=1 \\
   background.drawing=on icon.padding_left=10 label.padding_right=10 click_script="${click('open?view=status')}"
-sketchybar --add item ares.voice left --set ares.voice icon='◌' icon.color=${C.muted} label='W A K E  W O R D' label.color=${C.muted} \\
-  label.font='${font('Semibold', 9.5)}' click_script="${click('open?view=summon')}"
-sketchybar --add item ares.jobs left --set ares.jobs icon='●' icon.font='${font('Bold', 9.0)}' icon.color=${C.muted} label='WORK' \\
-  label.color=${C.muted} background.color=${C.none} background.border_color=${C.cyanFaint} background.border_width=1 background.drawing=on \\
-  icon.padding_left=10 label.padding_right=10 click_script="${click('open?view=work')}"
 sketchybar --add item ares.call left --set ares.call drawing=off icon='●' icon.font='${font('Bold', 9.0)}' icon.color=${C.green} \\
   label.color=${C.green} background.color=${C.greenDim} background.drawing=on icon.padding_left=10 label.padding_right=10 \\
   click_script="${click('open?view=call')}"
@@ -140,7 +146,7 @@ sketchybar --add item front left --set front icon.drawing=off label.color=${C.mu
   --subscribe front front_app_switched
 ${menuItems}
 
-# ---- right: clock, battery, Wi-Fi, mirrored menu-bar icons, weather ----
+# ---- right: clock, battery, Wi-Fi, mirrored menu-bar icons, weather, listening, WORK ----
 sketchybar --add item clock right --set clock icon.drawing=off label.color=${C.cyan} update_freq=15 script=${P('clock.sh')} \\
   click_script="${click('open?view=summon')}"
 sketchybar --add item battery right --set battery icon.font='${font('Bold', 11.0)}' update_freq=120 script=${P('battery.sh')} \\
@@ -150,6 +156,12 @@ sketchybar --add item wifi right --set wifi icon='◠' icon.font='${font('Bold',
 ${aliases}
 sketchybar --add item ares.weather right --set ares.weather drawing=off icon.drawing=off label.color=${C.text} \\
   click_script="${click('open?view=summon')}"
+# How she's listening, and WORK: right of the notch, beside the weather (the left half is the menus')
+sketchybar --add item ares.voice right --set ares.voice icon='◌' icon.color=${C.muted} label='W A K E  W O R D' label.color=${C.muted} \\
+  label.font='${font('Semibold', 9.5)}' click_script="${click('open?view=summon')}"
+sketchybar --add item ares.jobs right --set ares.jobs icon='●' icon.font='${font('Bold', 9.0)}' icon.color=${C.muted} label='WORK' \\
+  label.color=${C.muted} background.color=${C.none} background.border_color=${C.cyanFaint} background.border_width=1 background.drawing=on \\
+  icon.padding_left=10 label.padding_right=10 click_script="${click('open?view=work')}"
 # The watchdog (never drawn)
 sketchybar --add item ares.watch right --set ares.watch drawing=off updates=on update_freq=15 script=${P('watch.sh')}
 
@@ -286,6 +298,12 @@ sketchybar --update
     }[state] || null;
     if (look) this.set('ares.voice', look);
     this.glow();
+  }
+  /** A short amber note in the listening item (e.g. desk mode heard a voice that didn't match), then back to normal. */
+  flash(text) {
+    clearTimeout(this.flashTimer);
+    this.set('ares.voice', ['icon=◉', `icon.color=${C.amber}`, 'label.drawing=on', `label=${spaced(text)}`, `label.color=${C.amber}`]);
+    this.flashTimer = setTimeout(() => { this.sent['ares.voice'] = null; this.voice(this.state.voice); }, 2500);
   }
   /** Her real voice level: the dot breathes with it (a few updates a second at most, and only on a real change). */
   level(v) {

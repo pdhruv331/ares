@@ -5,6 +5,12 @@ const fs = require('fs');
 const RATE = 16000;
 const MIN_SECONDS = 1.2;       // shorter samples make unreliable voiceprints
 const MAX_SAMPLES = 20;        // cap on stored enrollment samples
+// Keeping the voiceprint current (the mic, the room, a cold): recent samples that are surely the owner's are blended in,
+// but the enrolment stays the anchor. A sample only counts if it's within LEARN_MARGIN of the threshold against the
+// ORIGINAL enrolment, and the recent ones never outweigh it, so the voiceprint can't wander off towards someone else.
+const RECENT = 12;             // recent samples kept
+const RECENT_WEIGHT = 0.4;     // their share of the voiceprint (the enrolment keeps the rest)
+const LEARN_MARGIN = 0.12;
 
 const normalize = (v) => {
   const n = Math.sqrt(v.reduce((s, x) => s + x * x, 0)) || 1;
@@ -85,10 +91,45 @@ class VoiceId {
     const samples = voiced(decode(b64));
     const seconds = samples.length / RATE;
     if (seconds < 0.3) return { ok: false, score: 0, seconds }; // nothing usable captured
-    const score = cosine(this.profile.centroid, this.embed(samples));
+    const emb = this.embed(samples);
+    const score = cosine(this.profile.centroid, emb);
     const ok = score >= this.threshold;
     this.log({ score: +score.toFixed(3), ok, seconds: +seconds.toFixed(1) });
-    return { ok, score, seconds };
+    (this.scores ??= []).push(score);
+    if (this.scores.length > 20) this.scores.shift();
+    return { ok, score, seconds, emb };
+  }
+  /** An utterance's embedding, without judging it (push-to-talk: the owner at the keyboard). */
+  embedAudio(b64) {
+    if (!this.enrolled) return null;
+    const samples = voiced(decode(b64));
+    return samples.length / RATE >= 1 ? this.embed(samples) : null;
+  }
+  /** The enrolment itself: what every learned sample is measured against. */
+  get anchor() { return this.profile?.samples?.length ? mean(this.profile.samples) : this.profile?.centroid; }
+  /**
+   * Blend one sample that's surely the owner's into the voiceprint (see RECENT_WEIGHT). Returns whether it was used.
+   * why: 'push-to-talk' | 'matched' | 'near-miss' (just under the threshold, mid-conversation with a verified owner).
+   */
+  learn(emb, why) {
+    if (!this.enrolled || !emb) return false;
+    const anchor = this.anchor;
+    const score = cosine(anchor, emb);
+    if (score < this.threshold - LEARN_MARGIN) { this.log({ learn: false, why, anchorScore: +score.toFixed(3) }); return false; }
+    const recent = [...(this.profile.recent || []), emb.map((x) => +x.toFixed(5))].slice(-RECENT);
+    this.profile.recent = recent;
+    if (recent.length >= 3) {
+      const r = mean(recent);
+      this.profile.centroid = normalize(anchor.map((x, i) => (1 - RECENT_WEIGHT) * x + RECENT_WEIGHT * r[i]));
+    }
+    this.save();
+    this.log({ learn: true, why, anchorScore: +score.toFixed(3), recent: recent.length });
+    return true;
+  }
+  /** Recent checks scoring under the threshold on average: the voiceprint needs retraining (mic mode, new room…). */
+  get drifting() {
+    const s = (this.scores || []).slice(-8);
+    return s.length >= 4 && s.reduce((a, b) => a + b, 0) / s.length < this.threshold;
   }
 
   // ---- Enrollment ----------------------------------------------------------------
