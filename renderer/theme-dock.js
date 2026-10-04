@@ -149,7 +149,8 @@
     raf = 0;
     if (!orbOn && now - orbOffAt > 900) { octx.clearRect(0, 0, 160, 160); return; }
     raf = requestAnimationFrame(frame);
-    if (now - lastFrame < 32) return; // ~30 fps is plenty for a 64 px orb
+    const busy = scene.state !== 'idle' || scene.level > 0.02 || scene.ripples.length;
+    if (now - lastFrame < (busy ? 32 : 66)) return; // 30 fps while she's active, 15 for the slow idle breath
     const dt = Math.min(0.1, (now - (lastFrame || now)) / 1000);
     lastFrame = now;
     const t = (now - t0) / 1000;

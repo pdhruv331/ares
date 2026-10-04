@@ -208,7 +208,7 @@ class Dock {
   }
 
   // ---- From theme.js ------------------------------------------------------------------------------------------
-  setOrb(on) { if (on === this.orb) return; this.orb = on; this.send({ type: 'orb', on }); }
+  setOrb(on) { if (on === this.orb) return; this.orb = on; this.log('theme orb', on ? 'shown' : 'hidden'); this.send({ type: 'orb', on }); }
   scene(msg) {
     if (msg.type === 'level' && !this.orb) return; // her voice only matters while the orb is showing
     this.send({ type: 'scene', msg });

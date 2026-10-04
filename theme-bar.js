@@ -39,7 +39,7 @@ class Bar {
     fs.mkdirSync(this.dir, { recursive: true });
     const url = this.url();
     const click = (view) => `curl -s -m 2 '${url}/open?view=${view}' >/dev/null`;
-    const font = (w, s) => `SF Mono:${w}:${s}`;
+    const font = (w, s) => `.SF NS Mono:${w}:${s}`; // SF Mono's system name ("SF Mono" itself isn't installed)
     const plugins = {
       'clock.sh': '#!/bin/zsh\nsketchybar --set "$NAME" label="$(date \'+%a %b %-d  %-I:%M %p\' | tr a-z A-Z)"\n',
       'battery.sh': `#!/bin/zsh
@@ -67,6 +67,7 @@ fi
     const P = (f) => `'${path.join(this.dir, f)}'`;
     const rc = `#!/bin/zsh
 # Written by ARES (theme-bar.js). The ARES items are live-fed by ARES itself; the rest are SketchyBar's own.
+export PATH="${path.dirname(this.sketchybar)}:$PATH"
 sketchybar --bar position=top height=34 color=${C.bar} border_width=0 shadow=off sticky=on topmost=off \\
   padding_left=14 padding_right=14 notch_width=210 font_smoothing=on display=all y_offset=0 \\
   border_color=${C.cyanFaint} corner_radius=0
@@ -115,9 +116,11 @@ sketchybar --update
     const rc = this.writeConfig();
     this.sent = {};
     this.active = true;
-    execFile(bin, ['--query', 'bar'], { timeout: 3000 }, (err) => {
-      if (!err) { execFile(bin, ['--reload', rc], () => setTimeout(() => this.pushAll(), 600)); return; }
-      const p = spawn(bin, ['--config', rc], { detached: true, stdio: 'ignore', env: { ...process.env, LANG: 'en_US.UTF-8' } });
+    // (`--query bar` can't tell: it exits 0 with no bar running)
+    execFile('/usr/bin/pgrep', ['-x', 'sketchybar'], (none) => {
+      if (!none) { execFile(bin, ['--reload', rc], () => setTimeout(() => this.pushAll(), 600)); return; }
+      const env = { ...process.env, LANG: 'en_US.UTF-8', PATH: `${path.dirname(bin)}:${process.env.PATH || '/usr/bin:/bin'}` };
+      const p = spawn(bin, ['--config', rc], { detached: true, stdio: 'ignore', env });
       p.unref();
       this.pid = p.pid;
       setTimeout(() => this.pushAll(), 1200);
@@ -149,6 +152,7 @@ sketchybar --update
 
   pushAll() {
     this.sent = {};
+    execFile(this.sketchybar, ['--update'], () => {}); // lay the items out again after a reload
     this.voice(this.state.voice, true);
     this.status(this.state.status);
     this.jobs(this.state.jobs);
@@ -216,7 +220,7 @@ sketchybar --update
     if (!bin) return false;
     this.lastGlow = this.glowColor();
     const args = ['style=round', 'width=3.0', 'hidpi=on', `active_color=${this.lastGlow}`, 'inactive_color=0x00000000', 'blacklist=ARES,Electron'];
-    const p = spawn(bin, args, { detached: true, stdio: 'ignore' });
+    const p = spawn(bin, args, { detached: true, stdio: 'ignore' }); // a second `borders …` only updates the one running
     p.unref();
     this.bordersPid = p.pid;
     this.bordersOn = true;

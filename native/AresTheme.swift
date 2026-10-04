@@ -125,8 +125,13 @@ func terminalProfile(out: String, spec: [String: Any]) {
     "TextBoldColor": archived(spec["bold"] as? String ?? "#ffffff"), "CursorColor": archived(spec["cursor"] as? String ?? "#ffffff"),
     "SelectionColor": archived(spec["selection"] as? String ?? "#333333"), "UseBrightBold": true, "columnCount": 110, "rowCount": 32,
   ]
-  if let font = NSFont(name: "SFMono-Regular", size: 12) ?? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular) as NSFont?,
-     let data = try? NSKeyedArchiver.archivedData(withRootObject: font, requiringSecureCoding: false) { p["Font"] = data }
+  // SF Mono ships inside Terminal itself: archive Menlo, then name SF Mono in the archive (Terminal resolves it)
+  if let menlo = NSFont(name: "Menlo-Regular", size: 12), let data = try? NSKeyedArchiver.archivedData(withRootObject: menlo, requiringSecureCoding: false),
+     var archive = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any], var objects = archive["$objects"] as? [Any] {
+    objects = objects.map { ($0 as? String) == "Menlo-Regular" ? "SFMono-Regular" : $0 }
+    archive["$objects"] = objects
+    p["Font"] = (try? PropertyListSerialization.data(fromPropertyList: archive, format: .binary, options: 0)) ?? data
+  }
   let ansi = spec["ansi"] as? [String] ?? []
   for (i, hex) in ansi.prefix(16).enumerated() { p["ANSI\(i >= 8 ? "Bright" : "")\(names[i % 8])Color"] = archived(hex) }
   guard let data = try? PropertyListSerialization.data(fromPropertyList: p, format: .xml, options: 0) else { fail("could not encode profile") }

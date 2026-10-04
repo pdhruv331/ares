@@ -74,17 +74,22 @@ class Theme {
   save(patch) { this.writeSettings({ theme: { ...(this.readSettings().theme || {}), ...patch } }); }
 
   // ---- Start / stop --------------------------------------------------------------------------------------------
-  /** At launch: if the theme is on, bring up its live parts (the settings themselves persist on their own). */
+  /** At launch: if the theme is on, bring up its live parts (the settings themselves persist on their own). Switched on
+   *  but never applied (turned on in settings.json): apply it now. */
   async start() {
-    if (this.opts.enabled) await this.startLive();
+    if (!this.opts.enabled) return;
+    if (!this.readSettings().theme?.applied) await this.apply();
+    else await this.startLive();
   }
   async startLive() {
     if (this.live) return;
     this.live = true;
     await this.serve();
+    if (!this.live) return; // switched off meanwhile
     if (this.bar.installed) { this.bar.start(); this.bar.startBorders(); }
     else this.log('theme: SketchyBar/JankyBorders not installed (brew install felixkratz/formulae/sketchybar felixkratz/formulae/borders)');
     await this.dock.start();
+    if (!this.live) { this.dock.stop(); return; }
     if (this.opts.notifications) this.notify.start();
     this.icons.watch();
     this.updateOrb();
@@ -131,7 +136,9 @@ class Theme {
       return true;
     }
     this.save({ enabled: false });
-    return this.restore();
+    const report = await this.restore();
+    this.save({ applied: false });
+    return report;
   }
 
   // ---- Apply ---------------------------------------------------------------------------------------------------
@@ -167,6 +174,7 @@ class Theme {
     if (o.apps.terminal) await step('terminal', () => this.apps.terminal());
     if (o.apps.vscode) await step('vscode', () => this.apps.vscode());
     if (o.apps.chrome) await step('chrome', () => { this.apps.chrome(); return true; });
+    this.save({ applied: true });
     await this.startLive();
     this.log('theme applied', results);
     this.lastApply = results;
@@ -374,10 +382,10 @@ class Theme {
 
   /** Development only (ARES_TEST_THEME=dock,notify,art,bar): bring up parts of the theme without changing any setting. */
   async test(parts) {
-    await this.serve();
-    this.live = true;
     if (parts.includes('apply')) { this.save({ asked: true, enabled: true }); this.log('theme test apply', await this.apply()); return; }
     if (parts.includes('restore')) { this.save({ enabled: false }); this.log('theme test restore', await this.restore()); return; }
+    await this.serve();
+    this.live = true;
     if (parts.includes('bar')) this.log('theme test bar config', this.bar.writeConfig());
     if (parts.includes('art')) this.log('theme test art', await this.icons.art(), this.icons.dir);
     if (parts.includes('dock')) { await this.dock.start(); this.updateOrb(); }

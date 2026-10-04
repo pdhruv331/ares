@@ -1868,8 +1868,8 @@ app.whenReady().then(async () => {
   wallpaper.on('desk', () => theme.updateOrb());
   theme.jobs(jobs.list());
   theme.weather(dashboard?.snapshot().weather);
-  theme.start().catch((err) => log('theme start failed', err.message));
-  if (!app.isPackaged && process.env.ARES_TEST_THEME) theme.test(process.env.ARES_TEST_THEME.split(',')); // development: parts, no settings
+  theme.start().catch((err) => log('theme start failed', err.message))
+    .then(() => { if (!app.isPackaged && process.env.ARES_TEST_THEME) theme.test(process.env.ARES_TEST_THEME.split(',')); }); // development
   createTray();
   // First run with the wallpaper on: ask (once) about the ARES lock-screen picture
   if (wallpaper.opts.enabled && !wallpaper.opts.lockAsked && (app.isPackaged || process.env.ARES_ASK_LOCK)) setTimeout(() => wallpaper.setLockStill(true).then(refreshTray), 8000);

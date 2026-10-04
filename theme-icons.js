@@ -125,7 +125,9 @@ class Icons {
     } catch (err) { this.log('theme desktop watch failed', err.message); }
   }
   newcomers() {
+    if (!this.watcher) return; // switched off meanwhile
     this.busy = this.busy.then(async () => {
+      if (!this.watcher) return;
       for (const f of this.desktopItems()) if (!this.originals.has(`icon:${f}`)) await this.applyOne(f);
     }).catch(() => {});
   }

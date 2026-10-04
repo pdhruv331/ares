@@ -136,6 +136,9 @@ class AppThemes {
   async restoreVscode(rec) {
     if (rec.kind === 'vscodeext') {
       await run(VSCODE.cli, ['--uninstall-extension', VSCODE.ext], { timeout: 120_000 }).catch((err) => this.log('vscode uninstall', err.stderr || err.message));
+      // The CLI leaves the folder for VS Code to sweep up on its next launch: remove ARES's own folder now
+      const dir = path.join(os.homedir(), '.vscode', 'extensions');
+      for (const f of fs.existsSync(dir) ? fs.readdirSync(dir) : []) if (f.startsWith(`${VSCODE.ext}-`)) fs.rmSync(path.join(dir, f), { recursive: true, force: true });
       return true;
     }
     if (rec.kind === 'vscodetheme') {
