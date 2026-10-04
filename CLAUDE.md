@@ -94,6 +94,9 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   a lift for one panel (bar/dock/notification: `showWindow(panel)`) shows only that panel and sinks when it closes.
 - Voice ID keeps itself current (`voiceid.js learn`, anchored to the enrolment); desk mode's "NOT MATCHED" flash and the
   drift warning in the Desk Mode menu come from it. Never learn from rejected speech except the near-miss rule.
+- Drop-downs: every owner (ares.mark, ares.status, ares.jobs, menu.N) has ROWS rows made once in sketchybarrc; ARES only
+  fills (`Bar.popup(…, show=false)` on hover) and shows them. Never add/remove popup items per open (that's the empty-frame
+  lag). Rows highlight via row.sh inside SketchyBar. Theme callbacks into main must not touch `win` while quitting.
 - The pointer colour can't be written (com.apple.universalaccess is protected): the menu walks the user through it.
 - Testing: `ARES_TEST_THEME=dock,notify,art,bar` in a harness brings up parts without touching settings; `apply` / `restore`
   change the REAL Mac (ask first). Running the standalone `Bar` against the live bar changes the real glow colour; reset it after.
