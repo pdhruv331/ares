@@ -257,7 +257,7 @@ body.comms-open .subs { opacity: 0; pointer-events: none; }
 /* The brain makes room for COMMS: lifts a little and dims, then settles back */
 .core { transition: transform 0.55s cubic-bezier(.3,.7,.4,1), opacity 0.45s ease; transform-origin: 50% calc(50% - 8px); }
 /* Where the brain sits (dash.js moves and shrinks it to keep clear of desktop icons) and the COMMS lift, composed */
-.core { transform: translate(var(--bx, 0px), calc(var(--by, 0px) + var(--comms-y, 0px))) scale(calc(var(--bs, 1) * var(--comms-s, 1))); }
+.core { transform: translate(var(--bx, 0px), calc(var(--by, 0px) + var(--comms-y, 0px))) scale(calc(var(--bs, 1) * var(--comms-s, 1) * var(--hand-zoom, 1))); }
 html.s-desktop .core, html.s-lifted .core { transition-duration: 1.4s, 0.45s; }
 .core.comms-dim { opacity: 0.62; }
 
@@ -574,3 +574,33 @@ html.blend.s-lifted #stars { opacity: 0; }
 /* Lifted for one panel (opened from the bar, the dock or a notification): only that panel */
 html.panel-lift .core, html.panel-lift .ticker, html.panel-lift .console, html.panel-lift #fx { opacity: 0 !important; pointer-events: none !important; }
 html.panel-lift:not([data-lift="call"]):not([data-lift="job"]) .panels { opacity: 0 !important; pointer-events: none !important; }
+
+/* ---- Hand gestures (renderer/hands.js): the cursor and what it touches ---------------------------------------- */
+.hand-cursor { position: fixed; left: 0; top: 0; z-index: 70; pointer-events: none; will-change: transform; }
+.hand-cursor[hidden] { display: none; }
+.hand-cursor i { position: absolute; left: 0; top: 0; display: block; }
+.hc-ring { width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%; border: 1.5px solid rgba(62, 230, 255, 0.85);
+  box-shadow: 0 0 10px rgba(62, 230, 255, 0.45), inset 0 0 6px rgba(62, 230, 255, 0.25); background: rgba(62, 230, 255, 0.04);
+  transition: width 0.12s ease, height 0.12s ease, margin 0.12s ease, background 0.12s ease, border-color 0.12s ease; }
+.hc-ring.two { display: none; }
+.hc-dot { width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #c8f6ff; box-shadow: 0 0 6px rgba(62, 230, 255, 0.9); opacity: 0; transition: opacity 0.12s, transform 0.12s; }
+.hc-line { height: 1px; width: 0; background: linear-gradient(90deg, rgba(62, 230, 255, 0.1), rgba(62, 230, 255, 0.8), rgba(62, 230, 255, 0.1)); transform-origin: 0 50%; display: none; }
+.hand-cursor.over .hc-ring { border-color: #e6fbff; box-shadow: 0 0 14px rgba(62, 230, 255, 0.7), inset 0 0 8px rgba(62, 230, 255, 0.35); }
+.hand-cursor[data-pose="pinch"] .hc-ring { width: 14px; height: 14px; margin: -7px 0 0 -7px; background: rgba(62, 230, 255, 0.55); border-color: #fff; }
+.hand-cursor[data-pose="two"] .hc-ring { width: 20px; height: 20px; margin: -10px 0 0 -10px; border-style: dashed; }
+.hand-cursor[data-pose="two"] .hc-dot { opacity: 1; }
+.hand-cursor[data-pose="two"] .hc-dot.a { transform: translate(-5px, 0); }
+.hand-cursor[data-pose="two"] .hc-dot.b { transform: translate(5px, 0); }
+.hand-cursor[data-pose="open"] .hc-ring { width: 34px; height: 34px; margin: -17px 0 0 -17px; border-color: rgba(62, 230, 255, 0.6); border-width: 1px; }
+.hand-cursor.zoom .hc-ring { width: 14px; height: 14px; margin: -7px 0 0 -7px; background: rgba(62, 230, 255, 0.5); border-color: #fff; }
+.hand-cursor.zoom .hc-ring.two, .hand-cursor.zoom .hc-line { display: block; }
+.hand-cursor.appear .hc-ring { animation: handAppear 0.45s ease-out; }
+@keyframes handAppear { 0% { transform: scale(2.6); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+.dp.hand-hover .br, .dp.hand-focus .br { border-color: #fff; filter: drop-shadow(0 0 4px rgb(var(--c))); width: 11px; height: 11px; transition: width 0.15s, height 0.15s; }
+.dp.hand-focus .br { border-color: rgba(var(--c), 1); }
+.dp-card.hand-hover .br, #comms.hand-hover .br { border-color: #fff; filter: drop-shadow(0 0 5px rgb(var(--c))); }
+.dp .dp-in, .dp-card { --hand-scale: 1; }
+.dp.hand-zooming .dp-in { transform: scale(var(--hand-scale)) !important; transition: none; }
+.dp-card { transform: scale(var(--hand-scale)); transform-origin: center; }
+html[data-hands="engaged"] .ear::after { content: " · HANDS"; color: var(--cyan); }
+@media (prefers-reduced-motion: reduce) { .hand-cursor.appear .hc-ring { animation: none; } }

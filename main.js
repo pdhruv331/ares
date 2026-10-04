@@ -46,6 +46,7 @@ const { ClaudeSessions } = require('./claude-sessions');
 const { ClaudeControl } = require('./claude-control');
 const { Surface } = require('./surface');
 const { DeskMode } = require('./desk');
+const { Vision, visionPath } = require('./vision');
 const { judge: judgeAddressed } = require('./addressed');
 const { registry: workerTools } = require('./worker-tools');
 const { startEgress } = require('./egress');
@@ -77,6 +78,7 @@ let wallpaper; // the starry backdrop below the desktop icons, the lock-screen s
 let claudeCtl;   // the user's Claude Code sessions: list, summaries, hooks, replies (claude-control.js)
 let claudeUsage; // the Claude plan's 5-hour/weekly limits, from Claude Code's rate-limit events (claude-usage.js)
 let desk;      // desk mode (desk.js): no wake word needed while the user is at the Mac
+let vision;    // hand gestures (vision.js): the camera helper and the gesture engine, only while desk mode is active
 let surface;   // where the ARES window lives: the live desktop, lifted above the apps, or a window (surface.js)
 let theme;     // the ARES OS theme (theme.js): the menu bar, window glow, dock, icons, notifications and system look
 let speech;    // her voice (voice.js): Katherine on ElevenLabs, the local Kokoro backup, budget mode, phrase cache, credit watch
@@ -244,6 +246,8 @@ function menuSections() {
       { label: voiceId.enrolled ? 'Retrain Voice ID…' : 'Set Up Voice ID…', click: () => { showWindow(); win.webContents.send('voiceid-enroll'); } },
       { type: 'separator' },
       ...deskMenu(),
+      { type: 'separator' },
+      ...handsMenu(),
     ],
     view: [
       { label: `Show / Hide  (${HOTKEY.replace('Alt', '⌥')})`, click: toggleWindow },
@@ -361,6 +365,28 @@ function deskMenu() {
   ];
 }
 
+/** Hand gestures: the switch (default off), what the camera is doing, and (development) recording test clips. */
+function handsMenu() {
+  if (!vision) return [];
+  const o = vision.opts, st = vision.state;
+  const line = !o.enabled ? 'Hands: off' : st.state === 'engaged' ? 'Hands: engaged (camera on)' : st.state === 'watching' ? 'Hands: watching for an open palm (camera on)'
+    : `Hands: off (${st.why})`;
+  const items = [
+    { label: 'Hand Gestures (camera, while I\'m at the Mac)', type: 'checkbox', checked: o.enabled, click: (item) => { vision.set({ enabled: item.checked }); refreshTray(); } },
+    { label: line, enabled: false },
+  ];
+  if (st.permission === 'denied') items.push({ label: 'Allow the camera in System Settings › Privacy › Camera…', click: () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Camera') });
+  if (!app.isPackaged) { // record joint streams (never video) for scripts/test-hands.js
+    const rec = (name, kind) => ({ label: name, click: () => { vision.recordStart(name, kind, 4); refreshTray(); } });
+    items.push({ label: st.recording ? `Recording clip ${st.recording}…` : 'Record a 4 s Test Clip (dev)', enabled: !st.recording, submenu: [
+      ...['engage', 'palmStop', 'quickPinch', 'grabThrow', 'swipeLeft', 'swipeRight', 'swipeUp', 'swipeDown', 'scroll', 'zoomIn', 'zoomOut'].map((n) => rec(n, 'positive')),
+      { type: 'separator' },
+      ...['typing', 'restingHands', 'scratchFace', 'chinOnHand', 'waveAtSomeone', 'heldPeaceSign', 'stretching'].map((n) => rec(n, 'negative')),
+    ] });
+  }
+  return items;
+}
+
 /** The menu bar's voice section: what she's speaking with, credits, the Budget voice submenu, dev mode. */
 function voiceMenu() {
   if (!speech) return [];
@@ -415,11 +441,16 @@ async function onBarge(evt) {
   if (echo || !owner) return listener.barge(false);
   lastBargeAt = Date.now();
   listener.barge(true); // the listener stops her voice and starts capturing the new request
+  const heard = [...playedTexts];
+  stopSpeaking();
+  win.webContents.send('barge', { heard: heard.join(' ') });
+}
+/** Her voice stops wherever it's playing, and the brain's reply with it (a barge-in, or a raised palm). */
+function stopSpeaking() {
   for (const id of speaking.keys()) cancelledClips.add(id);
   for (const abort of ttsAborts.values()) abort();
-  const heard = [...playedTexts];
+  listener.stopPlay();
   claude.interrupt();
-  win.webContents.send('barge', { heard: heard.join(' ') });
 }
 const playedTexts = []; // what she actually got to say in the current reply
 function onPlayback(evt) {
@@ -468,6 +499,30 @@ function createDesk() {
   wallpaper.watchAlways(() => desk.opts.enabled);
   desk.check();
 }
+function createVision() {
+  vision = new Vision({
+    helper: visionPath(app, __dirname), log, readSettings, writeSettings, supportDir: app.getPath('userData'), powerMonitor, desk,
+    lowPower: () => Boolean(wallpaper?.desk?.lowPower), devBuild: !app.isPackaged,
+  });
+  wallpaper.on('desk', () => vision.check()); // Low Power Mode comes and goes
+  vision.on('actions', (list) => { if (win && !win.isDestroyed()) win.webContents.send('hands-actions', list); });
+  vision.on('state', (st) => { if (win && !win.isDestroyed()) win.webContents.send('hands-state', st); refreshTray(); });
+  vision.on('recorded', (r) => notice(`Hand clip saved: ${path.basename(r.file)} (${r.frames} frames)`));
+  // A pinch at the face only counts over one of ARES's things: answered from the clickable areas the window reports
+  vision.setHitTest((p) => {
+    if (!surface.passThrough) return true;
+    const b = win.getBounds(), x = p.x * b.width, y = p.y * b.height;
+    return surface.hits.all || surface.hits.rects.some((r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
+  });
+  vision.check();
+}
+ipcMain.handle('hands-state', () => vision?.state || null);
+ipcMain.on('hands-act', (_e, what) => {
+  if (what === 'summon') showWindow();
+  else if (what === 'hide') hideWindow();
+  else if (what === 'stop') { log('hands', { stop: true }); stopSpeaking(); }
+});
+ipcMain.handle('test-hands', (_e, clip, opts) => { if (!app.isPackaged) vision?.replay(clip, opts || {}); return vision?.state || null; });
 // The conversation's timing, for judging speech heard without the wake word (addressed.js)
 const talk = { lastReplyAt: 0, askedQuestion: false, fromWake: false };
 ipcMain.on('reply-done', (_e, asked) => { talk.lastReplyAt = Date.now(); talk.askedQuestion = Boolean(asked); });
@@ -1924,6 +1979,7 @@ app.whenReady().then(async () => {
   }
   wallpaper.jobs(jobs.list());
   createDesk();
+  createVision();
   createWindow({ show: !openedAtLogin }); // at login, wait quietly in the menu bar
   theme = new Theme({
     log, readSettings, writeSettings, supportDir: app.getPath('userData'), appDir: __dirname, onOpen: openView, brainVisible,
@@ -1975,6 +2031,7 @@ app.on('will-quit', () => {
   wallpaper?.stop();
   theme?.quit();
   desk?.stop();
+  vision?.quit(); // the camera is released before anything else
   speech?.stop();
   egress?.close();
   claude.shutdown();

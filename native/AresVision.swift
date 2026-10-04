@@ -10,7 +10,9 @@
 //   {"type":"permission","status":"authorized|denied|restricted|notDetermined"}
 //   {"type":"camera","on":true,"res":"low","fps":10,"w":640,"h":480}      the camera (and its green light) is on
 //   {"type":"camera","on":false,"why":"stop|lid|error|suspended"}         the camera is fully off
-//   {"type":"hands","ts":<ms>,"hands":[{"side":"left|right|?","c":0.93,"j":[[x,y,c] | null ×21]}]}
+//   {"type":"hands","ts":<ms>,"key":1.8,"face":[x,y,w,h]|null,"hands":[{"side":"left|right|?","c":0.93,"j":[[x,y,c] | null ×21]}]}
+//        key = seconds since the last key press (CGEventSource, no permission needed), so typing can be ignored.
+//        face = the largest face's box (VNDetectFaceRectanglesRequest, mirrored), so hands at the face can be ignored.
 //        x,y normalised 0…1, origin top-left, x MIRRORED (move your hand right → x grows). c = confidence.
 //        Joint order (as MediaPipe): wrist; thumb CMC MP IP tip; index MCP PIP DIP tip; middle …; ring …; little …
 //        Joints under the confidence floor are null. Smoothed with a One Euro filter per joint.
@@ -21,6 +23,7 @@
 //
 // Bench (no camera): ares-vision --bench <frames> <low|high> [image]   Vision cost per frame on a still image.
 import AVFoundation
+import CoreGraphics
 import CoreImage
 import Foundation
 import IOKit
@@ -67,8 +70,24 @@ final class OneEuro {
 // ---- Requests: what is looked for in each frame -------------------------------------------------------------------
 protocol VisionTask: AnyObject {
   var request: VNRequest { get }
-  /** Called after the request ran on a frame; emits whatever it found. */
-  func publish(ts: Double)
+  /** Called after the request ran on a frame; returns its part of the frame line ("key":value pairs). */
+  func publish(ts: Double) -> String
+}
+
+/** Where the face is, as a box (the cheap face request, not landmarks): hands at the face are scratching, not gesturing. */
+final class FaceTask: VisionTask {
+  let face = VNDetectFaceRectanglesRequest()
+  var request: VNRequest { face }
+  private var last: (box: CGRect, ts: Double)? = nil
+  func publish(ts: Double) -> String {
+    if let o = (face.results ?? []).max(by: { $0.boundingBox.width < $1.boundingBox.width }) {
+      let b = o.boundingBox // normalised, bottom-left origin, unmirrored
+      let box = CGRect(x: 1 - b.maxX, y: 1 - b.maxY, width: b.width, height: b.height)
+      last = (box, ts)
+    } else if let l = last, ts - l.ts > 1500 { last = nil } // a face lost for a moment keeps its box
+    guard let l = last else { return "\"face\":null" }
+    return String(format: "\"face\":[%.3f,%.3f,%.3f,%.3f]", l.box.minX, l.box.minY, l.box.width, l.box.height)
+  }
 }
 
 final class HandsTask: VisionTask {
@@ -92,7 +111,7 @@ final class HandsTask: VisionTask {
     for fs in filters.values { for f in fs { f.minCutoff = minCutoff; f.beta = beta } }
   }
 
-  func publish(ts: Double) {
+  func publish(ts: Double) -> String {
     let obs = hand.results ?? []
     var out: [String] = []   // written by hand: compact, fixed 4 decimals
     var used = Set<String>()
@@ -120,7 +139,7 @@ final class HandsTask: VisionTask {
       }
       out.append(String(format: "{\"side\":\"%@\",\"c\":%.2f,\"j\":[%@]}", side, o.confidence, j.joined(separator: ",")))
     }
-    print(String(format: "{\"type\":\"hands\",\"ts\":%.0f,\"hands\":[%@]}", ts, out.joined(separator: ",")))
+    return "\"hands\":[" + out.joined(separator: ",") + "]"
   }
 }
 
@@ -253,7 +272,9 @@ final class Camera: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     try? handler.perform(tasks.map { $0.request })
     visionMs += nowMs() - t0
     frames += 1
-    for t in tasks { t.publish(ts: ts) }
+    let key = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+    let parts = tasks.map { $0.publish(ts: ts) }
+    print(String(format: "{\"type\":\"hands\",\"ts\":%.0f,\"key\":%.2f,", ts, key) + parts.joined(separator: ",") + "}")
     // The frame is dropped here: never kept, written or sent anywhere
     if ts - statsAt > 5000 {
       emit(["type": "stats", "fps": round4(Double(frames) * 1000 / (ts - statsAt)), "ms": round4(visionMs / Double(max(1, frames)))])
@@ -299,7 +320,7 @@ if let i = args.firstIndex(of: "--bench") {
 
 let camera = Camera()
 let hands = HandsTask()
-camera.tasks = [hands]
+camera.tasks = [FaceTask(), hands]
 
 // Commands arrive on stdin; everything camera-related runs on the main queue
 DispatchQueue.global(qos: .userInitiated).async {

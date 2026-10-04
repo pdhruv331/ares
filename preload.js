@@ -91,6 +91,14 @@ contextBridge.exposeInMainWorld('ares', {
     testHear: (evt) => ipcRenderer.send('test-hear', evt),
     testDesk: (patch) => ipcRenderer.invoke('test-desk', patch),
   },
+  // Hand gestures (vision.js → hands.js → renderer/hands.js)
+  hands: {
+    onActions: (fn) => ipcRenderer.on('hands-actions', (_e, list) => fn(list)),
+    onState: (fn) => ipcRenderer.on('hands-state', (_e, s) => fn(s)),
+    state: () => ipcRenderer.invoke('hands-state'),
+    act: (what) => ipcRenderer.send('hands-act', what), // summon | hide | stop
+    replay: (clip, opts) => ipcRenderer.invoke('test-hands', clip, opts || {}), // development builds only
+  },
   hide: () => ipcRenderer.send('window-hide'),
   pin: (pinned) => ipcRenderer.send('window-pin', pinned),
   toggleFullscreen: () => ipcRenderer.send('window-fullscreen'),

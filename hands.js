@@ -27,10 +27,10 @@ const DEFAULTS = {
   clickMs: 380,         // pinch released sooner than this without moving = a click
   pinchWaitMs: 140,     // a new pinch waits this long for the other hand (two-hand zoom) before pressing
   dragDead: 0.035,      // the pinch must move this far (fraction of the display) before it's a drag; jitter stays a click
-  bottomIgnore: 0.80,   // hands below this line (resting, typing) don't count
+  bottomIgnore: 0.80,   // while watching: hands below this line (resting, typing) can't engage
   edge: 0.04,           // nor right at the frame's edges
   faceMargin: 0.55,     // "near my face": inside the face box grown by this fraction of its width
-  box: { cx: 0.5, cy: 0.42, hands: 5.0, aspect: 0.62, min: 0.28, max: 0.9 }, // interaction box: centre, width in palm lengths
+  box: { cx: 0.5, cy: 0.42, hands: 5.0, aspect: 0.62, min: 0.28, max: 0.9, minH: 0.3, below: 0.02 }, // interaction box: centre, width in palm lengths; sits below the face when one is seen
   swipeDist: 1.1,       // two-finger swipe: at least this far (palm lengths)…
   swipeSpeed: 3.2,      // …at least this fast (palm lengths per second)…
   swipeAxis: 1.6,       // …and mostly along one axis
@@ -92,12 +92,18 @@ function classify(f, wasPinch = false, o = DEFAULTS) {
   return 'other';
 }
 
-/** The interaction box: a comfortable area at chest height, sized by the hand (near or far works the same). */
-function boxFor(size, aspect, o = DEFAULTS) {
+/** The interaction box: a comfortable area at chest height, sized by the hand (near or far works the same), and
+ *  below the face when one is seen (hands at the face are scratching, not gesturing). Uniform space (x × aspect). */
+function boxFor(size, aspect, o = DEFAULTS, face = null) {
   const b = o.box;
-  const w = Math.min(b.max * aspect, Math.max(b.min * aspect, size * b.hands));
-  const h = w * b.aspect;
-  return { x: b.cx * aspect - w / 2, y: b.cy - h / 2, w, h };
+  let w = Math.min(b.max * aspect, Math.max(b.min * aspect, size * b.hands));
+  let h = w * b.aspect;
+  let y = b.cy - h / 2;
+  if (face) {
+    const top = face[1] + face[3] + face[2] * o.faceMargin * 0.5 + b.below; // just under the near-face zone
+    if (top > y) { y = top; const room = Math.max(b.minH, 0.97 - top); if (h > room) { h = room; w = h / b.aspect; } }
+  }
+  return { x: b.cx * aspect - w / 2, y, w, h };
 }
 /** A point (uniform space) → the display, 0…1 each way. */
 function toDisplay(p, box) {
@@ -110,7 +116,7 @@ function nearFace(f, face, o = DEFAULTS) {
   const [x, y, w, h] = face;
   const m = w * o.faceMargin;
   const p = f.palmN;
-  return p.x > x - m && p.x < x + w + m && p.y > y - m && p.y < y + h + m; // (a chin on a hand sits inside the box)
+  return p.x > x - m && p.x < x + w + m && p.y > y - m && p.y < y + h + m * 0.5; // (a chin on a hand sits inside the box)
 }
 
 // ---- The state machine ---------------------------------------------------------------------------------------------
@@ -171,10 +177,13 @@ class HandEngine {
       const pose = classify(f, slot.pose === 'pinch', o);
       hands.push({ side: slot.key, f, pose, slot });
     }
-    // Which hands count: not resting low, not at the edges, not at the face (unless pinching on something)
+    // Which hands count: not at the edges, not at the face (unless pinching on something), and while watching not
+    // down low either (resting, typing); engaged, reaching down is deliberate
+    this.face = frame.face || null;
     const valid = hands.filter((h) => {
       const p = h.f.palmN;
-      if (p.y > o.bottomIgnore || p.x < o.edge || p.x > 1 - o.edge || p.y < o.edge) return false;
+      if (p.x < o.edge || p.x > 1 - o.edge || p.y < o.edge || p.y > 1 - o.edge) return false;
+      if (this.state !== 'engaged' && p.y > o.bottomIgnore) return false;
       if (!nearFace(h.f, frame.face, o)) return true;
       if (this.state !== 'engaged') return false;
       if (this.pinch && this.pinch.side === h.side && this.pinch.phase !== 'wait') return true;
@@ -266,7 +275,7 @@ class HandEngine {
 
   /** The cursor: the palm's centre (steady through a pinch), through the interaction box. */
   pointFor(f) {
-    return toDisplay(f.palm, boxFor(this.sizeEma ?? f.size, f.aspect, this.o));
+    return toDisplay(f.palm, boxFor(this.sizeEma ?? f.size, f.aspect, this.o, this.face));
   }
 
   twoFinger(h, now, out) {
@@ -298,7 +307,7 @@ class HandEngine {
     const st = Math.max(0.001, (z.t - b.t) / 1000);
     const vy = (z.y - b.y) / f.size / st, vx = (z.x - b.x) / f.size / st;
     if (Math.abs(vy) > o.scrollDead && Math.abs(vy) < o.scrollMax && Math.abs(vy) > 1.5 * Math.abs(vx) && speed < o.scrollMax) {
-      const box = boxFor(this.sizeEma ?? f.size, f.aspect, o);
+      const box = boxFor(this.sizeEma ?? f.size, f.aspect, o, this.face);
       out.push({ type: 'scroll', dy: -((z.y - b.y) / box.h) * o.scrollGain }); // hand up: further down the page (natural)
     }
   }
@@ -362,9 +371,11 @@ class HandEngine {
   /** Off (the camera is going off): anything held lets go. */
   stop() {
     const out = [];
+    if (this.state === 'off') return out;
     this.release(out, true);
     this.endZoom(out);
     this.reset('off');
+    out.push({ type: 'state', state: 'off' });
     return out;
   }
   start() { if (this.state === 'off') this.reset('watching'); return [{ type: 'state', state: 'watching' }, { type: 'camera', ...this.camera() }]; }

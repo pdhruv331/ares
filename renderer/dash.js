@@ -1567,6 +1567,30 @@ const Dash = (() => {
     get panels() { return [...panels.values()].map((p) => ({ id: p.id, mode: p.mode, x: p.x, y: p.y, slot: p.slot && `${p.slot.side}${p.slot.i}`, tier })); },
     /** Esc: fold an open detail card back. True if there was one. */
     closeCard() { if (!card) return false; closeCard(); return true; },
+    /** Open a panel's details (a hand gesture's click or spread; the mouse goes through press/letGo). */
+    openCard(id) { const p = panels.get(id); if (p && p.mode === 'rest') openCard(p); },
+    /** Into the brain without a throw (two-finger swipe down on the focused panel): the same absorb as a throw. */
+    dismiss(id) {
+      const p = panels.get(id);
+      if (!p || p.mode !== 'rest' || hand.p) return false;
+      const c = center(p);
+      p.ox = c.x; p.oy = c.y; p.vx = 0; p.vy = 0; p.trail = []; p.orbA = 0; p.slot = null;
+      p.mode = 'orb';
+      fold(p, 170);
+      setTimeout(() => { if (p.mode === 'orb') absorb(p); }, 180);
+      return true;
+    },
+    /** Squeezed by two hands: folds into an orb where it is, then opens back out (the orb's normal landing). */
+    collapse(id) {
+      const p = panels.get(id);
+      if (!p || p.mode !== 'rest' || hand.p) return false;
+      const c = center(p);
+      grab(p, c.x + stage.getBoundingClientRect().left, c.y + stage.getBoundingClientRect().top);
+      hand.p = null;
+      p.vx = 0; p.vy = 0;
+      setTimeout(() => { if (p.mode === 'orb') { p.mode = 'flying'; wake(); } }, 700);
+      return true;
+    },
     get card() { return card && { id: card.p.id, text: card.el.innerText }; },
     show, hide, // for testing and tuning from the console
     get desk() { return { walls, spot, brain: brain(), slots: { left: slots.left.length, right: slots.right.length }, tier, surface: surfaceName }; },

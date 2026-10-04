@@ -586,6 +586,20 @@ window.ares.onBarge(({ heard }) => {
   input.placeholder = 'Listening…';
 });
 
+/** A raised palm while she speaks (renderer/hands.js): she stops, silently, and waits; nothing is captured. */
+function stopSilently(how) {
+  const turn = activeTurn;
+  window.ares.hands.act('stop'); // her voice, wherever it's playing, and the brain's reply
+  if (!turn || turn.barged) return;
+  turn.barged = true;
+  turn.speech?.cancel();
+  interruptedNote = `(ARES note: the user stopped you mid-reply with ${how}; you said nothing more. Carry on only if asked.)\n\n`;
+  setState('idle');
+  window.ares.speakingMode(false);
+  window.ares.resumeListening();
+}
+const App = { get state() { return state; }, stopSilently };
+
 // ---- Voice ID: only the owner's voice gets through ------------------------------
 const voiceIdItem = document.querySelector('[data-key="voiceid"]');
 let voiceIdOn = false;
