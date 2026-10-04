@@ -23,6 +23,11 @@ echo "› Compiling theme helper (ARES OS theme: app icons, custom icons, runnin
 xcrun swiftc -O -swift-version 5 native/AresTheme.swift -o native/build/ares-theme
 codesign --force --sign "$SIGN" native/build/ares-theme
 
+echo "› Compiling camera helper (hand gestures: joints only, frames never leave it)"
+xcrun swiftc -O -swift-version 5 native/AresVision.swift -o native/build/ares-vision \
+  -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker native/Vision-Info.plist
+codesign --force --sign "$SIGN" native/build/ares-vision
+
 echo "› Backup voice model (Kokoro, downloaded once into the support folder)"
 zsh scripts/get-voice-model.sh
 
@@ -38,6 +43,7 @@ npx electron-packager . ARES \
   --extra-resource=native/build/ares-listener \
   --extra-resource=native/build/ares-desktop \
   --extra-resource=native/build/ares-theme \
+  --extra-resource=native/build/ares-vision \
   --extra-resource=models/speaker-titanet-small.onnx \
   --extra-resource=models/intent \
   --ignore='^/relay(/|$)' --ignore='^/(native|android|scripts|dist|assets|models|\.env.*|\.gitignore)' \

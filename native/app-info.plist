@@ -11,5 +11,7 @@
   <string>ARES controls apps like Music, Reminders and Notes when you ask her to.</string>
   <key>NSSpeechRecognitionUsageDescription</key>
   <string>ARES transcribes your voice on this Mac to understand commands. Audio never leaves your Mac.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>ARES watches for hand gestures while you're at your desk (only when Hand Gestures is on). Video stays on this Mac in the camera helper; only hand positions reach ARES, and nothing is recorded.</string>
 </dict>
 </plist>

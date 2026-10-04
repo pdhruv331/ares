@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>com.dhruv.ares.vision</string>
+  <key>CFBundleName</key>
+  <string>ARES Vision</string>
+  <key>NSCameraUsageDescription</key>
+  <string>ARES watches for hand gestures on this Mac. Video never leaves the camera helper: only hand positions reach ARES, nothing is recorded.</string>
+</dict>
+</plist>
