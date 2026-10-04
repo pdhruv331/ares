@@ -84,6 +84,12 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   config in `~/.ares/sketchybar` (SketchyBar runs config and item scripts through `sh -c` unquoted, so no spaces in that path);
   no launch agents, nothing in ~/.config. `sketchybar --query bar` exits 0
   even with no bar running: check with `pgrep -x sketchybar`. The bar hides itself in full-screen Spaces (by design).
+- The bar COVERS the macOS menu bar (topmost, same height; the menu bar itself stays at the user's own "never hide"):
+  the front app's menus come from Accessibility (`ares-theme menubar/menu-items/menu-press`), ARES's own from `menuSections()`
+  in main.js (the ◉ menu is the same sections joined). Mirrored icons are SketchyBar aliases (Screen Recording for SketchyBar).
+- Offline: `~/.ares/sketchybar/offline.sh` (run on quit, and by the `ares.watch` item if ARES's pid in `<support>/theme/ares.pid`
+  dies) puts the user's Dock settings back and lowers the bar; `resumeDock()` re-applies on launch. A dev harness
+  (ARES_USER_DATA set) uses `~/.ares/sketchybar-dev` so it never rewrites the installed bar's scripts.
 - The pointer colour can't be written (com.apple.universalaccess is protected): the menu walks the user through it.
 - Testing: `ARES_TEST_THEME=dock,notify,art,bar` in a harness brings up parts without touching settings; `apply` / `restore`
   change the REAL Mac (ask first). Running the standalone `Bar` against the live bar changes the real glow colour; reset it after.
