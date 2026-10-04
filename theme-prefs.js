@@ -62,6 +62,13 @@ class Originals {
     if (!r.ok) this.log('theme pref not saved', { domain, key });
     return Boolean(r.ok);
   }
+  /** Save a setting's original without changing it (something else is about to change it). */
+  async keepPref(domain, key) {
+    const id = `pref:${domain}:${key}`;
+    if (this.has(id)) return;
+    const cur = await this.readPref(domain, key);
+    this.keep(id, { kind: 'pref', domain, key, exists: cur.exists, plist: cur.plist || null });
+  }
   async restorePref(rec) {
     const r = await this.helperJson(['pref-set', rec.domain, rec.key, rec.exists ? rec.plist : '-']).catch((err) => ({ ok: false, error: err.message }));
     return Boolean(r.ok);

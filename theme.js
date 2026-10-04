@@ -25,11 +25,14 @@ const { Notify } = require('./theme-notify');
 const { AppThemes } = require('./theme-apps');
 
 const SE = (what) => `tell application "System Events" to tell ${what}`;
+// Flipped through System Events (so the change shows at once); the preference keys underneath are saved too and
+// written back after, so a restore leaves them byte for byte as they were (absent stays absent)
 const SCRIPTS = {
-  dark: { get: `${SE('appearance preferences')} to get dark mode`, set: `${SE('appearance preferences')} to set dark mode to %s` },
-  dockAutohide: { get: `${SE('dock preferences')} to get autohide`, set: `${SE('dock preferences')} to set autohide to %s` },
-  dockMagnify: { get: `${SE('dock preferences')} to get magnification`, set: `${SE('dock preferences')} to set magnification to %s` },
-  menubar: { get: `${SE('dock preferences')} to get autohide menu bar`, set: `${SE('dock preferences')} to set autohide menu bar to %s` },
+  dark: { get: `${SE('appearance preferences')} to get dark mode`, set: `${SE('appearance preferences')} to set dark mode to %s`, prefs: [['-g', 'AppleInterfaceStyle']] },
+  dockAutohide: { get: `${SE('dock preferences')} to get autohide`, set: `${SE('dock preferences')} to set autohide to %s`, prefs: [['com.apple.dock', 'autohide']] },
+  dockMagnify: { get: `${SE('dock preferences')} to get magnification`, set: `${SE('dock preferences')} to set magnification to %s`, prefs: [['com.apple.dock', 'magnification']] },
+  menubar: { get: `${SE('dock preferences')} to get autohide menu bar`, set: `${SE('dock preferences')} to set autohide menu bar to %s`,
+    prefs: [['-g', '_HIHideMenuBar'], ['-g', 'AppleMenuBarVisibleInFullscreen']] },
 };
 const CYAN_HIGHLIGHT = '0.243137 0.901961 1.000000 Other';
 const SOUND = path.join(os.homedir(), 'Library', 'Sounds', 'ARES.aiff');
@@ -139,7 +142,7 @@ class Theme {
       try { results[name] = (await fn()) !== false; } catch (err) { results[name] = false; this.log('theme apply failed', { step: name, error: err.stderr || err.message }); }
     };
     // 1. System look
-    await step('dark', () => this.originals.setScript('script:dark', SCRIPTS.dark, 'true'));
+    await step('dark', () => this.script('dark', 'true'));
     await step('accent', async () => {
       const a = await this.originals.setPref('-g', 'AppleAccentColor', 4); // blue: the nearest of macOS's accents to ARES cyan
       const h = await this.originals.setPref('-g', 'AppleHighlightColor', CYAN_HIGHLIGHT);
@@ -149,14 +152,14 @@ class Theme {
     await step('pointer', () => this.pointer());
     await step('sound', () => this.sound());
     await step('dock', async () => {
-      await this.originals.setScript('script:dockAutohide', SCRIPTS.dockAutohide, 'true');
-      await this.originals.setScript('script:dockMagnify', SCRIPTS.dockMagnify, 'false');
+      await this.script('dockAutohide', 'true');
+      await this.script('dockMagnify', 'false');
       // The ARES dock appears at once at the bottom edge; the Apple Dock after a short dwell (or ⌥⌘D)
       const ok = await this.originals.setPref('com.apple.dock', 'autohide-delay', { real: 1.2 });
       await run('/usr/bin/killall', ['Dock']).catch(() => {});
       return ok;
     });
-    await step('menubar', () => (this.bar.installed ? this.originals.setScript('script:menubar', SCRIPTS.menubar, 'true') : false));
+    await step('menubar', () => (this.bar.installed ? this.script('menubar', 'true') : false));
     await step('finder', () => this.finder());
     // 4. Icons
     await step('icons', async () => (await this.icons.apply(o.folders)).failed === 0);
@@ -168,6 +171,12 @@ class Theme {
     this.log('theme applied', results);
     this.lastApply = results;
     return results;
+  }
+
+  async script(name, value) {
+    const s = SCRIPTS[name];
+    for (const [d, k] of s.prefs) await this.originals.keepPref(d, k); // saved first, so restored after the script
+    await this.originals.setScript(`script:${name}`, s, value);
   }
 
   /** The pointer: cyan outline, dark fill (Accessibility → Display → Pointer). */
@@ -214,6 +223,7 @@ class Theme {
   /** Everything back as it was, then each saved original read back and compared. */
   async restore() {
     this.stopLive();
+    this.bar.stop(); this.bar.stopBorders(); // also a bar and glow left running by an earlier ARES
     const saved = JSON.parse(JSON.stringify(this.originals.data));
     const iconFails = await this.icons.restore();
     const terminalDefault = saved['pref:com.apple.Terminal:Default Window Settings'];
@@ -366,6 +376,8 @@ class Theme {
   async test(parts) {
     await this.serve();
     this.live = true;
+    if (parts.includes('apply')) { this.save({ asked: true, enabled: true }); this.log('theme test apply', await this.apply()); return; }
+    if (parts.includes('restore')) { this.save({ enabled: false }); this.log('theme test restore', await this.restore()); return; }
     if (parts.includes('bar')) this.log('theme test bar config', this.bar.writeConfig());
     if (parts.includes('art')) this.log('theme test art', await this.icons.art(), this.icons.dir);
     if (parts.includes('dock')) { await this.dock.start(); this.updateOrb(); }
