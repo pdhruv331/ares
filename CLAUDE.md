@@ -72,3 +72,17 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
 - Testing: the dev instance's hook files live in its own ARES_USER_DATA, so real hooks only reach the installed app;
   test with `claude -p … --settings '{"hooks":{"Stop":[…"<harness>/claude-hook.sh"…]}}'`. Set ARES_CODE_MODEL=haiku
   for test code sessions. Don't start test sessions in the user's real projects.
+
+## ARES OS theme (docs/ares-theme-prompt.md)
+
+- `theme.js` (the ◉ "ARES Theme" switch, apply/restore/verify) + `theme-prefs.js` (originals, CFPreferences through
+  `native/AresTheme.swift` → `ares-theme`) + `theme-bar.js` (SketchyBar, JankyBorders) + `theme-dock.js` / `renderer/theme-dock.*`
+  + `theme-icons.js` / `renderer/theme-art.*` + `theme-notify.js` / `renderer/theme-toast.*` + `theme-apps.js` (Terminal, VS Code, Chrome).
+- Every original is saved once in `<support>/theme/originals.json` before anything changes; switching off restores them all
+  and compares (`theme/last-restore.json`). Never write a theme setting without going through `Originals`.
+- SketchyBar and JankyBorders come from Homebrew (felixkratz/formulae, both formulae trusted). ARES starts them itself with its own
+  config (`<support>/theme/sketchybar/sketchybarrc`); no launch agents, nothing in ~/.config. `sketchybar --query bar` exits 0
+  even with no bar running: check with `pgrep -x sketchybar`. The bar hides itself in full-screen Spaces (by design).
+- The pointer colour can't be written (com.apple.universalaccess is protected): the menu walks the user through it.
+- Testing: `ARES_TEST_THEME=dock,notify,art,bar` in a harness brings up parts without touching settings; `apply` / `restore`
+  change the REAL Mac (ask first). Running the standalone `Bar` against the live bar changes the real glow colour; reset it after.
