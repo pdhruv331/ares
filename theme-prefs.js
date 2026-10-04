@@ -14,6 +14,8 @@ const run = (cmd, args, opts = {}) => new Promise((resolve, reject) => execFile(
   if (err) { err.stderr = String(stderr || '').trim(); return reject(err); }
   resolve(String(out));
 }));
+/** JSON from a helper or SketchyBar, or `fallback` when the output is empty or cut off (never throws). */
+const parse = (fallback) => (out) => { try { return JSON.parse(out); } catch { return fallback; } };
 const osa = (script) => run('/usr/bin/osascript', ['-e', script]).then((s) => s.trim());
 
 /** A JS value as an XML plist document. Numbers are integers unless wrapped: { real: 0.5 }. */
@@ -111,4 +113,4 @@ class Originals {
   }
 }
 
-module.exports = { Originals, plist, osa, run };
+module.exports = { Originals, plist, osa, run, parse };

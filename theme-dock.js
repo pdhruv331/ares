@@ -15,7 +15,7 @@ const path = require('path');
 const os = require('os');
 const { BrowserWindow, screen, Menu, shell, ipcMain } = require('electron');
 const { spawn, execFile } = require('child_process');
-const { run } = require('./theme-prefs');
+const { run, parse } = require('./theme-prefs');
 
 const HEIGHT = 190;          // the window: the icons, the lift, the name above, and the orb
 const NEAR = 240;            // px from the bottom where the pointer is watched closely
@@ -173,7 +173,7 @@ class Dock {
     if (a.type === 'menu') {
       const running = this.running.has(item.id);
       let wins = { trusted: true, windows: [] };
-      if (!item.kind && running) wins = await run(this.helper, ['windows', item.id]).then(JSON.parse, () => wins);
+      if (!item.kind && running) wins = await run(this.helper, ['windows', item.id]).then(parse(wins), () => wins);
       const helper = (args) => run(this.helper, args).catch(() => {});
       Menu.buildFromTemplate([
         ...wins.windows.map((w) => ({ label: `${w.min ? '◦ ' : ''}${w.title || item.name}`, click: () => helper(['raise', item.id, String(w.i)]) })),

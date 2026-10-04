@@ -19,7 +19,7 @@ class AppThemes {
     this.dir = path.join(dir, 'apps');
     fs.mkdirSync(this.dir, { recursive: true });
   }
-  helperJson(args) { return run(this.helper, args).then((o) => JSON.parse(o)); }
+  helperJson(args) { return run(this.helper, args).then((o) => { try { return JSON.parse(o); } catch { throw new Error(`no answer from the helper (${args[0]})`); } }); }
   get vscodeInstalled() { return fs.existsSync(VSCODE.cli); }
 
   // ---- Terminal ------------------------------------------------------------------------------------------------

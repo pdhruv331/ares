@@ -17,7 +17,7 @@ const os = require('os');
 const http = require('http');
 const crypto = require('crypto');
 const { dialog, shell } = require('electron');
-const { Originals, run, osa, plist } = require('./theme-prefs');
+const { Originals, run, osa, plist, parse } = require('./theme-prefs');
 const { Bar, MENUS } = require('./theme-bar');
 const { Dock } = require('./theme-dock');
 const { Icons } = require('./theme-icons');
@@ -94,19 +94,23 @@ class Theme {
   async startLive() {
     if (this.live) return;
     this.live = true;
-    await this.serve();
-    await this.migrate();
-    await this.measure();
+    // Each step on its own: one that fails is logged and the rest of the theme still comes up
+    const step = async (name, fn) => { try { await fn(); } catch (err) { this.log('theme start step failed', { step: name, error: err.message }); } };
+    await step('server', () => this.serve());
+    await step('migrate', () => this.migrate());
+    await step('measure', () => this.measure());
     if (!this.live) return; // switched off meanwhile
-    fs.writeFileSync(path.join(this.dir, 'ares.pid'), String(process.pid));
-    if (this.bar.installed) { this.bar.start(); this.bar.startBorders(); }
-    else this.log('theme: SketchyBar/JankyBorders not installed (brew install felixkratz/formulae/sketchybar felixkratz/formulae/borders)');
-    await this.dock.start();
+    await step('pid', () => fs.writeFileSync(path.join(this.dir, 'ares.pid'), String(process.pid)));
+    await step('bar', () => {
+      if (this.bar.installed) { this.bar.start(); this.bar.startBorders(); }
+      else this.log('theme: SketchyBar/JankyBorders not installed (brew install felixkratz/formulae/sketchybar felixkratz/formulae/borders)');
+    });
+    await step('dock', () => this.dock.start());
     if (!this.live) { this.dock.stop(); return; }
-    if (this.opts.notifications) this.notify.start();
-    this.icons.watch();
+    await step('notifications', () => { if (this.opts.notifications) this.notify.start(); });
+    await step('icons', () => this.icons.watch());
     this.updateOrb();
-    await this.resumeDock();
+    await step('dock settings', () => this.resumeDock());
     this.onLive?.(true);
   }
   stopLive({ quitting = false } = {}) {
@@ -240,10 +244,10 @@ class Theme {
   }
   /** The macOS menu bar's height (the ARES bar matches it exactly), and which menu-bar icons can be mirrored. */
   async measure() {
-    const m = await run(this.helper, ['metrics']).then(JSON.parse, () => ({}));
+    const m = await run(this.helper, ['metrics']).then(parse({}), () => ({}));
     this.menubarHeight = m.menubar || 37;
     this.notchLeft = m.left || m.width || 1512; // the bar's left half ends here (the notch)
-    const items = await run(this.bar.sketchybar || '/usr/bin/false', ['--query', 'default_menu_items']).then(JSON.parse, () => null);
+    const items = await run(this.bar.sketchybar || '/usr/bin/false', ['--query', 'default_menu_items']).then(parse(null), () => null);
     this.mirrorAllowed = Array.isArray(items);
     this.aliasNames = (items || []).filter((n) => this.opts.mirror.some((owner) => n.startsWith(`${owner},`)))
       .filter((n) => !n.startsWith('Control Center,') || /BentoBox/.test(n));
@@ -256,7 +260,7 @@ class Theme {
     this.frontId = id;
     this.menuCache = new Map(); // the front app's menus, as last read (shown at once; refreshed in the background)
     if (this.selfIds.includes(id)) return this.layoutMenus(ARES_MENUS.map((m) => m.toUpperCase()));
-    const r = await run(this.helper, ['menubar', id]).then(JSON.parse, () => ({ menus: [] }));
+    const r = await run(this.helper, ['menubar', id]).then(parse({ menus: [] }), () => ({ menus: [] }));
     if (r.trusted !== this.axTrusted) this.log('theme accessibility', { trusted: r.trusted }); // menus, windows and badges need it
     this.axTrusted = r.trusted;
     if (this.frontId !== id) return;
@@ -389,7 +393,7 @@ class Theme {
       });
       return entries;
     };
-    const read = () => run(this.helper, ['menu-items', app, menuPath]).then(JSON.parse, () => ({ items: [] })).then(({ items = [] }) => {
+    const read = () => run(this.helper, ['menu-items', app, menuPath]).then(parse({ items: [] }), () => ({ items: [] })).then(({ items = [] }) => {
       this.menuCache?.set(key, items);
       return items;
     });
@@ -405,7 +409,7 @@ class Theme {
     for (let n = 0; n < count && this.frontId === app; n++) {
       const key = `${app}|${n}`;
       if (this.menuCache?.has(key)) continue;
-      const { items = [] } = await run(this.helper, ['menu-items', app, String(n)]).then(JSON.parse, () => ({}));
+      const { items = [] } = await run(this.helper, ['menu-items', app, String(n)]).then(parse({}), () => ({}));
       if (this.frontId === app) this.menuCache?.set(key, items);
     }
   }
