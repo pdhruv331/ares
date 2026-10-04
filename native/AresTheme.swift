@@ -13,7 +13,8 @@
 //   ares-theme windows <bundleID>       {"trusted":bool,"windows":[{"i":0,"title":"…","min":false}]} (Accessibility)
 //   ares-theme raise <bundleID> <i>     Bring that window forward (un-minimised), and the app with it
 //   ares-theme hide <bundleID>          Hide the app
-//   ares-theme menubar <bundleID>       {"menus":["Edge","File",…]}: the app's menu bar titles (without the Apple menu)
+//   ares-theme menubar <bundleID>       {"menus":["Edge","File",…],"trusted":bool,"name":"Microsoft Edge"}: the app's menu bar titles
+//                                       (without the Apple menu; none without Accessibility)
 //   ares-theme menu-items <bundleID> <path>   One menu's items: path "2" = the 2nd title, "2.5" = a submenu in it:
 //                                       {"items":[{"t":"New Tab","e":true,"mark":"✓","key":"⌘T","sub":false,"sep":false}]}
 //   ares-theme menu-press <bundleID> <path>   Choose a menu item ("2.5.1"): AXPress
@@ -255,9 +256,10 @@ case "hide":
 
 case "menubar":
   guard args.count >= 3 else { fail("usage: ares-theme menubar <bundleID>") }
-  guard AXIsProcessTrusted(), let app = runningApp(args[2]) else { emit(["menus": [], "trusted": AXIsProcessTrusted()]); exit(0) }
+  let name = runningApp(args[2])?.localizedName ?? ""
+  guard AXIsProcessTrusted(), let app = runningApp(args[2]) else { emit(["menus": [], "trusted": AXIsProcessTrusted(), "name": name]); exit(0) }
   let bar = axMenuBar(AXUIElementCreateApplication(app.processIdentifier))
-  emit(["menus": axChildren(bar).dropFirst().map { axString($0, kAXTitleAttribute) ?? "" }, "trusted": true])
+  emit(["menus": axChildren(bar).dropFirst().map { axString($0, kAXTitleAttribute) ?? "" }, "trusted": true, "name": name])
 
 case "menu-items":
   guard args.count >= 4, let app = runningApp(args[2]), AXIsProcessTrusted() else { emit(["items": []]); exit(0) }

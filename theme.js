@@ -252,8 +252,12 @@ class Theme {
     this.frontId = id;
     if (this.selfIds.includes(id)) return this.bar.menus(['ARES', 'LISTEN', 'VOICE', 'WORK', 'VIEW', 'PHONE']);
     const r = await run(this.helper, ['menubar', id]).then(JSON.parse, () => ({ menus: [] }));
+    if (r.trusted !== this.axTrusted) this.log('theme accessibility', { trusted: r.trusted }); // menus, windows and badges need it
     this.axTrusted = r.trusted;
-    if (this.frontId === id) this.bar.menus(r.menus.slice(0, MENUS));
+    if (this.frontId !== id) return;
+    this.bar.menus(r.menus.slice(0, MENUS));
+    // No menus (no Accessibility yet): at least the app's name, without waiting for SketchyBar's next switch event
+    if (!r.menus.length && r.name) this.bar.raw(['--set', 'front', `label=${r.name.toUpperCase().split('').join(' ')}`]);
   }
   get aresFront() { return this.selfIds.includes(this.frontId); }
   /** ARES's menu sections as drop-down lines (one level of submenu shown inline under its heading). */
