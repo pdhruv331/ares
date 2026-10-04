@@ -93,13 +93,15 @@ class Vision extends EventEmitter {
   }
   calibrationStep(m) {
     const c = this.cal;
-    const h = (this.engine.lastHands || []).find((x) => x.pose === 'open' && x.valid);
+    // Any open hand counts here, even at the frame's edge or near the face: a corner is wherever the user puts it
+    const h = (this.engine.lastHands || []).find((x) => x.pose === 'open');
     const now = Date.now();
     if (!h) { c.since = 0; return; }
     if (!c.since || Math.hypot(h.palm.x - c.at.x, h.palm.y - c.at.y) > h.size * 0.3) { c.since = now; c.at = h.palm; return; }
     if (now - c.since < 1000) return;
     c.points.push({ ...c.at });
     c.since = 0;
+    this.log('hands', { calibration: c.points.length, at: c.at });
     if (c.points.length === 1) { c.step = 1; this.calNote?.('Got it. Now the BOTTOM-RIGHT corner…'); return; }
     const [a, b] = c.points;
     this.cal = null;
