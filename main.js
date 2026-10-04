@@ -185,7 +185,7 @@ function writeSettings(patch) {
 function uiPrefs() {
   const s = readSettings();
   return { reduceMotion: Boolean(s.reduceMotion), magnetic: s.ui?.magnetic !== false, panels: s.ui?.[panelsKey()] || {},
-    owner: process.env.ARES_OWNER_NAME || 'Dhruv' };
+    owner: process.env.ARES_OWNER_NAME || 'Dhruv', themeBar: Boolean(theme?.live) }; // the ARES bar has the top row's items
 }
 /** Panel positions are remembered separately for the desktop (and lifted) and for the window. */
 const panelsKey = () => (surface && surface.name !== 'window' ? 'desktopPanels' : 'panels');
@@ -207,76 +207,103 @@ function refreshTray() {
   const awake = listener.awake;
   tray.setTitle(muted ? '○' : awake ? '●' : '◉');
   tray.setToolTip(muted ? `ARES — muted${until}` : awake ? 'ARES — always listening' : 'ARES — listening for "Hey ARES"');
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: muted ? `Muted${until}` : desk?.state.active && !manualAwake ? 'Desk mode: no wake word needed' : awake ? 'Always listening (no wake word)' : 'Listening for “Hey ARES”', enabled: false },
-    { label: 'Stay Awake (always listening)', type: 'checkbox', checked: manualAwake, click: (item) => setAwake(item.checked) },
-    muted
-      ? { label: 'Start Listening', click: () => listener.unmute() }
-      : { label: 'Mute', click: () => listener.mute() },
-    { label: 'Mute for 1 Hour', visible: !muted, click: () => listener.mute(60) },
-    // Apple's mic modes (Voice Isolation etc.) are picked per app in its own picker; Control Center may not list the listener
-    { label: 'Microphone Mode (Voice Isolation)…', click: () => listener.send('micmode show') },
-    { type: 'separator' },
-    { label: `Show / Hide  (${HOTKEY.replace('Alt', '⌥')})`, click: toggleWindow },
-    { label: 'Toggle Full Screen  (⌃⌘F)', click: toggleFullScreen },
-    { type: 'separator' },
-    ...wallpaperMenu(),
-    ...(theme ? theme.menu(refreshTray) : []),
-    { type: 'separator' },
-    {
-      label: 'Voice ID (only answer to you)',
-      type: 'checkbox',
-      enabled: voiceId.enrolled,
-      checked: voiceId.enabled,
-      click: (item) => { voiceId.setEnabled(item.checked); refreshTray(); win.webContents.send('voiceid-changed', voiceId.status()); },
-    },
-    {
-      label: remoteState === 'online' ? 'Phone (Telegram): connected' : remoteInfo ? `Phone (Telegram): send code ${remoteInfo.code} to @${remoteInfo.bot}` : 'Phone (Telegram): not set up',
-      enabled: false,
-    },
-    { label: 'Unpair Phone', visible: remoteState === 'online', click: unpairRemote },
-    { label: phone?.devices.length ? `Phone app: ${phone.devices.length} paired` : 'Phone app: not paired', enabled: false },
-    { label: 'Pair a Phone…', click: pairPhone },
-    { type: 'separator' },
-    { label: memory ? `Memory: ${memory.count} thing${memory.count === 1 ? '' : 's'} remembered` : 'Memory', enabled: false },
-    { label: 'Open Memory…', click: () => { require('electron').shell.openPath(memory.file); } },
-    { label: 'Clear Memory…', click: clearMemory },
-    { label: 'My Phrases…', enabled: Boolean(intents?.ready), click: () => { require('electron').shell.openPath(intents.phrasesFile); } },
-    { type: 'separator' },
-    { label: jobs?.active.length ? `Work: ${jobs.running.length} running, ${jobs.active.length - jobs.running.length} queued` : 'Work: no jobs running', enabled: false },
-    { label: 'Open Work Folder…', click: () => shell.openPath(jobs.dir) },
-    { label: claudeCtl?.hooksInstalled() ? 'Claude Code alerts: connected' : 'Claude Code alerts: hooks not installed', enabled: false },
-    { label: 'Quiet Hours for Claude Alerts (11 pm–7 am)', type: 'checkbox', checked: readSettings().claudeQuiet !== false,
-      click: (item) => { writeSettings({ claudeQuiet: item.checked ? { from: 23, to: 7 } : false }); refreshTray(); } },
-    { type: 'separator' },
-    ...voiceMenu(),
-    { label: 'Reduce Motion', type: 'checkbox', checked: Boolean(readSettings().reduceMotion), click: (item) => { writeSettings({ reduceMotion: item.checked }); win?.webContents.send('ui-prefs', uiPrefs()); wallpaper?.prefs(); refreshTray(); } },
-    { label: 'Magnetic Panel Slots', type: 'checkbox', checked: readSettings().ui?.magnetic !== false, click: (item) => { writeUi({ magnetic: item.checked }); win?.webContents.send('ui-prefs', uiPrefs()); refreshTray(); } },
-    { label: 'Open Calls Log…', visible: Boolean(calls?.ready), click: () => shell.openPath(calls.dir) },
-    { label: 'Always Also Notify My Phone', type: 'checkbox', checked: Boolean(readSettings().workAlwaysPhone), click: (item) => { writeSettings({ workAlwaysPhone: item.checked }); refreshTray(); } },
-    { type: 'separator' },
-    { label: contacts?.count ? `Contacts: ${contacts.count} imported` : 'Contacts: none imported', enabled: false },
-    { label: 'Import Contacts (vCard)…', click: importContacts },
-    { label: 'Unpair All Phones', visible: Boolean(phone?.devices.length), click: () => { phone.unpairAll(); relay.ready && relay.unregisterAll().catch(() => {}); refreshTray(); } },
-    { label: voiceId.enrolled ? 'Retrain Voice ID…' : 'Set Up Voice ID…', click: () => { showWindow(); win.webContents.send('voiceid-enroll'); } },
-    { type: 'separator' },
-    {
-      label: 'Launch at Login',
-      type: 'checkbox',
-      enabled: app.isPackaged,
-      checked: app.isPackaged && app.getLoginItemSettings().openAtLogin,
-      click: (item) => setLaunchAtLogin(item.checked),
-    },
-    { label: 'Quit ARES', click: () => { app.isQuitting = true; app.quit(); } },
-  ]));
+  const sections = menuSections();
+  tray.setContextMenu(Menu.buildFromTemplate(['listen', 'view', 'voice', 'work', 'phone', 'ares']
+    .flatMap((k, i) => [...(i ? [{ type: 'separator' }] : []), ...sections[k]])));
+  // The ARES theme's bar shows how she's listening while she's idle (as the window's "ear" does)
+  theme?.ear(muted ? 'MUTED' : desk?.state.active ? 'DESK MODE' : awake ? 'LISTENING' : 'WAKE WORD');
+}
+
+/** ARES's menus, in sections: the ◉ menu shows them all; the ARES theme's bar shows each one as its own menu. */
+function menuSections() {
+  const muted = listener.muted;
+  const until = listener.muteUntil
+    ? ` until ${new Date(listener.muteUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+    : '';
+  const awake = listener.awake;
+  return {
+    listen: [
+      { label: muted ? `Muted${until}` : desk?.state.active && !manualAwake ? 'Desk mode: no wake word needed' : awake ? 'Always listening (no wake word)' : 'Listening for “Hey ARES”', enabled: false },
+      { label: 'Stay Awake (always listening)', type: 'checkbox', checked: manualAwake, click: (item) => setAwake(item.checked) },
+      muted
+        ? { label: 'Start Listening', click: () => listener.unmute() }
+        : { label: 'Mute', click: () => listener.mute() },
+      { label: 'Mute for 1 Hour', visible: !muted, click: () => listener.mute(60) },
+      // Apple's mic modes (Voice Isolation etc.) are picked per app in its own picker; Control Center may not list the listener
+      { label: 'Microphone Mode (Voice Isolation)…', click: () => listener.send('micmode show') },
+      { type: 'separator' },
+      {
+        label: 'Voice ID (only answer to you)',
+        type: 'checkbox',
+        enabled: voiceId.enrolled,
+        checked: voiceId.enabled,
+        click: (item) => { voiceId.setEnabled(item.checked); refreshTray(); win.webContents.send('voiceid-changed', voiceId.status()); },
+      },
+      { label: voiceId.enrolled ? 'Retrain Voice ID…' : 'Set Up Voice ID…', click: () => { showWindow(); win.webContents.send('voiceid-enroll'); } },
+    ],
+    view: [
+      { label: `Show / Hide  (${HOTKEY.replace('Alt', '⌥')})`, click: toggleWindow },
+      { label: 'Toggle Full Screen  (⌃⌘F)', click: toggleFullScreen },
+      { type: 'separator' },
+      ...wallpaperMenu(),
+      ...(theme ? theme.menu(refreshTray) : []),
+      { type: 'separator' },
+      { label: 'Reduce Motion', type: 'checkbox', checked: Boolean(readSettings().reduceMotion), click: (item) => { writeSettings({ reduceMotion: item.checked }); win?.webContents.send('ui-prefs', uiPrefs()); wallpaper?.prefs(); refreshTray(); } },
+      { label: 'Magnetic Panel Slots', type: 'checkbox', checked: readSettings().ui?.magnetic !== false, click: (item) => { writeUi({ magnetic: item.checked }); win?.webContents.send('ui-prefs', uiPrefs()); refreshTray(); } },
+    ],
+    voice: voiceMenu(),
+    work: [
+      { label: jobs?.active.length ? `Work: ${jobs.running.length} running, ${jobs.active.length - jobs.running.length} queued` : 'Work: no jobs running', enabled: false },
+      { label: 'Open Work Panel', click: () => openView('work') },
+      { label: 'Open Work Folder…', click: () => shell.openPath(jobs.dir) },
+      { type: 'separator' },
+      { label: claudeCtl?.hooksInstalled() ? 'Claude Code alerts: connected' : 'Claude Code alerts: hooks not installed', enabled: false },
+      { label: 'Quiet Hours for Claude Alerts (11 pm–7 am)', type: 'checkbox', checked: readSettings().claudeQuiet !== false,
+        click: (item) => { writeSettings({ claudeQuiet: item.checked ? { from: 23, to: 7 } : false }); refreshTray(); } },
+      { label: 'Always Also Notify My Phone', type: 'checkbox', checked: Boolean(readSettings().workAlwaysPhone), click: (item) => { writeSettings({ workAlwaysPhone: item.checked }); refreshTray(); } },
+    ],
+    phone: [
+      {
+        label: remoteState === 'online' ? 'Phone (Telegram): connected' : remoteInfo ? `Phone (Telegram): send code ${remoteInfo.code} to @${remoteInfo.bot}` : 'Phone (Telegram): not set up',
+        enabled: false,
+      },
+      { label: 'Unpair Phone', visible: remoteState === 'online', click: unpairRemote },
+      { label: phone?.devices.length ? `Phone app: ${phone.devices.length} paired` : 'Phone app: not paired', enabled: false },
+      { label: 'Pair a Phone…', click: pairPhone },
+      { label: 'Unpair All Phones', visible: Boolean(phone?.devices.length), click: () => { phone.unpairAll(); relay.ready && relay.unregisterAll().catch(() => {}); refreshTray(); } },
+      { type: 'separator' },
+      { label: 'Open Calls Log…', visible: Boolean(calls?.ready), click: () => shell.openPath(calls.dir) },
+      { label: contacts?.count ? `Contacts: ${contacts.count} imported` : 'Contacts: none imported', enabled: false },
+      { label: 'Import Contacts (vCard)…', click: importContacts },
+    ],
+    ares: [
+      { label: 'Summon ARES', click: () => openView('summon') },
+      { type: 'separator' },
+      { label: memory ? `Memory: ${memory.count} thing${memory.count === 1 ? '' : 's'} remembered` : 'Memory', enabled: false },
+      { label: 'Open Memory…', click: () => { require('electron').shell.openPath(memory.file); } },
+      { label: 'Clear Memory…', click: clearMemory },
+      { label: 'My Phrases…', enabled: Boolean(intents?.ready), click: () => { require('electron').shell.openPath(intents.phrasesFile); } },
+      { type: 'separator' },
+      {
+        label: 'Launch at Login',
+        type: 'checkbox',
+        enabled: app.isPackaged,
+        checked: app.isPackaged && app.getLoginItemSettings().openAtLogin,
+        click: (item) => setLaunchAtLogin(item.checked),
+      },
+      { label: 'Quit ARES', click: () => { app.isQuitting = true; app.quit(); } },
+    ],
+  };
 }
 
 /** The ARES theme's views, opened from its menu bar, dock and notifications. */
-function openView(view) {
+function openView(view, anchor = null) {
   showWindow();
   if (view === 'summon') return;
   const id = /^job:(.+)$/.exec(view)?.[1];
-  setTimeout(() => { if (id) win.webContents.send('job-show', id); else win.webContents.send('theme-open', view); }, 350);
+  // anchor: where on the screen it was opened from (the bar's status pill), in the window's coordinates
+  const at = anchor && { x: anchor.x - win.getBounds().x };
+  setTimeout(() => { if (id) win.webContents.send('job-show', id); else win.webContents.send('theme-open', { view, anchor: at }); }, 350);
 }
 
 /** Is the wallpaper brain on screen (the ARES window as the desktop, its middle not covered)? */
@@ -1863,6 +1890,8 @@ app.whenReady().then(async () => {
   createWindow({ show: !openedAtLogin }); // at login, wait quietly in the menu bar
   theme = new Theme({
     log, readSettings, writeSettings, supportDir: app.getPath('userData'), appDir: __dirname, onOpen: openView, brainVisible,
+    menuSections, onMenuAction: () => refreshTray(), selfIds: ['com.dhruv.ares', 'com.github.Electron'],
+    onLive: () => win?.webContents.send('ui-prefs', uiPrefs()),
     helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(__dirname, 'native', 'build', 'ares-theme'),
   });
   wallpaper.on('desk', () => theme.updateOrb());

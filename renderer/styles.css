@@ -560,3 +560,8 @@ html.s-sinking .panels, html.s-sinking .console { transition: opacity 0.2s; }
 .ear.muted { color: var(--amber); border-color: rgba(255, 181, 71, 0.4); }
 /* The live desktop: the top bar's status group sits beside the ARES name, clear of desktop icons (dash.js placeTopBar) */
 .titlebar.desk-left { justify-content: flex-start; gap: 22px; }
+
+/* The ARES OS theme's menu bar is up (theme.js): it has the mark, listening mode, weather, clock, status and WORK, so the
+   window's top row keeps only the greeting (and the window controls when ARES is a window) */
+html.theme-bar .brand-mark, html.theme-bar .brand-name, html.theme-bar #ear, html.theme-bar #weather, html.theme-bar #clock,
+html.theme-bar #statusBtn, html.theme-bar #workBtn { display: none !important; }

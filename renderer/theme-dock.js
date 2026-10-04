@@ -91,12 +91,20 @@
   }
   function build() {
     tiles.clear();
-    const half = Math.ceil(apps.length / 2);
+    // Both sides of the orb the same width: the right side also carries the divider and the places
+    const half = Math.min(apps.length, Math.ceil((apps.length + folders.length) / 2));
     $('left').replaceChildren(...apps.slice(0, half).map(tile));
     $('right').replaceChildren(...apps.slice(half).map(tile));
     $('places').replaceChildren(...folders.map(tile));
     paintRunning();
+    requestAnimationFrame(centre);
     setTimeout(postHits, 50);
+  }
+  /** The orb slot's centre on the screen's centre, whatever the two sides hold. */
+  function centre() {
+    const slot = $('orbSlot').getBoundingClientRect(), d = dock.getBoundingClientRect();
+    const offset = slot.left + slot.width / 2 - d.left;
+    dock.style.left = `${Math.round(innerWidth / 2 - offset)}px`;
   }
   function paintRunning() {
     for (const [id, { el, item }] of tiles) {
@@ -231,7 +239,7 @@
       }
     }
   });
-  window.addEventListener('resize', () => { sizeOrb(); postHits(); });
+  window.addEventListener('resize', () => { sizeOrb(); centre(); postHits(); });
   sizeOrb();
   window.theme.send('theme-ready');
 })();

@@ -7,6 +7,18 @@
 //   ares-theme app-icon <size> <out.png> <path>…   Each file's Finder icon as a PNG (<out> gets -<n> before .png for n > 0)
 //   ares-theme set-icon <path> <png | ->           A custom Finder icon for a file or folder ("-" removes it)
 //   ares-theme quit <bundleID>          Asks an app to quit (NSRunningApplication.terminate)
+//   ares-theme activate <bundleID> <app path>   Open or switch to an app the way a Dock click does: Launch Services
+//                                       (which switches Spaces), then, with Accessibility, frontmost + its window raised
+//                                       (un-minimised if every window is minimised)
+//   ares-theme windows <bundleID>       {"trusted":bool,"windows":[{"i":0,"title":"…","min":false}]} (Accessibility)
+//   ares-theme raise <bundleID> <i>     Bring that window forward (un-minimised), and the app with it
+//   ares-theme hide <bundleID>          Hide the app
+//   ares-theme menubar <bundleID>       {"menus":["Edge","File",…]}: the app's menu bar titles (without the Apple menu)
+//   ares-theme menu-items <bundleID> <path>   One menu's items: path "2" = the 2nd title, "2.5" = a submenu in it:
+//                                       {"items":[{"t":"New Tab","e":true,"mark":"✓","key":"⌘T","sub":false,"sep":false}]}
+//   ares-theme menu-press <bundleID> <path>   Choose a menu item ("2.5.1"): AXPress
+//   ares-theme metrics                  {"menubar":<height of the menu bar on the main screen, points>}
+//   ares-theme ax-prompt                Ask macOS to show the Accessibility permission prompt for ARES
 //   ares-theme appearance-changed       Tells running apps the accent/highlight colours changed
 //   ares-theme focus                    {"focus":true|false|null}: is a Focus on (null = macOS won't say, no Full Disk Access)
 //   ares-theme ax                       {"trusted":true|false}: Accessibility permission (for the Dock badges)
@@ -139,6 +151,33 @@ func terminalProfile(out: String, spec: [String: Any]) {
   emit(["ok": true])
 }
 
+// ---- Accessibility helpers ----------------------------------------------------------------------------------
+func runningApp(_ id: String) -> NSRunningApplication? { NSRunningApplication.runningApplications(withBundleIdentifier: id).first }
+func axValue(_ el: AXUIElement, _ attr: String) -> CFTypeRef? {
+  var v: CFTypeRef?
+  return AXUIElementCopyAttributeValue(el, attr as CFString, &v) == .success ? v : nil
+}
+func axString(_ el: AXUIElement, _ attr: String) -> String? { axValue(el, attr) as? String }
+func axBool(_ el: AXUIElement, _ attr: String) -> Bool { (axValue(el, attr) as? Bool) ?? false }
+func axNumber(_ el: AXUIElement, _ attr: String) -> Int? { (axValue(el, attr) as? NSNumber)?.intValue }
+func axChildren(_ el: AXUIElement?) -> [AXUIElement] { el.flatMap { axValue($0, kAXChildrenAttribute) as? [AXUIElement] } ?? [] }
+func axWindows(_ app: AXUIElement) -> [AXUIElement] { (axValue(app, kAXWindowsAttribute) as? [AXUIElement]) ?? [] }
+func axMenuBar(_ app: AXUIElement) -> AXUIElement? { axValue(app, kAXMenuBarAttribute).map { $0 as! AXUIElement } }
+/** "2" = the menu under the 2nd title (after the Apple menu), "2.5" = the submenu of its 5th item. */
+func axMenuAt(_ app: AXUIElement, _ path: String) -> AXUIElement? {
+  let idx = path.split(separator: ".").compactMap { Int($0) }
+  guard let first = idx.first else { return nil }
+  let titles = axChildren(axMenuBar(app))
+  guard first + 1 < titles.count else { return nil }
+  var menu = axChildren(titles[first + 1]).first
+  for i in idx.dropFirst() {
+    let items = axChildren(menu)
+    guard i < items.count else { return nil }
+    menu = axChildren(items[i]).first
+  }
+  return menu
+}
+
 // ---- main -------------------------------------------------------------------------------------------------
 let args = CommandLine.arguments
 switch args.count > 1 ? args[1] : "" {
@@ -169,6 +208,90 @@ case "quit":
   guard args.count >= 3 else { fail("usage: ares-theme quit <bundleID>") }
   let apps = NSRunningApplication.runningApplications(withBundleIdentifier: args[2])
   emit(["ok": !apps.isEmpty && apps.allSatisfy { $0.terminate() }])
+
+case "activate":
+  guard args.count >= 4 else { fail("usage: ares-theme activate <bundleID> <app path>") }
+  let cfg = NSWorkspace.OpenConfiguration()
+  cfg.activates = true
+  let done = DispatchSemaphore(value: 0)
+  var openError = ""
+  NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: args[3]), configuration: cfg) { _, err in openError = err?.localizedDescription ?? ""; done.signal() }
+  _ = done.wait(timeout: .now() + 10)
+  var raised = false
+  if AXIsProcessTrusted(), let app = runningApp(args[2]) {
+    let el = AXUIElementCreateApplication(app.processIdentifier)
+    let wins = axWindows(el)
+    // Every window minimised: bring the first one back, as the Dock does
+    if !wins.isEmpty && wins.allSatisfy({ axBool($0, kAXMinimizedAttribute) }) { AXUIElementSetAttributeValue(wins[0], kAXMinimizedAttribute as CFString, kCFBooleanFalse) }
+    AXUIElementSetAttributeValue(el, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+    if let w = wins.first(where: { !axBool($0, kAXMinimizedAttribute) }) { raised = AXUIElementPerformAction(w, kAXRaiseAction as CFString) == .success }
+  }
+  emit(["ok": openError.isEmpty, "error": openError, "raised": raised])
+
+case "windows":
+  guard args.count >= 3 else { fail("usage: ares-theme windows <bundleID>") }
+  guard AXIsProcessTrusted() else { emit(["trusted": false, "windows": []]); exit(0) }
+  guard let app = runningApp(args[2]) else { emit(["trusted": true, "windows": []]); exit(0) }
+  let wins = axWindows(AXUIElementCreateApplication(app.processIdentifier))
+  emit(["trusted": true, "windows": wins.enumerated().compactMap { (i, w) -> [String: Any]? in
+    let role = axString(w, kAXSubroleAttribute) ?? ""
+    guard role == "AXStandardWindow" || role == "AXDialog" || role.isEmpty else { return nil }
+    return ["i": i, "title": axString(w, kAXTitleAttribute) ?? "", "min": axBool(w, kAXMinimizedAttribute)]
+  }])
+
+case "raise":
+  guard args.count >= 4, let i = Int(args[3]), let app = runningApp(args[2]) else { fail("usage: ares-theme raise <bundleID> <i>") }
+  let el = AXUIElementCreateApplication(app.processIdentifier)
+  let wins = axWindows(el)
+  guard i < wins.count else { emit(["ok": false]); exit(1) }
+  AXUIElementSetAttributeValue(wins[i], kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+  AXUIElementSetAttributeValue(wins[i], kAXMainAttribute as CFString, kCFBooleanTrue)
+  AXUIElementSetAttributeValue(el, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+  emit(["ok": AXUIElementPerformAction(wins[i], kAXRaiseAction as CFString) == .success])
+
+case "hide":
+  guard args.count >= 3 else { fail("usage: ares-theme hide <bundleID>") }
+  emit(["ok": runningApp(args[2])?.hide() ?? false])
+
+case "menubar":
+  guard args.count >= 3 else { fail("usage: ares-theme menubar <bundleID>") }
+  guard AXIsProcessTrusted(), let app = runningApp(args[2]) else { emit(["menus": [], "trusted": AXIsProcessTrusted()]); exit(0) }
+  let bar = axMenuBar(AXUIElementCreateApplication(app.processIdentifier))
+  emit(["menus": axChildren(bar).dropFirst().map { axString($0, kAXTitleAttribute) ?? "" }, "trusted": true])
+
+case "menu-items":
+  guard args.count >= 4, let app = runningApp(args[2]), AXIsProcessTrusted() else { emit(["items": []]); exit(0) }
+  guard let menu = axMenuAt(AXUIElementCreateApplication(app.processIdentifier), args[3]) else { emit(["items": []]); exit(0) }
+  emit(["items": axChildren(menu).map { item -> [String: Any] in
+    let title = axString(item, kAXTitleAttribute) ?? ""
+    let mods = (axNumber(item, kAXMenuItemCmdModifiersAttribute) ?? 0)
+    var key = axString(item, kAXMenuItemCmdCharAttribute) ?? ""
+    if !key.isEmpty {
+      // kAXMenuItemModifier*: 1 shift, 2 option, 4 control, 8 = no command
+      key = (mods & 4 != 0 ? "⌃" : "") + (mods & 2 != 0 ? "⌥" : "") + (mods & 1 != 0 ? "⇧" : "") + (mods & 8 == 0 ? "⌘" : "") + key
+    }
+    return ["t": title, "e": axBool(item, kAXEnabledAttribute), "mark": axString(item, kAXMenuItemMarkCharAttribute) ?? "", "key": key,
+            "sub": !axChildren(item).isEmpty, "sep": title.isEmpty]
+  }])
+
+case "menu-press":
+  guard args.count >= 4, let app = runningApp(args[2]), AXIsProcessTrusted() else { emit(["ok": false]); exit(1) }
+  var parts = args[3].split(separator: ".").compactMap { Int($0) }
+  guard parts.count >= 2, let last = parts.popLast(),
+        let menu = axMenuAt(AXUIElementCreateApplication(app.processIdentifier), parts.map(String.init).joined(separator: ".")) else { emit(["ok": false]); exit(1) }
+  let items = axChildren(menu)
+  guard last < items.count else { emit(["ok": false]); exit(1) }
+  emit(["ok": AXUIElementPerformAction(items[last], kAXPressAction as CFString) == .success])
+
+case "metrics":
+  // The menu bar's height: the top of the main screen that isn't usable (the notch's band on a notched MacBook),
+  // or the safe-area inset while the menu bar is set to hide
+  let s = NSScreen.screens.first!
+  let top = s.frame.maxY - s.visibleFrame.maxY
+  emit(["menubar": top > 0 ? top : max(s.safeAreaInsets.top, NSStatusBar.system.thickness)])
+
+case "ax-prompt":
+  emit(["trusted": AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)])
 
 case "appearance-changed":
   let dnc = DistributedNotificationCenter.default()
@@ -234,5 +357,5 @@ case "plist-file":
   emit(["plist": xml.base64EncodedString()])
 
 default:
-  fail("usage: ares-theme apps | app-icon | set-icon | quit | appearance-changed | focus | ax | terminal-profile | pref-get | pref-set | pref-merge | plist-file")
+  fail("usage: ares-theme apps | app-icon | set-icon | quit | appearance-changed | focus | ax | terminal-profile | pref-get | pref-set | pref-merge | plist-file | activate | windows | raise | hide | menubar | menu-items | menu-press | metrics | ax-prompt")
 }

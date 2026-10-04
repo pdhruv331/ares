@@ -150,8 +150,14 @@ const Dash = (() => {
   });
   document.addEventListener('click', (e) => { if (!$('statusPanel').contains(e.target)) $('statusPanel').hidden = true; });
   // The ARES theme's menu bar and notifications: open the status list, the Work panel or the latest call
-  window.ares.theme?.onOpen((view) => {
-    if (view === 'status' && $('statusPanel').hidden) $('statusBtn').click();
+  window.ares.theme?.onOpen((msg) => {
+    const { view, anchor } = typeof msg === 'string' ? { view: msg } : msg;
+    if (view === 'status') {
+      if ($('statusPanel').hidden) $('statusBtn').click();
+      // From the ARES bar: hang it just under the bar's pill instead of the window's own (hidden) one
+      const panel = $('statusPanel');
+      if (anchor && !panel.hidden) Object.assign(panel.style, { left: `${clamp(anchor.x, 14, innerWidth - panel.offsetWidth - 14)}px`, right: 'auto', top: '8px' });
+    }
     else if (view === 'work' && !document.body.classList.contains('work-open')) $('workBtn').click();
     else if (view === 'call') {
       const p = panels.get('call') || [...panels.values()].reverse().find((x) => x.id.startsWith('callsum:') || x.id.startsWith('inbox:call-'));
@@ -1518,6 +1524,8 @@ const Dash = (() => {
   // ---- Start -------------------------------------------------------------------------------------------------------
   const applyPrefs = (p) => {
     const hadMagnet = prefs.magnetic;
+    // The ARES theme's bar carries the mark, weather, clock, status and WORK: the window's top row keeps the rest
+    if ('themeBar' in p) document.documentElement.classList.toggle('theme-bar', Boolean(p.themeBar));
     prefs = { ...prefs, ...p, panels: p.panels || prefs.panels };
     greet();
     if (hadMagnet !== prefs.magnetic) layout();

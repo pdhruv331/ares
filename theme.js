@@ -17,8 +17,8 @@ const os = require('os');
 const http = require('http');
 const crypto = require('crypto');
 const { dialog, shell } = require('electron');
-const { Originals, run, osa } = require('./theme-prefs');
-const { Bar } = require('./theme-bar');
+const { Originals, run, osa, plist } = require('./theme-prefs');
+const { Bar, MENUS } = require('./theme-bar');
 const { Dock } = require('./theme-dock');
 const { Icons } = require('./theme-icons');
 const { Notify } = require('./theme-notify');
@@ -36,6 +36,7 @@ const SCRIPTS = {
 };
 const CYAN_HIGHLIGHT = '0.243137 0.901961 1.000000 Other';
 const SOUND = path.join(os.homedir(), 'Library', 'Sounds', 'ARES.aiff');
+const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 class Theme {
   /**
@@ -44,15 +45,21 @@ class Theme {
    * @param {(…) => void} o.log  @param {() => object} o.readSettings  @param {(p: object) => void} o.writeSettings
    * @param {(view: string) => void} o.onOpen   open an ARES view: 'summon' | 'work' | 'status' | 'call' | 'job:<id>'
    * @param {() => boolean} o.brainVisible  is the wallpaper brain on screen right now
+   * @param {() => object} o.menuSections  ARES's menus as Electron menu templates: { ares, listen, voice, work, view, phone }
+   * @param {string[]} o.selfIds  ARES's own bundle IDs (so the bar shows ARES's menus while ARES is in front)
+   * @param {(live: boolean) => void} o.onLive  the theme's live parts came up or went away (the window hides its header)
    */
   constructor(o) {
     Object.assign(this, o);
     this.dir = path.join(o.supportDir, 'theme');
     this.originals = new Originals({ dir: this.dir, helper: o.helper, log: o.log });
     this.token = crypto.randomBytes(16).toString('hex');
-    this.bar = new Bar({ log: o.log, url: () => this.clickUrl });
+    this.bar = new Bar({ log: o.log, url: () => this.clickUrl, aliases: () => this.aliasNames || [], height: () => this.menubarHeight || 37,
+      pidFile: path.join(this.dir, 'ares.pid'), offlineCommands: () => this.offlineCommands() });
     this.dock = new Dock({ dir: this.dir, helper: o.helper, log: o.log, appDir: o.appDir, onSummon: () => o.onOpen('summon'),
+      onAccessibility: () => this.askAccessibility(), onFront: (id) => this.front(id),
       readOpts: () => this.opts.dock, saveOpts: (p) => this.save({ dock: { ...this.opts.dock, ...p } }) });
+    this.popups = {}; // menuId -> [{ run }]: what each line of an open drop-down does
     this.icons = new Icons({ dir: this.dir, helper: o.helper, originals: this.originals, log: o.log, appDir: o.appDir });
     this.notify = new Notify({ helper: o.helper, log: o.log, appDir: o.appDir, onAct: (a) => this.act(a) });
     this.apps = new AppThemes({ dir: this.dir, helper: o.helper, originals: this.originals, log: o.log });
@@ -69,6 +76,7 @@ class Theme {
       folders: t.folders || ['Documents', 'Downloads', 'My AI'].map((f) => path.join(os.homedir(), f)),
       apps: { terminal: true, vscode: true, chrome: true, ...(t.apps || {}) },
       pointerManual: Boolean(t.pointerManual),
+      mirror: t.mirror || ['Control Center', 'Tailscale'], // menu-bar icons mirrored in the bar (by owner)
     };
   }
   save(patch) { this.writeSettings({ theme: { ...(this.readSettings().theme || {}), ...patch } }); }
@@ -85,7 +93,10 @@ class Theme {
     if (this.live) return;
     this.live = true;
     await this.serve();
+    await this.migrate();
+    await this.measure();
     if (!this.live) return; // switched off meanwhile
+    fs.writeFileSync(path.join(this.dir, 'ares.pid'), String(process.pid));
     if (this.bar.installed) { this.bar.start(); this.bar.startBorders(); }
     else this.log('theme: SketchyBar/JankyBorders not installed (brew install felixkratz/formulae/sketchybar felixkratz/formulae/borders)');
     await this.dock.start();
@@ -93,19 +104,24 @@ class Theme {
     if (this.opts.notifications) this.notify.start();
     this.icons.watch();
     this.updateOrb();
+    await this.resumeDock();
+    this.onLive?.(true);
   }
   stopLive({ quitting = false } = {}) {
     if (!this.live) return;
     this.live = false;
-    if (quitting) this.bar.offline(); // the bar stays as the menu bar, saying ARES is offline
+    if (quitting) this.bar.offline(); // the bar stays (clock, battery, Wi-Fi), the Mac's own Dock and menu bar come back
     else { this.bar.stop(); this.bar.stopBorders(); }
+    try { fs.rmSync(path.join(this.dir, 'ares.pid'), { force: true }); } catch {}
+    this.onLive?.(false);
     this.dock.stop();
     this.notify.stop();
     this.icons.unwatch();
     this.server?.close();
     this.server = null;
   }
-  /** ARES is quitting: the windows go; the bar and the glow stay (they're the Mac's look), the bar says offline. */
+  /** ARES is quitting: the windows go; the bar and the glow stay (they're the Mac's look), the bar says offline, and
+   *  the Apple Dock is the user's own again until ARES is back. */
   quit() { this.stopLive({ quitting: true }); }
 
   // ---- The switch ----------------------------------------------------------------------------------------------
@@ -166,7 +182,6 @@ class Theme {
       await run('/usr/bin/killall', ['Dock']).catch(() => {});
       return ok;
     });
-    await step('menubar', () => (this.bar.installed ? this.script('menubar', 'true') : false));
     await step('finder', () => this.finder());
     // 4. Icons
     await step('icons', async () => (await this.icons.apply(o.folders)).failed === 0);
@@ -186,6 +201,117 @@ class Theme {
     for (const [d, k] of s.prefs) await this.originals.keepPref(d, k); // saved first, so restored after the script
     await this.originals.setScript(`script:${name}`, s, value);
   }
+
+  // ---- The Apple Dock and the macOS menu bar around ARES's own --------------------------------------------------
+  /** What the theme sets in com.apple.dock while ARES runs (the originals are kept by apply()). */
+  get dockValues() { return { autohide: true, magnification: false, 'autohide-delay': { real: 1.2 } }; }
+  /** For offline.sh: the user's own Dock settings back, as shell lines (run when ARES quits, or by the watchdog). */
+  offlineCommands() {
+    const lines = [];
+    for (const key of Object.keys(this.dockValues)) {
+      const rec = this.originals.get(`pref:com.apple.dock:${key}`);
+      if (rec) lines.push(`${q(this.helper)} pref-set com.apple.dock ${key} ${rec.exists ? rec.plist : '-'} >/dev/null`);
+    }
+    if (lines.length) lines.push('/usr/bin/killall Dock');
+    return lines;
+  }
+  /** ARES is back: the theme's Dock settings again (only if offline.sh had put the user's back). */
+  async resumeDock() {
+    if (!this.originals.has('pref:com.apple.dock:autohide-delay')) return;
+    const cur = await this.originals.readPref('com.apple.dock', 'autohide-delay');
+    if (cur.exists && /<real>1\.2/.test(Buffer.from(cur.plist, 'base64').toString())) return;
+    for (const [k, v] of Object.entries(this.dockValues)) await run(this.helper, ['pref-set', 'com.apple.dock', k, plist(v)]).catch(() => {});
+    await run('/usr/bin/killall', ['Dock']).catch(() => {});
+    this.log('theme dock resumed');
+  }
+  /** Earlier versions hid the macOS menu bar; it now stays put underneath the bar (so windows stop below it). */
+  async migrate() {
+    const ids = ['script:menubar', 'pref:-g:_HIHideMenuBar', 'pref:-g:AppleMenuBarVisibleInFullscreen'].filter((id) => this.originals.has(id));
+    if (!ids.length) return;
+    for (const id of ids) {
+      const rec = this.originals.get(id);
+      const ok = rec.kind === 'script' ? await this.originals.restoreScript(rec).then(() => true, () => false) : await this.originals.restorePref(rec);
+      if (ok) this.originals.forget(id);
+    }
+    this.log('theme: macOS menu bar back to its own setting (the ARES bar covers it now)');
+    await new Promise((r) => setTimeout(r, 800)); // let the menu bar settle before measuring it
+  }
+  /** The macOS menu bar's height (the ARES bar matches it exactly), and which menu-bar icons can be mirrored. */
+  async measure() {
+    this.menubarHeight = await run(this.helper, ['metrics']).then((o) => JSON.parse(o).menubar, () => 37);
+    const items = await run(this.bar.sketchybar || '/usr/bin/false', ['--query', 'default_menu_items']).then(JSON.parse, () => null);
+    this.mirrorAllowed = Array.isArray(items);
+    this.aliasNames = (items || []).filter((n) => this.opts.mirror.some((owner) => n.startsWith(`${owner},`)))
+      .filter((n) => !n.startsWith('Control Center,') || /BentoBox/.test(n));
+  }
+
+  // ---- Menus in the bar ----------------------------------------------------------------------------------------
+  /** The front app changed (the dock's app watcher): its menus across the bar, or ARES's while ARES is in front. */
+  async front(id) {
+    if (!this.live || id === this.frontId) return;
+    this.frontId = id;
+    if (this.selfIds.includes(id)) return this.bar.menus(['ARES', 'LISTEN', 'VOICE', 'WORK', 'VIEW', 'PHONE']);
+    const r = await run(this.helper, ['menubar', id]).then(JSON.parse, () => ({ menus: [] }));
+    this.axTrusted = r.trusted;
+    if (this.frontId === id) this.bar.menus(r.menus.slice(0, MENUS));
+  }
+  get aresFront() { return this.selfIds.includes(this.frontId); }
+  /** ARES's menu sections as drop-down lines (one level of submenu shown inline under its heading). */
+  aresEntries(name) {
+    const out = [];
+    const walk = (items, depth) => {
+      for (const it of items || []) {
+        if (!it || it.visible === false) continue;
+        if (it.type === 'separator') { if (out.length && !out[out.length - 1].sep) out.push({ sep: true }); continue; }
+        if (it.submenu) { out.push({ label: it.label, header: true }); walk(it.submenu, depth + 1); continue; }
+        const mark = (it.type === 'checkbox' || it.type === 'radio') && it.checked ? (it.type === 'radio' ? '•' : '✓') : '';
+        out.push({ label: it.label, mark, enabled: it.enabled !== false && Boolean(it.click),
+          run: () => it.click?.({ checked: it.type === 'checkbox' ? !it.checked : true }) });
+      }
+    };
+    walk(this.menuSections()[name], 0);
+    while (out.length && out[out.length - 1].sep) out.pop();
+    return out;
+  }
+  async openMenu(i) {
+    if (i === 'mark') return this.showPopup('ares.mark', 'mark', [...this.aresEntries('ares')]);
+    const n = Number(i);
+    if (!(n >= 0 && n < MENUS)) return;
+    if (this.aresFront) return this.showPopup(`menu.${n}`, String(n), this.aresEntries(['ares', 'listen', 'voice', 'work', 'view', 'phone'][n]));
+    if (!this.frontId) return;
+    if (!this.axTrusted) return this.showPopup(`menu.${n}`, String(n), [{ label: 'Show this app\'s menus: allow Accessibility for ARES…', run: () => this.askAccessibility() }]);
+    await this.appMenu(`menu.${n}`, String(n), String(n));
+  }
+  /** One of the front app's menus (or a submenu: path "2.5"), read through Accessibility. */
+  async appMenu(owner, menuId, menuPath, back = null) {
+    const app = this.frontId;
+    const { items = [] } = await run(this.helper, ['menu-items', app, menuPath]).then(JSON.parse, () => ({}));
+    const entries = back ? [{ label: '‹ Back', run: () => this.appMenu(owner, menuId, back.path, back.back), keepOpen: true }, { sep: true }] : [];
+    items.forEach((it, k) => {
+      if (it.sep) { if (entries.length && !entries[entries.length - 1].sep) entries.push({ sep: true }); return; }
+      const itemPath = `${menuPath}.${k}`;
+      entries.push({ label: it.t, mark: it.mark, key: it.key, enabled: it.e, sub: it.sub,
+        run: it.sub ? () => this.appMenu(owner, menuId, itemPath, { path: menuPath, back }) : () => run(this.helper, ['menu-press', app, itemPath]).catch(() => {}),
+        keepOpen: it.sub });
+    });
+    this.showPopup(owner, menuId, entries);
+  }
+  showPopup(owner, menuId, entries) {
+    this.popups[menuId] = entries;
+    this.bar.popup(owner, menuId, entries);
+  }
+  pick(menuId, k) {
+    const e = this.popups[menuId]?.[Number(k)];
+    if (!e?.run) return;
+    if (!e.keepOpen) this.bar.closePopups();
+    Promise.resolve(e.run()).catch((err) => this.log('theme menu action failed', err.message)).finally(() => { if (!e.keepOpen) this.onMenuAction?.(); });
+  }
+  askAccessibility() {
+    run(this.helper, ['ax-prompt']).catch(() => {});
+    shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
+  }
+  /** How she's listening (the window's "ear"), for the bar's voice item. */
+  ear(text) { this.bar.ear(text); }
 
   /** The pointer: cyan outline, dark fill (Accessibility → Display → Pointer). */
   async pointer() {
@@ -320,13 +446,23 @@ class Theme {
       const server = http.createServer((req, res) => {
         const u = new URL(req.url, 'http://x');
         const [token, what] = u.pathname.split('/').filter(Boolean);
-        if (token !== this.token || what !== 'open') { res.writeHead(404); return res.end(); }
-        const view = u.searchParams.get('view') || 'summon';
-        if (['summon', 'work', 'status', 'call'].includes(view)) this.onOpen(view);
+        if (token !== this.token || !['open', 'menu', 'pick'].includes(what)) { res.writeHead(404); return res.end(); }
         res.writeHead(204); res.end();
+        if (what === 'menu') return this.openMenu(u.searchParams.get('i'));
+        if (what === 'pick') return this.pick(u.searchParams.get('m'), u.searchParams.get('k'));
+        const view = u.searchParams.get('view') || 'summon';
+        if (view === 'status') return this.openStatus();
+        if (['summon', 'work', 'call'].includes(view)) this.onOpen(view);
       });
       server.listen(0, '127.0.0.1', () => { this.server = server; resolve(); });
     });
+  }
+
+  /** The status list, hung under the bar's status pill. */
+  async openStatus() {
+    const r = await this.bar.query('ares.status');
+    const rect = r && Object.values(r.bounding_rects || {})[0];
+    this.onOpen('status', rect ? { x: Math.round(rect.origin[0]) } : null);
   }
 
   // ---- The ◉ menu ---------------------------------------------------------------------------------------------
@@ -354,7 +490,9 @@ class Theme {
         }) },
         { type: 'separator' },
         { label: 'Set the Pointer Colour…', visible: o.pointerManual, click: () => this.pointerHelp() },
-        { label: 'Dock Badges Need Accessibility…', click: () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility') },
+        { label: 'Windows, Menus and Badges: Allow Accessibility…', click: () => this.askAccessibility() },
+        { label: 'Mirror Menu-Bar Icons: Allow Screen Recording for SketchyBar…', visible: this.mirrorAllowed === false,
+          click: () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture') },
         { label: 'Focus Detection Needs Full Disk Access…', click: () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles') },
         { label: 'Load the Chrome Theme…', visible: o.apps.chrome, click: () => this.chromeHelp() },
         { label: 'Test an ARES Notification', enabled: this.live, click: () => this.notify.show({ kind: 'work', label: 'TEST', tag: 'ARES', value: 'This is how ARES alerts look.', detail: 'Click to open ARES.' }) },

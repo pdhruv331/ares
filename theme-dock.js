@@ -4,7 +4,9 @@
 //
 //  - Apps: the pinned list (settings: theme.dock.apps, first taken from the Apple Dock), their running state from
 //    native/AresTheme.swift `apps` (NSWorkspace notifications) and the Dock's own badges (Accessibility, if allowed).
-//  - Launch / switch: `open -b` (Launch Services). Quit: NSRunningApplication.terminate, through the helper.
+//  - Launch / switch: the helper's `activate` (Launch Services, which switches Spaces, then with Accessibility the app
+//    made frontmost and its window raised: `open -b` from a background app can be refused focus since macOS 14).
+//    Right-click: the app's windows (Accessibility), Hide, Quit. Quit: NSRunningApplication.terminate.
 //  - The ARES orb: theme.js decides when the wallpaper brain is hidden; the orb then fades into the dock's centre.
 // macOS doesn't send mouse moves to a click-through window of an inactive app, so (like surface.js) the pointer is
 // checked here: often near the bottom of the screen, rarely elsewhere.
@@ -20,8 +22,8 @@ const NEAR = 240;            // px from the bottom where the pointer is watched 
 const HIDE_MS = 700;         // edge reveal: hide this long after the pointer leaves
 
 class Dock {
-  constructor({ dir, helper, log, appDir, readOpts, saveOpts, onSummon }) {
-    Object.assign(this, { helper, log, appDir, readOpts, saveOpts, onSummon });
+  constructor({ dir, helper, log, appDir, readOpts, saveOpts, onSummon, onAccessibility, onFront }) {
+    Object.assign(this, { helper, log, appDir, readOpts, saveOpts, onSummon, onAccessibility, onFront });
     this.dir = path.join(dir, 'dock');
     this.win = null;
     this.apps = [];               // [{ path, id, name }]
@@ -141,6 +143,7 @@ class Dock {
         let m; try { m = JSON.parse(line); } catch { continue; }
         if (m.running) {
           this.running = new Set(m.running);
+          if (m.front && m.front !== this.front) this.onFront?.(m.front);
           this.front = m.front;
           this.send({ type: 'running', running: m.running, front: m.front, badges: this.badges });
           this.askBadges();
@@ -162,15 +165,25 @@ class Dock {
     if (a.type === 'open') {
       if (item.kind === 'trash') return execFile('/usr/bin/osascript', ['-e', 'tell application "Finder"\nopen trash\nactivate\nend tell'], () => {});
       if (item.kind === 'folder') return shell.openPath(item.path);
-      return execFile('/usr/bin/open', ['-b', item.id], (err) => { if (err) execFile('/usr/bin/open', ['-a', item.path], () => {}); });
+      return run(this.helper, ['activate', item.id, item.path]).catch((err) => {
+        this.log('dock activate failed', { app: item.id, error: err.stderr || err.message });
+        execFile('/usr/bin/open', ['-b', item.id], () => {});
+      });
     }
     if (a.type === 'menu') {
       const running = this.running.has(item.id);
+      let wins = { trusted: true, windows: [] };
+      if (!item.kind && running) wins = await run(this.helper, ['windows', item.id]).then(JSON.parse, () => wins);
+      const helper = (args) => run(this.helper, args).catch(() => {});
       Menu.buildFromTemplate([
+        ...wins.windows.map((w) => ({ label: `${w.min ? '◦ ' : ''}${w.title || item.name}`, click: () => helper(['raise', item.id, String(w.i)]) })),
+        ...(!wins.trusted ? [{ label: 'Show Windows: Allow Accessibility for ARES…', click: () => this.onAccessibility?.() }] : []),
+        { type: 'separator', visible: wins.windows.length > 0 || !wins.trusted },
         { label: item.kind ? `Open ${item.name}` : running ? `Show ${item.name}` : `Open ${item.name}`, click: () => this.act({ type: 'open', id: item.id }) },
         { label: 'Show in Finder', visible: item.kind !== 'trash', click: () => shell.showItemInFolder(item.path) },
         { type: 'separator', visible: !item.kind && running },
-        { label: `Quit ${item.name}`, visible: !item.kind && running, click: () => run(this.helper, ['quit', item.id]).catch(() => {}) },
+        { label: `Hide ${item.name}`, visible: !item.kind && running, click: () => helper(['hide', item.id]) },
+        { label: `Quit ${item.name}`, visible: !item.kind && running, click: () => helper(['quit', item.id]) },
       ]).popup({ window: this.win });
     }
   }
