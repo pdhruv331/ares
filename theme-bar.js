@@ -1,11 +1,13 @@
 // The ARES menu bar (SketchyBar) and the active-window glow (JankyBorders), for the ARES OS theme
 // (docs/ares-theme-prompt.md). Both are free, open-source Homebrew tools that ARES starts and stops itself, with its
-// own config file in the support folder (no launch agents, nothing in ~/.config).
+// own config file (no launch agents, nothing in ~/.config). SketchyBar hands its config and item scripts to `sh -c`
+// unquoted, so they can't live under "Application Support": they're in ~/.ares/sketchybar, removed when the theme is off.
 //
 // LIVE-FED: ARES pushes every change (`sketchybar --set …`, `borders active_color=…`); the bar never polls ARES. The
 // clock, battery and Wi-Fi are SketchyBar's own items. Clicks call back into ARES over a local URL with a token
 // (theme.js), which opens the matching view.
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
 
@@ -21,8 +23,9 @@ const C = {
 const spaced = (s) => String(s).toUpperCase().split('').join(' ').replace(/ {3}/g, '  ');
 
 class Bar {
-  constructor({ dir, log, url }) {
-    this.dir = path.join(dir, 'sketchybar');
+  constructor({ log, url }) {
+    const home = path.join(os.homedir(), '.ares', 'sketchybar');
+    this.dir = /\s/.test(home) ? path.join(os.tmpdir(), `ares-sketchybar-${process.getuid()}`) : home;
     this.log = log;
     this.url = url;          // () => 'http://127.0.0.1:<port>/<token>' for clicks
     this.state = { voice: 'idle', status: { ok: true, text: 'all systems ok' }, jobs: { working: 0, approval: 0 }, call: null, weather: '', attention: false };
@@ -116,23 +119,25 @@ sketchybar --update
     const rc = this.writeConfig();
     this.sent = {};
     this.active = true;
-    // (`--query bar` can't tell: it exits 0 with no bar running)
-    execFile('/usr/bin/pgrep', ['-x', 'sketchybar'], (none) => {
-      if (!none) { execFile(bin, ['--reload', rc], () => setTimeout(() => this.pushAll(), 600)); return; }
+    // A fresh bar each time: one ARES started earlier (launched with --config) is replaced, so a moved or changed config
+    // always takes. A bar the user runs themselves (brew services, no --config) is left alone.
+    execFile('/usr/bin/pkill', ['-f', '^/.*/sketchybar --config '], () => setTimeout(() => {
       const env = { ...process.env, LANG: 'en_US.UTF-8', PATH: `${path.dirname(bin)}:${process.env.PATH || '/usr/bin:/bin'}` };
       const p = spawn(bin, ['--config', rc], { detached: true, stdio: 'ignore', env });
       p.unref();
       this.pid = p.pid;
       setTimeout(() => this.pushAll(), 1200);
-    });
+    }, 400));
     return true;
   }
   stop() {
     this.active = false;
     // The bar ARES started (its pid), or any bar still running ARES's config
     if (this.pid) { try { process.kill(this.pid); } catch {} this.pid = null; }
-    execFile('/usr/bin/pkill', ['-f', `sketchybar --config ${path.join(this.dir, 'sketchybarrc')}`], () => {});
+    execFile('/usr/bin/pkill', ['-f', '^/.*/sketchybar --config '], () => {});
   }
+  /** Theme off: the bar's files go too. */
+  removeFiles() { fs.rmSync(this.dir, { recursive: true, force: true }); try { fs.rmdirSync(path.dirname(this.dir)); } catch {} }
   /** ARES is quitting: the bar stays (it's the menu bar) but says so. */
   offline() {
     this.set('ares.status', ['label=ares offline', `icon.color=${C.amber}`, `label.color=${C.amber}`, `background.border_color=${C.amberDim}`]);

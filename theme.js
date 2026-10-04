@@ -50,7 +50,7 @@ class Theme {
     this.dir = path.join(o.supportDir, 'theme');
     this.originals = new Originals({ dir: this.dir, helper: o.helper, log: o.log });
     this.token = crypto.randomBytes(16).toString('hex');
-    this.bar = new Bar({ dir: this.dir, log: o.log, url: () => this.clickUrl });
+    this.bar = new Bar({ log: o.log, url: () => this.clickUrl });
     this.dock = new Dock({ dir: this.dir, helper: o.helper, log: o.log, appDir: o.appDir, onSummon: () => o.onOpen('summon'),
       readOpts: () => this.opts.dock, saveOpts: (p) => this.save({ dock: { ...this.opts.dock, ...p } }) });
     this.icons = new Icons({ dir: this.dir, helper: o.helper, originals: this.originals, log: o.log, appDir: o.appDir });
@@ -232,6 +232,7 @@ class Theme {
   async restore() {
     this.stopLive();
     this.bar.stop(); this.bar.stopBorders(); // also a bar and glow left running by an earlier ARES
+    this.bar.removeFiles();
     const saved = JSON.parse(JSON.stringify(this.originals.data));
     const iconFails = await this.icons.restore();
     const terminalDefault = saved['pref:com.apple.Terminal:Default Window Settings'];
