@@ -90,6 +90,10 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
 - Offline: `~/.ares/sketchybar/offline.sh` (run on quit, and by the `ares.watch` item if ARES's pid in `<support>/theme/ares.pid`
   dies) puts the user's Dock settings back and lowers the bar; `resumeDock()` re-applies on launch. A dev harness
   (ARES_USER_DATA set) uses `~/.ares/sketchybar-dev` so it never rewrites the installed bar's scripts.
+- Blended (theme live): summoning lifts ARES without glass or chrome and stays click-through except over her things;
+  a lift for one panel (bar/dock/notification: `showWindow(panel)`) shows only that panel and sinks when it closes.
+- Voice ID keeps itself current (`voiceid.js learn`, anchored to the enrolment); desk mode's "NOT MATCHED" flash and the
+  drift warning in the Desk Mode menu come from it. Never learn from rejected speech except the near-miss rule.
 - The pointer colour can't be written (com.apple.universalaccess is protected): the menu walks the user through it.
 - Testing: `ARES_TEST_THEME=dock,notify,art,bar` in a harness brings up parts without touching settings; `apply` / `restore`
   change the REAL Mac (ask first). Running the standalone `Bar` against the live bar changes the real glow colour; reset it after.
