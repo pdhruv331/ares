@@ -30,7 +30,7 @@ const DEFAULTS = {
   bottomIgnore: 0.94,   // while watching: hands right at the bottom edge (resting on the keyboard) can't engage
   edge: 0.04,           // nor right at the frame's edges
   faceMargin: 0.55,     // "near my face": inside the face box grown by this fraction of its width
-  box: { hands: 5.0, aspect: 0.62, min: 0.28, max: 0.9, minH: 0.26, pad: 0.02 }, // interaction box: width in palm lengths, centred where the palm engaged, kept inside the frame
+  box: { cx: 0.5, hands: 6.0, aspect: 0.62, min: 0.28, max: 0.92, minH: 0.26, pad: 0.02 }, // interaction box: a mirror of the screen, centred on the frame (cx), width in palm lengths; its height sits where the palm engaged
   swipeDist: 1.1,       // two-finger swipe: at least this far (palm lengths)…
   swipeSpeed: 3.2,      // …at least this fast (palm lengths per second)…
   swipeAxis: 1.6,       // …and mostly along one axis
@@ -96,18 +96,17 @@ function classify(f, wasPinch = false, o = DEFAULTS) {
   return 'other';
 }
 
-/** The interaction box: sized by the hand (near or far works the same), centred where the palm engaged (so wherever
- *  the hand naturally is, the whole display is in reach), and kept inside the frame. Uniform space (x × aspect). */
+/** The interaction box: a mirror of the screen. Centred on the camera frame left-to-right (a hand in front of the right
+ *  of the screen is on the right), sized by the hand (near or far works the same), and vertically where the palm
+ *  engaged (people hold their hands at different heights), kept inside the frame. Uniform space (x × aspect). */
 function boxFor(size, aspect, o = DEFAULTS, centre = null) {
   const b = o.box;
-  const c = centre || { x: 0.5 * aspect, y: 0.6 };
-  let w = Math.min(b.max * aspect, Math.max(b.min * aspect, size * b.hands));
-  let h = w * b.aspect;
-  // Near the bottom of the frame: the box can't reach below it, so it shrinks a little, then shifts up
-  h = Math.max(b.minH, Math.min(h, 2 * (1 - b.pad - c.y)));
-  w = Math.min(w, h / b.aspect);
+  const c = centre || { x: b.cx * aspect, y: 0.6 };
+  const w = Math.min(b.max * aspect, Math.max(b.min * aspect, size * b.hands));
+  // Near the bottom of the frame the box can't reach below it: a little shorter, then shifted up
+  const h = Math.max(b.minH, Math.min(w * b.aspect, 2 * (1 - b.pad - c.y)));
   const cy = Math.min(Math.max(c.y, h / 2 + b.pad), 1 - b.pad - h / 2);
-  const cx = Math.min(Math.max(c.x, w / 2 + b.pad), aspect - b.pad - w / 2);
+  const cx = Math.min(Math.max(b.cx * aspect, w / 2 + b.pad), aspect - b.pad - w / 2);
   return { x: cx - w / 2, y: cy - h / 2, w, h };
 }
 /** A point (uniform space) → the display, 0…1 each way. */
