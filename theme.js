@@ -429,14 +429,15 @@ class Theme {
     lines('Voice', d.voice);
     if (d.integrations?.length) {
       out.push({ sep: true }, { label: 'Integrations', header: true });
-      for (const it of d.integrations) out.push({ label: it.text, mark: it.state === 'off' ? '○' : '●', info: true, ...(it.state === 'pending' && { color: 'amber' }) });
+      // As in the panel: ● connected, ○ amber needs attention, ○ dim off
+      for (const it of d.integrations) out.push({ label: it.text, mark: it.state === 'online' ? '●' : '○', info: it.state !== 'off', ...(it.state === 'pending' && { color: 'amber' }) });
     }
     const st = await this.systemStats().catch(() => null);
     if (st) {
       const up = `${Math.floor(st.uptime / 86400)}d ${Math.floor(st.uptime / 3600) % 24}h ${Math.floor(st.uptime / 60) % 60}m`;
       out.push({ sep: true }, { label: 'System', header: true },
         { label: `${st.user}@${st.host}`, info: true },
-        { label: `CPU ${Math.round(st.cpu * 100)}%   ·   Memory ${Math.round((st.memUsed || 0) / Math.max(1, st.memTotalGB) * 100)}%`, info: true },
+        { label: `CPU ${Math.round(st.cpu * 100)}%   ·   Memory ${Math.round((st.memUsed || 0) * 100)}%`, info: true },
         { label: `Up ${up}`, info: true });
     }
     out.push({ sep: true }, { label: 'Recheck', run: () => this.dashAct('fix', { key: 'recheck' }) },
