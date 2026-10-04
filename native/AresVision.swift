@@ -18,8 +18,13 @@
 //        Joints under the confidence floor are null. Smoothed with a One Euro filter per joint.
 //   {"type":"stats","fps":9.8,"ms":7.1}                                   every 5 s while on: frames processed, Vision ms/frame
 //   {"type":"error","code":"denied|nocamera|config","message":"…"}
-// Commands (lines on stdin):
-//   start | stop | rate <fps> | res low|high | filter <minCutoff> <beta> | floor <confidence> | status
+// Commands (lines on stdin, or on the socket):
+//   start | stop | rate <fps> | res low|high | filter <minCutoff> <beta> | floor <confidence> | status | quit
+//
+// Launch: ARES starts this as a real app through LaunchServices (`open -a "ARES Vision.app" --args --serve <socket>`), and the
+// helper connects back to that UNIX socket and talks the line protocol over it. Why: macOS grants the camera to an app it can
+// name; the same binary spawned as a plain child process is refused without any prompt (tested 2026-10-04). Over the socket,
+// the helper exits as soon as ARES hangs up.
 //
 // Bench (no camera): ares-vision --bench <frames> <low|high> [image]   Vision cost per frame on a still image.
 import AVFoundation
@@ -31,9 +36,24 @@ import Vision
 
 setvbuf(stdout, nil, _IOLBF, 0)
 
+// Where lines go: stdout, or the socket ARES is listening on
+var outFD: Int32 = 1
+let outLock = NSLock()
+func emitLine(_ s: String) {
+  outLock.lock(); defer { outLock.unlock() }
+  let data = Array((s + "\n").utf8)
+  var off = 0
+  data.withUnsafeBytes { p in
+    while off < data.count {
+      let n = write(outFD, p.baseAddress! + off, data.count - off)
+      if n <= 0 { if outFD != 1 { exit(0) }; return } // ARES hung up
+      off += Int(n)
+    }
+  }
+}
 func emit(_ obj: [String: Any]) {
   guard let data = try? JSONSerialization.data(withJSONObject: obj), let s = String(data: data, encoding: .utf8) else { return }
-  print(s)
+  emitLine(s)
 }
 
 func nowMs() -> Double { Date().timeIntervalSince1970 * 1000 }
@@ -274,7 +294,7 @@ final class Camera: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     frames += 1
     let key = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
     let parts = tasks.map { $0.publish(ts: ts) }
-    print(String(format: "{\"type\":\"hands\",\"ts\":%.0f,\"key\":%.2f,", ts, key) + parts.joined(separator: ",") + "}")
+    emitLine(String(format: "{\"type\":\"hands\",\"ts\":%.0f,\"key\":%.2f,", ts, key) + parts.joined(separator: ",") + "}")
     // The frame is dropped here: never kept, written or sent anywhere
     if ts - statsAt > 5000 {
       emit(["type": "stats", "fps": round4(Double(frames) * 1000 / (ts - statsAt)), "ms": round4(visionMs / Double(max(1, frames)))])
@@ -312,6 +332,18 @@ func bench(_ n: Int, _ res: String, _ imagePath: String?) {
 }
 
 let args = CommandLine.arguments
+// --probe <file>: ask for camera access as a launched app (open -a), write the answer to the file and exit (diagnostics)
+if let i = args.firstIndex(of: "--probe"), args.count > i + 1 {
+  let out = args[i + 1]
+  let write = { (s: String) in try? s.write(toFile: out, atomically: true, encoding: .utf8); exit(0) }
+  switch AVCaptureDevice.authorizationStatus(for: .video) {
+  case .authorized: write("authorized")
+  case .denied: write("denied")
+  case .restricted: write("restricted")
+  default: AVCaptureDevice.requestAccess(for: .video) { ok in write(ok ? "granted" : "refused") }
+  }
+  RunLoop.main.run()
+}
 if let i = args.firstIndex(of: "--bench") {
   let n = Int(args.count > i + 1 ? args[i + 1] : "100") ?? 100
   bench(n, args.count > i + 2 ? args[i + 2] : "low", args.count > i + 3 ? args[i + 3] : nil)
@@ -322,29 +354,64 @@ let camera = Camera()
 let hands = HandsTask()
 camera.tasks = [FaceTask(), hands]
 
-// Commands arrive on stdin; everything camera-related runs on the main queue
-DispatchQueue.global(qos: .userInitiated).async {
-  while let line = readLine() {
-    let parts = line.split(separator: " ").map(String.init)
-    guard let cmd = parts.first else { continue }
-    DispatchQueue.main.async {
-      switch cmd {
-      case "start": camera.start()
-      case "stop": camera.stop()
-      case "rate": if parts.count > 1, let f = Double(parts[1]) { camera.setRate(f) }
-      case "res": if parts.count > 1 { camera.setRes(parts[1] == "high" ? "high" : "low") }
-      case "filter": if parts.count > 2, let a = Double(parts[1]), let b = Double(parts[2]) { camera.queue.async { hands.tune(minCutoff: a, beta: b) } }
-      case "floor": if parts.count > 1, let f = Float(parts[1]) { camera.queue.async { hands.floor = f } }
-      case "status":
-        let s: String
-        switch AVCaptureDevice.authorizationStatus(for: .video) { case .authorized: s = "authorized"; case .denied: s = "denied"; case .restricted: s = "restricted"; default: s = "notDetermined" }
-        emit(["type": "permission", "status": s]); camera.emitState()
-      default: break
-      }
+func handle(_ line: String) {
+  let parts = line.split(separator: " ").map(String.init)
+  guard let cmd = parts.first else { return }
+  DispatchQueue.main.async {
+    switch cmd {
+    case "start": camera.start()
+    case "stop": camera.stop()
+    case "quit": camera.stop(); exit(0)
+    case "rate": if parts.count > 1, let f = Double(parts[1]) { camera.setRate(f) }
+    case "res": if parts.count > 1 { camera.setRes(parts[1] == "high" ? "high" : "low") }
+    case "filter": if parts.count > 2, let a = Double(parts[1]), let b = Double(parts[2]) { camera.queue.async { hands.tune(minCutoff: a, beta: b) } }
+    case "floor": if parts.count > 1, let f = Float(parts[1]) { camera.queue.async { hands.floor = f } }
+    case "status":
+      let s: String
+      switch AVCaptureDevice.authorizationStatus(for: .video) { case .authorized: s = "authorized"; case .denied: s = "denied"; case .restricted: s = "restricted"; default: s = "notDetermined" }
+      emit(["type": "permission", "status": s]); camera.emitState()
+    default: break
     }
   }
-  // ARES went away: let go of the camera and exit
-  DispatchQueue.main.async { camera.stop(); exit(0) }
+}
+
+/** Commands from a file descriptor (the socket), line by line, until it closes. */
+func readCommands(fd: Int32) {
+  DispatchQueue.global(qos: .userInitiated).async {
+    var buf = [UInt8](repeating: 0, count: 4096), acc = [UInt8]()
+    while true {
+      let n = read(fd, &buf, buf.count)
+      if n <= 0 { break }
+      acc.append(contentsOf: buf[0..<Int(n)])
+      while let nl = acc.firstIndex(of: 10) {
+        if let line = String(bytes: acc[0..<nl], encoding: .utf8) { handle(line.trimmingCharacters(in: .whitespaces)) }
+        acc.removeSubrange(0...nl)
+      }
+    }
+    // ARES went away: let go of the camera and exit
+    DispatchQueue.main.async { camera.stop(); exit(0) }
+  }
+}
+
+if let i = args.firstIndex(of: "--serve"), args.count > i + 1 {
+  // Launched by LaunchServices: connect back to ARES's socket
+  let path = args[i + 1]
+  let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+  var addr = sockaddr_un()
+  addr.sun_family = sa_family_t(AF_UNIX)
+  let bytes = Array(path.utf8)
+  guard fd >= 0, bytes.count < MemoryLayout.size(ofValue: addr.sun_path) else { exit(1) }
+  withUnsafeMutableBytes(of: &addr.sun_path) { p in for (k, b) in bytes.enumerated() { p[k] = b } }
+  let ok = withUnsafePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) } }
+  guard ok == 0 else { exit(1) }
+  outFD = fd
+  readCommands(fd: fd)
+} else {
+  // Plain stdin/stdout (tests, the bench)
+  DispatchQueue.global(qos: .userInitiated).async {
+    while let line = readLine() { handle(line) }
+    DispatchQueue.main.async { camera.stop(); exit(0) }
+  }
 }
 
 emit(["type": "ready"])

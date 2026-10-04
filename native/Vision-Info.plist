@@ -6,7 +6,17 @@
   <string>com.dhruv.ares.vision</string>
   <key>CFBundleName</key>
   <string>ARES Vision</string>
+  <key>CFBundleExecutable</key>
+  <string>ares-vision</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>LSUIElement</key>
+  <true/>
   <key>NSCameraUsageDescription</key>
-  <string>ARES watches for hand gestures on this Mac. Video never leaves the camera helper: only hand positions reach ARES, nothing is recorded.</string>
+  <string>ARES watches for hand gestures on this Mac. Video never leaves this camera helper: only hand positions reach ARES, nothing is recorded.</string>
 </dict>
 </plist>

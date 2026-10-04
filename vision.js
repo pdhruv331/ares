@@ -7,6 +7,7 @@
 // Frames never leave the helper; this file only ever sees joints. Nothing here is logged beyond state changes.
 const { spawn } = require('child_process');
 const fs = require('fs');
+const net = require('net');
 const path = require('path');
 const EventEmitter = require('events');
 const { HandEngine } = require('./hands');
@@ -67,29 +68,56 @@ class Vision extends EventEmitter {
     if (why !== was) { this.log('hands', { why, camera: this.camera.on }); this.emit('state', this.state); }
   }
 
+  /** The helper is launched as its own app through LaunchServices and talks to us over a UNIX socket: macOS grants the
+   *  camera to an app it can name ("ARES Vision"), and refuses the same binary spawned as a child without any prompt. */
   start() {
     if (this.child) { if (this.engine.state === 'off') this.engineStart(); return; }
-    this.child = spawn(this.helper, [], { stdio: ['pipe', 'pipe', 'pipe'] });
-    let buf = '';
-    this.child.stdout.on('data', (chunk) => {
-      buf += chunk;
-      let nl;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
-        if (!line) continue;
-        try { this.onLine(JSON.parse(line)); } catch { /* not JSON */ }
-      }
-    });
-    this.child.stderr.on('data', (d) => this.log('vision-stderr', String(d).trim().slice(0, 300)));
-    this.child.on('exit', (code, signal) => {
+    const bundle = path.resolve(this.helper, '..', '..', '..');
+    const sock = path.join(this.supportDir, 'vision.sock');
+    try { fs.unlinkSync(sock); } catch {}
+    const conn = { sock: null, server: null, gone: false };
+    this.child = conn;
+    const gone = (why) => {
+      if (conn.gone) return;
+      conn.gone = true;
+      clearTimeout(conn.timer);
+      try { conn.server?.close(); } catch {}
+      try { conn.sock?.destroy(); } catch {}
+      if (this.child !== conn) return; // replaced already (a stop and a new start)
       this.child = null;
       this.camera = { on: false };
       this.emit('actions', this.engine.stop());
       this.emit('state', this.state);
       if (this.why !== 'on') return;
-      if (++this.restarts > 4) { this.why = `helper crashed (${code ?? signal})`; this.log('hands', { why: this.why }); this.emit('state', this.state); return; }
+      if (++this.restarts > 4) { this.why = `helper crashed (${why})`; this.log('hands', { why: this.why }); this.emit('state', this.state); return; }
       setTimeout(() => this.check(), 1500 * this.restarts);
+    };
+    conn.server = net.createServer((s) => {
+      if (conn.sock) { s.destroy(); return; } // one helper
+      conn.sock = s;
+      clearTimeout(conn.timer);
+      let buf = '';
+      s.on('data', (chunk) => {
+        buf += chunk;
+        let nl;
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl); buf = buf.slice(nl + 1);
+          if (!line) continue;
+          try { this.onLine(JSON.parse(line)); } catch { /* not JSON */ }
+        }
+      });
+      s.on('close', () => gone('hung up'));
+      s.on('error', () => gone('socket error'));
+      for (const cmd of conn.queued || []) this.send(cmd);
+      conn.queued = null;
     });
+    conn.server.on('error', (err) => { this.log('hands', { why: `socket: ${err.message}` }); gone('socket'); });
+    conn.server.listen(sock, () => {
+      const opener = spawn('open', ['-a', bundle, '--args', '--serve', sock], { stdio: 'ignore' });
+      opener.on('exit', (code) => { if (code) { this.log('hands', { why: `open failed (${code})` }); gone(`open ${code}`); } });
+    });
+    conn.timer = setTimeout(() => { if (!conn.sock) { this.log('hands', { why: 'helper did not connect' }); gone('no connection'); } }, 8000);
+    conn.queued = [];
     this.engineStart();
   }
 
@@ -104,15 +132,22 @@ class Vision extends EventEmitter {
   stop() {
     if (this.engine.state !== 'off') this.emit('actions', this.engine.stop());
     if (!this.child) return;
-    this.send('stop');
     const c = this.child;
-    setTimeout(() => { if (this.child === c) { c.kill(); } }, 400); // fully gone: the camera light must go off
+    this.send('quit'); // the helper releases the camera and exits; hanging up below makes sure of it
     this.child = null;
+    c.gone = true;
+    clearTimeout(c.timer);
+    setTimeout(() => { try { c.sock?.destroy(); } catch {} try { c.server?.close(); } catch {} }, 400);
     this.camera = { on: false };
     this.emit('state', this.state);
   }
 
-  send(cmd) { try { this.child?.stdin.write(cmd + '\n'); } catch {} }
+  send(cmd) {
+    const c = this.child;
+    if (!c) return;
+    if (!c.sock) { c.queued?.push(cmd); return; } // before the helper has connected
+    try { c.sock.write(cmd + '\n'); } catch {}
+  }
 
   /** The engine asked for a camera rate/resolution (watching vs engaged). */
   applyCamera(actions) {
@@ -121,6 +156,7 @@ class Vision extends EventEmitter {
   rate() { const c = this.engine.camera(); if (c && this.child) this.send(`rate ${c.fps}`); }
 
   onLine(m) {
+    if (m.type !== 'hands' && m.type !== 'stats') this.log('vision', m); // state only, never joints
     switch (m.type) {
       case 'ready': this.restarts = 0; break;
       case 'permission': this.permission = m.status; if (m.status === 'denied') this.check(); this.emit('state', this.state); break;
@@ -203,12 +239,16 @@ class Vision extends EventEmitter {
   quit() {
     clearInterval(this.timer);
     this.rec = null;
-    if (this.child) { this.send('stop'); this.child.kill(); this.child = null; }
+    const c = this.child;
+    if (c) { this.send('quit'); this.child = null; try { c.sock?.destroy(); } catch {} try { c.server?.close(); } catch {} }
+    try { fs.unlinkSync(path.join(this.supportDir, 'vision.sock')); } catch {}
   }
 }
 
+/** The helper lives in its own .app bundle (macOS grants the camera only to something it can name). */
 function visionPath(app, dir) {
-  return app.isPackaged ? path.join(process.resourcesPath, 'ares-vision') : path.join(dir, 'native', 'build', 'ares-vision');
+  const base = app.isPackaged ? process.resourcesPath : path.join(dir, 'native', 'build');
+  return path.join(base, 'ARES Vision.app', 'Contents', 'MacOS', 'ares-vision');
 }
 
 module.exports = { Vision, visionPath };

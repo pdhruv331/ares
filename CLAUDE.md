@@ -116,4 +116,4 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   `<support>/hands/clips`; every positive must fire, no negative may. Record clips from the ◉ menu (dev only, joints only).
   In a harness, `Hands.test(clip)` in the window replays a clip through the live engine (`vision.replay`; the camera rules hold
   off for 30 s after). The main process doesn't hot-reload hands.js: restart the harness after engine changes.
-- The dev Electron binary asks for Camera as "Electron"; the installed app as ARES (NSCameraUsageDescription in app-info.plist).
+- The helper is a real .app bundle ("ARES Vision.app", in Resources): a bare binary is refused the camera without a prompt. The prompt names ARES Vision.
