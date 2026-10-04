@@ -97,6 +97,9 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
 - Drop-downs: every owner (ares.mark, ares.status, ares.jobs, menu.N) has ROWS rows made once in sketchybarrc; ARES only
   fills (`Bar.popup(…, show=false)` on hover) and shows them. Never add/remove popup items per open (that's the empty-frame
   lag). Rows highlight via row.sh inside SketchyBar. Theme callbacks into main must not touch `win` while quitting.
+- The status pill and WORK drop-downs are ARES windows (`theme-drop.js`, `renderer/theme-drop.*`), not SketchyBar popups:
+  filled on hover, shown after the pause, closed when the pointer leaves both them and the pill. A pointing-hand cursor
+  isn't possible over any ARES overlay while another app is in front (tested 2026-10-04: macOS keeps the arrow).
 - The pointer colour can't be written (com.apple.universalaccess is protected): the menu walks the user through it.
 - Testing: `ARES_TEST_THEME=dock,notify,art,bar` in a harness brings up parts without touching settings; `apply` / `restore`
   change the REAL Mac (ask first). Running the standalone `Bar` against the live bar changes the real glow colour; reset it after.
