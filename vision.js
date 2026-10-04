@@ -94,10 +94,13 @@ class Vision extends EventEmitter {
   calibrationStep(m) {
     const c = this.cal;
     // Any open hand counts here, even at the frame's edge or near the face: a corner is wherever the user puts it
-    const h = (this.engine.lastHands || []).find((x) => x.pose === 'open');
+    const seen = this.engine.lastHands || [];
+    const h = seen.find((x) => x.pose === 'open');
     const now = Date.now();
-    if (!h) { c.since = 0; return; }
-    if (!c.since || Math.hypot(h.tip.x - c.at.x, h.tip.y - c.at.y) > h.size * 0.3) { c.since = now; c.at = h.tip; return; }
+    if (now - (c.logAt || 0) > 2000) { c.logAt = now; this.log('hands', { calibrating: c.step, seen: seen.map((x) => `${x.side}:${x.pose}`), held: c.since ? now - c.since : 0 }); }
+    if (!h) { if (c.since && now - (c.lastOpen || 0) > 400) c.since = 0; return; } // a flicker to "other" doesn't restart the hold
+    c.lastOpen = now;
+    if (!c.since || Math.hypot(h.tip.x - c.at.x, h.tip.y - c.at.y) > h.size * 0.6) { c.since = now; c.at = h.tip; return; }
     if (now - c.since < 1000) return;
     c.points.push({ ...c.at });
     c.since = 0;
