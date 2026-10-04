@@ -50,6 +50,8 @@ function startBridge({ onTimerDone, onTimers = () => {}, onPhoneAction, onNotify
     return true;
   }
 
+  const ctl = () => { const c = claude(); if (!c) throw new Error('Claude session control is still starting up'); return c; };
+  const ownerOnly = { message: "Refused: that needs the owner, and this request wasn't verified (Voice ID is off, or the voice didn't match). Tell the user briefly: they can type it, use push-to-talk, or turn Voice ID on." };
   const longPoll = (p) => Promise.race([p, new Promise((r) => setTimeout(() => r({ wait: true }), 60_000))]);
 
   const routes = {
@@ -65,6 +67,12 @@ function startBridge({ onTimerDone, onTimers = () => {}, onPhoneAction, onNotify
     },
     // The user's Claude Code sessions (claude-control.js)
     '/claude/sessions': (args) => claude()?.status(args) ?? { message: 'Claude session control is still starting up.' },
+    // Writing to a session, starting one or handing one over: only for the verified owner
+    '/claude/reply': (args) => (verified ? ctl().reply({ ...args, source }) : ownerOnly),
+    '/claude/start': (args) => (verified ? ctl().start({ ...args, aresRepo: Boolean(args.aresRepo) && /\b(ares|my ai)\b/i.test(lastUserText), source }) : ownerOnly),
+    '/claude/phone': (args) => (verified ? ctl().toPhone(args) : ownerOnly),
+    '/claude/open': (args) => ctl().open(args),
+    '/claude/stop': (args) => ctl().stop(args),
     '/claude-usage': () => ({ message: claudeUsage ? claudeUsage() : 'Claude usage tracking is not available.' }),
     '/timers': () => ({
       message: timers.size

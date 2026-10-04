@@ -103,7 +103,53 @@ function classify(command, okScript) {
   return 'allow';
 }
 
+// ---- Code sessions (jobs of kind 'code', run in one of the user's project folders) ---------------------
+/**
+ * A code session's Bash profile: network allowed (package installs, docs), writing only inside the project (plus temp
+ * folders and package caches), and the user's secrets unreadable. `extraWrite`: e.g. a git worktree's metadata folder.
+ */
+function writeCodeProfile(file, { folder, jobDir, extraWrite = [] }) {
+  const home = realDir(os.homedir());
+  const h = (p) => q(path.join(home, p));
+  const claudeTmp = `/private/tmp/claude-${process.getuid?.() ?? 501}`;
+  const profile = `(version 1)
+(allow default)
+(deny file-read* (subpath ${h('.ssh')}) (subpath ${h('.gnupg')}) (subpath ${h('.aws')}) (subpath ${h('.config/gh')}) (subpath ${h('.docker')})
+  (subpath ${h('Library/Keychains')}) (subpath ${h('Library/Application Support/ares')}) (subpath ${h('Library/Application Support/Claude')})
+  (subpath ${h('.claude')}) (literal ${h('.claude.json')}) (literal ${h('.netrc')}) (literal ${h('.npmrc')}) (literal ${h('.pypirc')}))
+(deny file-write* (subpath "/"))
+(allow file-write* (subpath ${q(realDir(folder))}) (subpath ${q(realDir(jobDir))}) ${extraWrite.map((p) => `(subpath ${q(realDir(p))})`).join(' ')}
+  (subpath "/private/tmp") (subpath "/private/var/folders") (subpath ${h('.npm')}) (subpath ${h('.cache')}) (subpath ${h('Library/Caches')})
+  (subpath ${h('.pnpm-store')}) (subpath ${h('.yarn')}) (subpath ${h('.cargo/registry')}) (subpath ${h('go/pkg')})
+  (regex #"^/dev/(null|tty|fd/|dtracehelper|ptmx|ttys)"))
+(deny file-write* (subpath ${q(claudeTmp)}))
+`;
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(file, profile, { mode: 0o600 });
+  return file;
+}
+
+// Tier 3 for code sessions: things that send, publish, deploy, spend, reach other machines or change the system.
+// Everything else runs (inside the profile above, so it can only write in the project).
+const CODE_TIER3 = new RegExp([
+  String.raw`\bgit\s+(push|remote\s+(add|set-url))\b`, String.raw`\b(npm|yarn|pnpm|bun)\s+publish\b`, String.raw`\bcargo\s+publish\b`, String.raw`\btwine\s+upload\b`,
+  String.raw`\bgh\s+(pr\s+(create|merge|close)|release|repo\s+(create|delete|edit)|issue\s+(create|close)|api)\b`,
+  String.raw`\b(vercel|netlify|firebase|flyctl|fly|heroku|railway|wrangler|surge|amplify|eb|sam|cdk|serverless|sls)\s+(deploy|publish|--prod)\b`,
+  String.raw`\b(vercel)\b`, String.raw`\bterraform\s+(apply|destroy)\b`, String.raw`\b(kubectl|helm)\s+(apply|delete|install|upgrade)\b`, String.raw`\bdocker\s+push\b`,
+  String.raw`\b(aws|gcloud|az)\s`, String.raw`\b(ssh|scp|sftp)\s`, String.raw`\brsync\b[^|;]*:`, String.raw`\bsudo\b`, String.raw`\bosascript\b`, String.raw`\bopen\s`,
+  String.raw`\blaunchctl\b`, String.raw`\bdefaults\s+write\b`, String.raw`\bsecurity\s`, String.raw`\bcrontab\b`, String.raw`\bshutdown\b|\breboot\b`,
+  String.raw`\bcurl\b[^|;]*(\s-X\s*(POST|PUT|PATCH|DELETE)|\s--data|\s-d\s|\s-F\s|--upload-file)`, String.raw`\b(sendmail|mail)\s`,
+].join('|'), 'i');
+const CODE_INSTALL = /\b(npm|pnpm|yarn|bun)\s+(i|install|add|ci)\b|\bpip3?\s+install\b|\buv\s+(add|pip\s+install|sync)\b|\bpoetry\s+(add|install)\b|\bcargo\s+add\b|\bgo\s+get\b/i;
+/** 'ask' (tier 3), 'install' (tier 2: run it and say so) or 'allow'. */
+function classifyCode(command) {
+  const c = String(command || '');
+  if (CODE_TIER3.test(c)) return 'ask';
+  if (CODE_INSTALL.test(c)) return 'install';
+  return 'allow';
+}
+
 /** Where Claude Code unpacks its built-in skills (dataviz and friends): readable by workers. */
 const bundledSkills = () => `/private/tmp/claude-${process.getuid?.() ?? 501}/bundled-skills`;
 
-module.exports = { bundledSkills, writeProfile, wrap, classify, segments };
+module.exports = { bundledSkills, writeProfile, wrap, classify, segments, writeCodeProfile, classifyCode };

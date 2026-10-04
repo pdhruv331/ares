@@ -14,6 +14,9 @@ const MODEL = process.env.ARES_WORK_MODEL || 'opus';
 const EFFORT = process.env.ARES_WORK_EFFORT || 'high';
 const CONCURRENCY = Math.min(3, Math.max(1, Number(process.env.ARES_WORK_CONCURRENCY) || 2));
 const TIMEOUT_MS = (Number(process.env.ARES_WORK_TIMEOUT_MIN) || 45) * 60_000;
+const CODE_MODEL = process.env.ARES_CODE_MODEL || 'opus';
+const CODE_TIMEOUT_MS = (Number(process.env.ARES_CODE_TIMEOUT_MIN) || 90) * 60_000;
+const CODE_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'WebSearch', 'WebFetch', 'TodoWrite', 'NotebookEdit'];
 const APPROVAL_WAIT_MS = 30 * 60_000; // an unanswered "may I send this?" is refused after half an hour
 
 // File tools are NOT pre-allowed: every write (and any read outside the job folder) goes through the gate
@@ -24,6 +27,14 @@ const READ_VERBS = /^(get|list|search|read|find|fetch|suggest|query|view|downloa
 const SAFE_WRITES = /^(create_draft|draft_)/i;
 // Worker-internal files that aren't results
 const HIDDEN = /^(events\.jsonl|result\.md)$|^[.:]|^~\$|^__pycache__$|^node_modules$/;
+
+// Code sessions (kind 'code'): Claude Code working in one of the user's own project folders, started or
+// continued through ARES (claude-control.js). Same job machinery, different folder, tools and gate.
+const CODE_PROMPT = `You're running headless for the user, started by ARES, their personal assistant, often while they're away from the Mac. Work in the current folder (their project).
+Do the task properly: understand the code first, make the change, run the tests or the build if the project has them, and fix what you break. Commit to git when a piece of work is done and passing (never push).
+Some actions wait for the user's yes from their phone: pushing, deploying, publishing, anything that sends, spends or reaches other machines. If one is refused, carry on without it and say what you'd have done. You can only write inside this project folder.
+You can't ask the user questions mid-way: make sensible choices and mention them at the end.
+Finish with a short plain-text summary (two to four sentences, no markdown or lists) of what you did, the test or build result, and anything they need to do. ARES reads it to them.`;
 
 const WORKER_PROMPT = (tools) => `You are an ARES worker: a background agent doing one job for the user of ARES, their personal assistant. The user isn't watching you work; they'll get your result when you're done, in the ARES results panel.
 
@@ -193,7 +204,11 @@ class Jobs extends EventEmitter {
     return best;
   }
 
-  start({ title, task, size = 'medium', source = 'mac', inputs = [] }) {
+  /**
+   * Code sessions: kind 'code' with `folder` (the project). `sessionId` + `adopt` continues an existing Claude Code
+   * session (the user's own, idle one); `fork` starts a copy of one instead. `extraWrite`: more writable paths.
+   */
+  start({ title, task, size = 'medium', source = 'mac', inputs = [], kind, folder, sessionId, adopt = false, fork = null, extraWrite }) {
     const id = `${new Date().toISOString().slice(0, 10)}-${crypto.randomBytes(3).toString('hex')}`;
     fs.mkdirSync(this.folder(id), { recursive: true });
     const given = inputs.length ? this.attach(id, inputs) : [];
@@ -201,8 +216,9 @@ class Jobs extends EventEmitter {
     const job = {
       id, title: String(title || 'Job').slice(0, 80), task: String(task), size, source,
       status: 'queued', created: Date.now(), started: null, finished: null,
-      sessionId: crypto.randomUUID(), turns: [{ at: Date.now(), text: String(task) }],
+      sessionId: sessionId || crypto.randomUUID(), turns: [{ at: Date.now(), text: String(task) }],
       steps: 0, summary: '', error: null, seen: false, approval: null,
+      ...(kind === 'code' ? { kind, folder, adopt: Boolean(adopt), fork: fork || null, extraWrite: extraWrite || [] } : {}),
     };
     fs.mkdirSync(this.folder(id), { recursive: true });
     this.jobs.push(job);
@@ -389,7 +405,12 @@ class Jobs extends EventEmitter {
   }
 
   pump() {
-    while (this.running.length < CONCURRENCY) {
+    // The usage reserve (claude-usage.js): near the plan's limit, queued work waits so chat can still answer
+    const room = this.canRun?.() || { ok: true };
+    if (!room.ok && this.jobs.some((j) => j.status === 'queued')) {
+      if (this.heldWhy !== room.why) { this.heldWhy = room.why; this.log('jobs held', { why: room.why }); this.emit('held', room.why); }
+    } else this.heldWhy = null;
+    while (room.ok && this.running.length < CONCURRENCY) {
       const next = this.jobs.find((j) => j.status === 'queued');
       if (!next) break;
       this.run(next);
@@ -398,6 +419,7 @@ class Jobs extends EventEmitter {
   }
 
   run(job) {
+    if (job.kind === 'code') return this.runCode(job);
     const cwd = this.folder(job.id);
     fs.mkdirSync(cwd, { recursive: true });
     const first = !job.started && !job.pendingFollowUp && !job.resumeNote;
@@ -445,17 +467,75 @@ class Jobs extends EventEmitter {
     };
     delete env.ANTHROPIC_API_KEY; // subscription only, never API billing
 
+    this.watch(job, args, { cwd, env, prompt, resume, model: MODEL, timeoutMs: TIMEOUT_MS });
+  }
+
+  /** A code session: Claude Code in the user's own project folder (claude-control.js starts these). */
+  runCode(job) {
+    const jobDir = this.folder(job.id);
+    fs.mkdirSync(jobDir, { recursive: true });
+    const cwd = job.folder;
+    if (!cwd || !fs.existsSync(cwd)) {
+      Object.assign(job, { status: 'failed', error: `the folder ${cwd || '(none)'} isn't there any more`, finished: Date.now(), seen: false });
+      this.save();
+      this.event(job, { type: 'failed', text: job.error });
+      this.emit('finished', this.view(job));
+      return;
+    }
+    const started = fs.existsSync(path.join(jobDir, '.session'));
+    let prompt;
+    if (job.pendingFollowUp) prompt = `Message from the user (sent through ARES): ${job.pendingFollowUp}`;
+    else if (job.resumeNote) prompt = job.resumeNote;
+    else prompt = job.task;
+    const fork = !started && job.fork;            // a copy of a session that's open elsewhere
+    const resume = !fork && (job.adopt || started); // adopted: the user's own idle session, continued in place
+    job.pendingFollowUp = undefined;
+    job.resumeNote = undefined;
+    job.status = 'running';
+    job.started ??= Date.now();
+    job.runStarted = Date.now();
+    job.finished = null;
+    this.save();
+
+    // Only ARES's gate server: the session's tools are Claude Code's own
+    const work = this.tools().find((t) => t.id === 'work');
+    const configFile = path.join(this.configDir, `${job.id}.json`);
+    fs.mkdirSync(this.configDir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(configFile, JSON.stringify({ mcpServers: work ? { work: work.mcp(job, jobDir) } : {} }), { mode: 0o600 });
+    sandbox.writeCodeProfile(this.profile(job.id), { folder: cwd, jobDir, extraWrite: job.extraWrite || [] });
+    const args = [
+      '-p',
+      '--output-format', 'stream-json', '--verbose',
+      '--model', CODE_MODEL,
+      '--effort', EFFORT,
+      ...(fork ? ['--resume', job.fork, '--fork-session'] : resume ? ['--resume', job.sessionId] : ['--session-id', job.sessionId]),
+      '--append-system-prompt', CODE_PROMPT,
+      '--tools', CODE_TOOLS.join(','),
+      '--setting-sources', '', // the user's hooks and permission rules stay out: ARES's gate decides, and no hook loops
+      '--mcp-config', configFile,
+      '--allowedTools', 'mcp__work', 'WebSearch', 'TodoWrite',
+      '--permission-prompt-tool', 'mcp__work__approve',
+      '--disallowedTools', 'mcp__claude_ai_ElevenLabs', 'mcp__claude_ai_Claude_Docs', 'mcp__claude_ai_Slack',
+    ];
+    const env = { ...process.env, MCP_TOOL_TIMEOUT: String(APPROVAL_WAIT_MS + 60_000) };
+    delete env.ANTHROPIC_API_KEY; // subscription only, never API billing
+    this.watch(job, args, { cwd, env, prompt, resume: resume || Boolean(fork), model: CODE_MODEL, timeoutMs: CODE_TIMEOUT_MS });
+  }
+
+  /** Run the Claude Code process for a job and follow it to the end (both kinds). */
+  watch(job, args, { cwd, env, prompt, resume, model, timeoutMs }) {
+    const jobDir = this.folder(job.id);
     const child = spawn(this.cli, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
     this.procs.set(job.id, child);
-    fs.writeFileSync(path.join(cwd, '.session'), job.sessionId);
-    this.log('job start', { id: job.id, model: MODEL, resume });
+    fs.writeFileSync(path.join(jobDir, '.session'), job.sessionId);
+    this.log('job start', { id: job.id, model, resume, kind: job.kind || 'work' });
     this.event(job, { type: 'start', text: resume ? 'Picking it back up' : 'Started' });
 
     let buf = '';
     let stderr = '';
     let finalText = '';
     let resultMsg = null;
-    const timer = setTimeout(() => { this.log('job timeout', { id: job.id }); child.kill(); }, TIMEOUT_MS);
+    const timer = setTimeout(() => { this.log('job timeout', { id: job.id }); child.kill(); }, timeoutMs);
 
     child.stdout.on('data', (chunk) => {
       buf += chunk;
@@ -467,6 +547,13 @@ class Jobs extends EventEmitter {
         let msg;
         try { msg = JSON.parse(line); } catch { continue; }
         observeUsage(msg); // the plan's 5-hour/weekly limits (claude-usage.js)
+        // A forked session gets its new id here: follow-ups and handovers resume that one
+        if (msg.type === 'system' && msg.subtype === 'init' && msg.session_id && msg.session_id !== job.sessionId) {
+          job.sessionId = msg.session_id;
+          job.fork = null;
+          fs.writeFileSync(path.join(jobDir, '.session'), job.sessionId);
+          this.save();
+        }
         if (msg.type === 'assistant') {
           for (const block of msg.message?.content || []) {
             if (block.type === 'tool_use' && block.name === 'TodoWrite') {
@@ -503,7 +590,7 @@ class Jobs extends EventEmitter {
         job.status = 'done';
         job.summary = (resultMsg.result || finalText || '').trim().replace(/\s+/g, ' ').slice(0, 600);
         // No result.md? The final reply is the result, then.
-        if (!this.result(job.id) && (resultMsg.result || finalText)) fs.writeFileSync(path.join(cwd, 'result.md'), resultMsg.result || finalText);
+        if ((job.kind === 'code' || !this.result(job.id)) && (resultMsg.result || finalText)) fs.writeFileSync(path.join(jobDir, 'result.md'), resultMsg.result || finalText);
         this.event(job, { type: 'done', text: 'Done' });
       } else {
         job.status = 'failed';
@@ -530,6 +617,7 @@ class Jobs extends EventEmitter {
   async gate(id, tool, input = {}) {
     const job = this.get(id);
     if (!job || job.status === 'cancelled') return { allow: false, message: 'This job is no longer running.' };
+    if (job.kind === 'code') return this.gateCode(job, tool, input);
     const cwd = this.folder(id);
     const refuse = (message) => { this.log('job gate refuse', { id, tool }); return { allow: false, message }; };
     if (FILE_TOOLS.has(tool)) {
@@ -565,11 +653,40 @@ class Jobs extends EventEmitter {
     return this.ask(job, tool, input);
   }
 
+  /**
+   * Code sessions' tiers (docs/autonomy-prompt.md): edits inside the project and ordinary commands run (Bash inside a
+   * profile that can only write in the project); package installs run and are noted; anything that sends, publishes,
+   * deploys or reaches other machines waits for a yes, and then runs as asked (it needs the user's credentials).
+   */
+  async gateCode(job, tool, input) {
+    const folder = job.folder;
+    const refuse = (message) => { this.log('job gate refuse', { id: job.id, tool }); return { allow: false, message }; };
+    if (FILE_TOOLS.has(tool)) {
+      const p = input.file_path ?? input.notebook_path ?? input.path ?? folder;
+      if (inside(folder, p)) return { allow: true };
+      if (READ_ONLY_FILE_TOOLS.has(tool)) return this.ask(job, tool, input);
+      return refuse('Only files inside the project folder can be changed.');
+    }
+    if (tool === 'Bash') {
+      const command = String(input.command || '');
+      const wrapped = { ...input, command: sandbox.wrap(command, { profile: this.profile(job.id), jobDir: this.folder(job.id) }) };
+      const tier = sandbox.classifyCode(command);
+      if (tier === 'install') this.event(job, { type: 'step', kind: 'tool', text: `Installing packages: ${command.slice(0, 90)}` });
+      if (tier !== 'ask') return { allow: true, updatedInput: wrapped };
+      return this.ask(job, tool, input);
+    }
+    if (tool === 'WebFetch') return (await require('./egress').isPublicUrl(input.url)) ? { allow: true } : refuse('Only public http(s) web pages.');
+    if (String(tool).startsWith('mcp__work__')) return { allow: true };
+    return this.ask(job, tool, input);
+  }
+
   /** Hold the worker until the user says yes or no (on the Mac, by voice, or from the phone). */
   ask(job, tool, input, updatedInput) {
     const decision = new Promise((resolve) => {
       this.answer(job.id, false, 'Superseded by another request.');
-      const request = { tool, what: summariseAction(tool, input), command: tool === 'Bash' ? String(input.command || '').slice(0, 4000) : undefined, at: Date.now() };
+      // In a code session the command itself is the clearest description ("run: git push -u origin main")
+      const what = job.kind === 'code' && tool === 'Bash' ? `run: ${String(input.command || '').replace(/\s+/g, ' ').slice(0, 140)}` : summariseAction(tool, input);
+      const request = { tool, what, command: tool === 'Bash' ? String(input.command || '').slice(0, 4000) : undefined, at: Date.now() };
       const timer = setTimeout(() => this.answer(job.id, false, 'The user did not answer in time.'), APPROVAL_WAIT_MS);
       this.approvals.set(job.id, { resolve, timer, request, updatedInput });
       job.status = 'approval';

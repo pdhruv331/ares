@@ -95,6 +95,20 @@ class ClaudeUsage extends EventEmitter {
     return out;
   }
 
+  /**
+   * The reserve that keeps ARES able to answer: background work (jobs, code sessions) waits while a window is above
+   * its line (default 90% of the 5-hour, 95% of the weekly). Chat is never held. Returns { ok, why }.
+   */
+  reserve(limits = {}) {
+    const lines = { five_hour: limits.fiveHour ?? 90, seven_day: limits.weekly ?? 95 };
+    const snap = this.snapshot();
+    for (const [key, line] of Object.entries(lines)) {
+      const w = snap.windows[key];
+      if (w && w.pct >= line) return { ok: false, why: `the ${WINDOWS[key]} Claude limit is at ${w.pct}%${w.resetsAt ? ` (resets ${when(w.resetsAt)})` : ''}` };
+    }
+    return { ok: true };
+  }
+
   /** For the brain's claude_usage tool and the status panel. */
   describe() {
     const snap = this.snapshot();

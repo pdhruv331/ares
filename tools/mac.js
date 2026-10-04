@@ -90,6 +90,29 @@ tool('claude_sessions', "The user's Claude Code sessions (in the Claude app, the
   { session: z.string().optional() },
   async ({ session }) => (await bridge('/claude/sessions', { session })).message);
 
+tool('claude_session_reply', "Send the user's message to one of their Claude Code sessions (\"tell the GUI session to also fix the subtitle bug\"). "
+  + 'ARES-run sessions get it as a follow-up; the user\'s closed sessions are continued in place in the background. A session open in the Claude app '
+  + 'or a terminal is never written to: the result says so, and you can offer a copy instead (fork: true, only after the user says yes).',
+  { session: z.string().describe('the session: its name, folder, words from it, or id'), message: z.string(), fork: z.boolean().optional() },
+  async (args) => (await bridge('/claude/reply', args)).message);
+
+tool('claude_session_start', 'Start a new Claude Code session in one of the user\'s project folders to do a task ("start a Claude session in my portfolio '
+  + 'folder to update the projects page"). Runs in the background by default, with risky steps waiting for their OK and a push when done. '
+  + 'on_phone: true when they want to drive it from their phone (Claude Code Remote Control: it opens in the Claude app). '
+  + 'ares_repo: true ONLY when they explicitly ask to work on ARES itself (its own code); it then runs on a new git branch.',
+  { folder: z.string().describe('a path, or the folder\'s name as they said it'), task: z.string(), title: z.string().optional(), on_phone: z.boolean().optional(), ares_repo: z.boolean().optional() },
+  async ({ folder, task, title, on_phone, ares_repo }) => (await bridge('/claude/start', { folder, task, title, onPhone: on_phone, aresRepo: ares_repo })).message);
+
+tool('claude_session_to_phone', 'Put an existing Claude Code session on the user\'s phone (Remote Control, in the Claude app): a closed one, or one ARES ran. '
+  + 'Sessions open in the Claude app on the Mac need Remote Control switched on there instead; the result says so.',
+  { session: z.string() }, async (args) => (await bridge('/claude/phone', args)).message);
+
+tool('claude_session_open', 'Open a Claude Code session on the Mac in Terminal, resumed in its folder ("open it in Claude Code"), so the user can take over.',
+  { session: z.string() }, async (args) => (await bridge('/claude/open', args)).message);
+
+tool('claude_session_stop', 'Stop what ARES is running for a Claude session (pause it; a later reply picks it up), or end a Remote Control session ARES started.',
+  { session: z.string() }, async (args) => (await bridge('/claude/stop', args)).message);
+
 tool('cancel_timer', 'Cancel a running timer by its label (or all timers).',
   { label: z.string().optional() },
   async ({ label }) => (await bridge('/timer/cancel', { label })).message);

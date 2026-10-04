@@ -1177,6 +1177,14 @@ async function startWork() {
   powerMonitor.on('unlock-screen', () => setTimeout(macPresent, 1500));
   powerMonitor.on('user-did-become-active', () => setTimeout(macPresent, 1500));
   jobs.on('approval', (job) => notifyJob(job, 'approval'));
+  // Near the Claude plan's limits, background work waits (chat never does); it starts again as usage drops or resets
+  jobs.canRun = () => claudeUsage.reserve(readSettings().claudeReserve || {});
+  jobs.on('held', (why) => {
+    notice(`Background work is waiting: ${why}. I'm keeping the rest for our conversation.`);
+    if (!atMac()) pushToPhones({ title: 'Claude work paused', body: `Queued jobs and sessions wait: ${why}.`, tag: 'claude-reserve' }).catch(() => {});
+  });
+  claudeUsage.on('change', () => jobs.pump());
+  setInterval(() => jobs.pump(), 5 * 60_000); // windows reset without an event
   jobs.pump(); // jobs left over from last time (queued, or running when ARES quit)
   startClaudeControl();
 }
@@ -1193,7 +1201,8 @@ function startClaudeControl() {
       return j && { id: j.id, title: j.title, status: j.status, approval: j.approval, error: j.error, folder: j.folder || jobs.folder(j.id), running: jobs.active.includes(j) };
     },
   });
-  claudeCtl = new ClaudeControl({ log, sessions, jobs });
+  claudeCtl = new ClaudeControl({ log, sessions, jobs, cli: claude.CLI, readSettings, workDir: jobs.dir,
+    aresRepo: app.isPackaged ? path.join(os.homedir(), 'My AI') : __dirname });
   claudeCtl.startHooks(app.getPath('userData'), path.join(__dirname, 'tools', 'claude-hook.sh'));
   claudeCtl.on('alert', deliverClaudeAlert);
   setInterval(releaseHeldAlerts, 60_000);
@@ -1236,9 +1245,10 @@ function notifyJob(job, kind) {
   const phoneToo = !here || readSettings().workAlwaysPhone || job.source === 'phone';
   log('job notify', { id: job.id, kind, here, phoneToo });
   if (kind === 'done' || kind === 'failed') {
+    const what = job.kind === 'code' ? `${job.title} Claude session` : `${job.title} job`;
     const line = job.status === 'done'
-      ? `Your ${job.title} job is done. ${firstSentences(job.summary || '')}`
-      : `Sorry, sir, the ${job.title} job didn't finish: ${job.error}.`;
+      ? `Your ${what} is done. ${firstSentences(job.summary || '')}`
+      : `Sorry, sir, the ${what} didn't finish: ${job.error}.`;
     if (here) { present(); win.webContents.send('job-announce', { id: job.id, kind: job.status, line, open: job.status === 'done' }); }
     if (phoneToo) pushToPhones({ title: job.status === 'done' ? `Done: ${job.title}` : `Job failed: ${job.title}`, body: job.status === 'done' ? job.summary || 'Ready.' : job.error, tag: `job-${job.id}`, job: job.id, buttons: jobButtons(job) }).catch(() => {});
   } else {
@@ -1255,6 +1265,14 @@ function notifyJob(job, kind) {
 
 /** Open / Send to Mac, for a job's notification on the phone. */
 function jobButtons(job) {
+  // A Claude code session: the answer, a typed reply, or take it over in the Claude app
+  if (job.kind === 'code') {
+    return [
+      { title: 'Open', job: job.id, url: `${phoneUrl || ''}/?job=${job.id}` },
+      { title: 'Reply', reply: `Reply to my "${job.title}" Claude session [id ${String(job.sessionId).slice(0, 8)}]: ` },
+      { title: 'On my phone', ask: `Put my "${job.title}" Claude session on my phone.` },
+    ];
+  }
   return [
     { title: 'Open', job: job.id, url: `${phoneUrl || ''}/?job=${job.id}` },
     { title: 'Send to Mac', api: `/api/jobs/${job.id}/send-to-mac`, ask: `Open the ${job.title} job on my Mac.` },
@@ -1835,7 +1853,7 @@ app.on('will-quit', () => {
   phone?.stop();
   intents?.dispose();
   jobs?.shutdown();
-  claudeCtl?.stopHooks();
+  claudeCtl?.shutdown(); // hook files removed, Remote Control sessions ARES started are stopped
   calls?.stop();
   voicemail?.stop();
   dashboard?.stop();
