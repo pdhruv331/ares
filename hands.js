@@ -101,6 +101,7 @@ function classify(f, wasPinch = false, o = DEFAULTS) {
  *  engaged (people hold their hands at different heights), kept inside the frame. Uniform space (x × aspect). */
 function boxFor(size, aspect, o = DEFAULTS, centre = null) {
   const b = o.box;
+  if (b.fixed) return { x: b.fixed.x * aspect, y: b.fixed.y, w: b.fixed.w * aspect, h: b.fixed.h }; // calibrated (frame-normalised)
   const c = centre || { x: b.cx * aspect, y: 0.6 };
   const w = Math.min(b.max * aspect, Math.max(b.min * aspect, size * b.hands));
   // Near the bottom of the frame the box can't reach below it: a little shorter, then shifted up
@@ -194,7 +195,7 @@ class HandEngine {
       if (this.pinch && this.pinch.side === h.side && this.pinch.phase !== 'wait') return true;
       return h.pose === 'pinch' && this.onTarget(this.pointFor(h.f));
     });
-    this.lastHands = hands.map((h) => ({ side: h.side, pose: h.pose, valid: valid.includes(h) })); // (for the preview)
+    this.lastHands = hands.map((h) => ({ side: h.side, pose: h.pose, valid: valid.includes(h), palm: h.f.palmN, size: h.f.size })); // (for the preview and calibration)
     this.lastBox = hands[0] ? boxFor(this.sizeEma ?? hands[0].f.size, aspect, o, this.boxCentre) : null;
     for (const h of hands) { // pose history (also for hands that don't count: a pose must re-form after it)
       h.slot.prevPose = h.slot.pose;

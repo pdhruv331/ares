@@ -84,6 +84,35 @@ class Vision extends EventEmitter {
   }
   get available() { return fs.existsSync(this.helper); }
 
+  // ---- Calibration: the user shows where the screen's top-left and bottom-right corners are (open palm, held 1 s each)
+  calibrate() {
+    this.cal = { step: 0, since: 0, at: null, points: [] };
+    this.calNote?.('Calibrating: hold an open palm where the TOP-LEFT corner of the screen feels right…');
+    if (!this.previewOn) this.preview(true);
+    this.emit('state', this.state);
+  }
+  calibrationStep(m) {
+    const c = this.cal;
+    const h = (this.engine.lastHands || []).find((x) => x.pose === 'open' && x.valid);
+    const now = Date.now();
+    if (!h) { c.since = 0; return; }
+    if (!c.since || Math.hypot(h.palm.x - c.at.x, h.palm.y - c.at.y) > h.size * 0.3) { c.since = now; c.at = h.palm; return; }
+    if (now - c.since < 1000) return;
+    c.points.push({ ...c.at });
+    c.since = 0;
+    if (c.points.length === 1) { c.step = 1; this.calNote?.('Got it. Now the BOTTOM-RIGHT corner…'); return; }
+    const [a, b] = c.points;
+    this.cal = null;
+    const w = b.x - a.x, hgt = b.y - a.y;
+    if (w < 0.1 || hgt < 0.08) { this.calNote?.('Those two points were too close together; calibration cancelled.'); this.emit('state', this.state); return; }
+    const fixed = { x: +a.x.toFixed(3), y: +a.y.toFixed(3), w: +w.toFixed(3), h: +hgt.toFixed(3) };
+    this.set({ tune: { ...this.opts.tune, box: { ...(this.opts.tune.box || {}), fixed } } });
+    this.calNote?.(`Hand box calibrated: ${Math.round(w * 100)}% of the frame wide, ${Math.round(hgt * 100)}% tall.`);
+    this.log('hands', { calibrated: fixed });
+  }
+  clearCalibration() { const box = { ...(this.opts.tune.box || {}) }; delete box.fixed; this.set({ tune: { ...this.opts.tune, box } }); }
+  get calibrated() { return Boolean(this.opts.tune.box?.fixed); }
+
   /** The tuning window in the helper: what the camera sees, with ARES's reading of it drawn over. */
   preview(on) { this.previewOn = Boolean(on); this.send(`preview ${on ? 'on' : 'off'}`); if (on && !this.child) this.check(); this.emit('state', this.state); }
   /** off | watching | engaged, and why it's off. */
@@ -227,13 +256,14 @@ class Vision extends EventEmitter {
     }
     const before = this.engine.state;
     const acts = this.engine.feed({ ts: m.ts, aspect, key: m.key, face: m.face, hands: m.hands });
+    if (this.cal) this.calibrationStep(m);
     if (this.previewOn) {
       const e = this.engine, bx = e.lastBox;
       for (const a of acts) if (a.type !== 'cursor' && a.type !== 'move' && !(a.type === 'zoom' && a.phase === 'update')) {
         (this.recentActs ||= []).push(`${new Date().toLocaleTimeString([], { hour12: false })} ${a.type}${a.state ? ':' + a.state : ''}${a.dir ? ':' + a.dir : ''}${a.click ? ':click' : ''}${a.phase ? ':' + a.phase : ''}`);
         if (this.recentActs.length > 8) this.recentActs.shift();
       }
-      this.send('overlay ' + JSON.stringify({ state: e.state, hands: e.lastHands || [], box: bx ? [bx.x / aspect, bx.y, bx.w / aspect, bx.h] : null, cursor: e.cursor ? [e.cursor.x, e.cursor.y] : null, acts: this.recentActs || [] }));
+      this.send('overlay ' + JSON.stringify({ state: this.cal ? (this.cal.step ? 'CALIBRATING: bottom-right corner' : 'CALIBRATING: top-left corner') : e.state, hands: e.lastHands || [], box: bx ? [bx.x / aspect, bx.y, bx.w / aspect, bx.h] : null, cursor: e.cursor ? [e.cursor.x, e.cursor.y] : null, acts: this.recentActs || [] }));
     }
     if (!acts.length) return;
     this.applyCamera(acts);

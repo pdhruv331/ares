@@ -376,6 +376,8 @@ function handsMenu() {
     { label: line, enabled: false },
     { label: 'Hands Move the Mac\'s Pointer (click anything)', type: 'checkbox', checked: o.mac, enabled: o.enabled, click: (item) => { vision.set({ mac: item.checked }); refreshTray(); } },
     { label: 'Show What the Camera Sees (tuning window)', type: 'checkbox', checked: st.preview, enabled: o.enabled, click: (item) => { vision.preview(item.checked); refreshTray(); } },
+    { label: st.calibrating ? 'Calibrating… (open palm: top-left, then bottom-right)' : `Calibrate Hand Box… ${st.calibrated ? '(calibrated)' : '(guessed from your hand)'}`, enabled: o.enabled && !st.calibrating, click: () => { vision.calibrate(); refreshTray(); } },
+    { label: 'Forget Hand Box Calibration', visible: st.calibrated, click: () => { vision.clearCalibration(); refreshTray(); } },
   ];
   if (st.permission === 'denied') items.push({ label: 'Allow the camera in System Settings › Privacy › Camera…', click: () => shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Camera') });
   if (!app.isPackaged) { // record joint streams (never video) for scripts/test-hands.js
@@ -512,6 +514,7 @@ function createVision() {
   vision.on('actions', (list) => { if (win && !win.isDestroyed()) win.webContents.send('hands-actions', list); });
   vision.on('state', (st) => { if (win && !win.isDestroyed()) win.webContents.send('hands-state', st); refreshTray(); });
   vision.on('recorded', (r) => notice(`Hand clip saved: ${path.basename(r.file)} (${r.frames} frames)`));
+  vision.calNote = (text) => { notice(text); theme?.toast({ kind: 'day', label: 'HANDS', tag: 'CALIBRATE', value: text }); refreshTray(); };
   // A pinch at the face only counts over one of ARES's things: answered from the clickable areas the window reports
   vision.setHitTest((p) => {
     if (!surface.passThrough) return true;
