@@ -530,11 +530,15 @@ async function onCommand(evt) {
   if (!check.ok && !addressed) {
     if (check.score != null && check.score >= voiceId.threshold - 0.15 && (evt.text || '').trim().split(/\s+/).length >= 2) theme?.flash('NOT MATCHED');
     if (voiceId.drifting) refreshTray();
+    win?.webContents.send('listener-event', { type: 'ignored' }); // the screen stops "listening…" for it
     return log('voice-id', { ignored: true, score: check.score });
   }
   if (!addressed && !harmless) {
     const j = judgeAddressed(evt.text, talk);
-    if (j.verdict !== 'yes') return log('overheard', { words: (evt.text || '').split(/\s+/).filter(Boolean).length, verdict: j.verdict, why: j.why });
+    if (j.verdict !== 'yes') {
+      win?.webContents.send('listener-event', { type: 'ignored' }); // not for her: the screen goes back to standby
+      return log('overheard', { words: (evt.text || '').split(/\s+/).filter(Boolean).length, verdict: j.verdict, why: j.why });
+    }
     log('addressed', { why: j.why });
     if (j.followUp) addressed = true; // part of the conversation: no "were you talking to me?" note for the brain
   }

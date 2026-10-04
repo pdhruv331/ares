@@ -540,6 +540,7 @@ window.ares.onListener((evt) => {
       else handle(evt.text, { voice: true, addressed: evt.addressed !== false, intent: evt.intent });
       break;
     case 'timeout':
+    case 'ignored': // heard without the wake word, and not for her (main.js): nothing more is coming for it
       stopCapturing();
       Comms.userFade();
       if (state === 'listening') setState('idle');
@@ -552,6 +553,8 @@ window.ares.onListener((evt) => {
       }
       renderListening();
       if (state === 'idle') setState('idle');
+      // Stopped listening without the wake word (desk mode off, idle, "go quiet"): a capture it started is over
+      if (!evt.on && state === 'listening') { stopCapturing(); Comms.userFade(); setState('idle'); }
       if (!evt.on && evt.reason === 'idle') show("It's been quiet for a while, so I've gone back to waiting for my name.");
       break;
     case 'muted':
