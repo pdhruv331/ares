@@ -256,6 +256,7 @@ class Theme {
     this.mirrorAllowed = Array.isArray(items);
     this.aliasNames = (items || []).filter((n) => this.opts.mirror.some((owner) => n.startsWith(`${owner},`)))
       .filter((n) => !n.startsWith('Control Center,') || /BentoBox|Bluetooth/.test(n)); // Control Center itself and Bluetooth
+    if (!this.aliasNames.some((n) => /Bluetooth/.test(n))) this.aliasNames.push('Control Center,Bluetooth'); // always there: it opens Bluetooth settings when the menu-bar item is hidden
   }
 
   // ---- Menus in the bar ----------------------------------------------------------------------------------------
@@ -539,7 +540,10 @@ class Theme {
     const name = this.aliasNames?.[Number(k)];
     if (!name) return;
     const [owner, ...rest] = name.split(',');
-    run(this.helper, ['extra-press', owner, rest.join(',')]).catch((err) => this.log('theme extra press failed', { name, error: err.message }));
+    run(this.helper, ['extra-press', owner, rest.join(',')]).catch((err) => {
+      this.log('theme extra press failed', { name, error: err.message });
+      if (/Bluetooth/.test(name)) shell.openExternal('x-apple.systempreferences:com.apple.BluetoothSettings'); // no Bluetooth menu-bar item: the settings pane
+    });
   }
   pick(menuId, k) {
     const e = this.popups[menuId]?.[Number(k)];
