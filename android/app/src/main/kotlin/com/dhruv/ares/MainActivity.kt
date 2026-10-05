@@ -37,6 +37,12 @@ class MainActivity : Activity(), Session.Ui {
     private var heardView: TextView? = null
     private var pressedAt = 0L
     private lateinit var workBtn: TextView
+    private lateinit var youLatest: TextView
+    private lateinit var aresLatest: TextView
+    private lateinit var actions: LinearLayout
+    private lateinit var history: View
+    private lateinit var exchange: View
+    private lateinit var inputRow: View
     private val jobsChanged = { showJobs() }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -61,6 +67,20 @@ class MainActivity : Activity(), Session.Ui {
         stateText = findViewById(R.id.stateText)
         setup = findViewById(R.id.setup)
 
+        youLatest = findViewById(R.id.youLatest)
+        aresLatest = findViewById(R.id.aresLatest)
+        aresLatest.movementMethod = android.text.method.ScrollingMovementMethod()
+        actions = findViewById(R.id.actions)
+        history = findViewById(R.id.history)
+        exchange = findViewById(R.id.exchange)
+        inputRow = findViewById(R.id.inputRow)
+        findViewById<View>(R.id.historyBtn).setOnClickListener { showHistory(true) }
+        findViewById<View>(R.id.historyClose).setOnClickListener { showHistory(false) }
+        findViewById<View>(R.id.kbBtn).setOnClickListener {
+            val show = inputRow.visibility != View.VISIBLE
+            inputRow.visibility = if (show) View.VISIBLE else View.GONE
+            if (show) { input.requestFocus(); getSystemService(android.view.inputmethod.InputMethodManager::class.java).showSoftInput(input, 0) }
+        }
         findViewById<View>(R.id.send).setOnClickListener { send() }
         input.setOnEditorActionListener { _, id, _ -> if (id == EditorInfo.IME_ACTION_SEND) { send(); true } else false }
         reactor.onTap = { session.hush() }
@@ -165,12 +185,14 @@ class MainActivity : Activity(), Session.Ui {
     override fun heard(text: String, final: Boolean) {
         val v = heardView ?: add("YOU", text, user = true).also { heardView = it }
         v.text = text
+        youLatest.text = text
         if (final) heardView = null
     }
 
     override fun reply(text: String, final: Boolean) {
         val v = replyView ?: add("ARES", "", user = false).also { replyView = it }
         v.text = text
+        aresLatest.text = text
         if (final) replyView = null
         scrollDown()
         setStatus("online")
@@ -181,8 +203,20 @@ class MainActivity : Activity(), Session.Ui {
         card.text = "↗  $label"
         card.setOnClickListener { Ares.open(this, url) }
         log.addView(card)
+        // ...and under her latest answer, where you can tap it without opening the history
+        val chip = layoutInflater.inflate(R.layout.item_action, actions, false) as TextView
+        chip.text = "↗  $label"
+        chip.setOnClickListener { Ares.open(this, url) }
+        actions.addView(chip)
         scrollDown()
         Ares.open(this, url) // you just asked for it: open it straight away
+    }
+
+    /** The full conversation over the brain, or just the latest exchange. */
+    private fun showHistory(open: Boolean) {
+        history.visibility = if (open) View.VISIBLE else View.GONE
+        exchange.visibility = if (open) View.GONE else View.VISIBLE
+        if (open) scrollDown()
     }
 
     override fun notPaired() {
@@ -205,6 +239,9 @@ class MainActivity : Activity(), Session.Ui {
         body.text = text
         body.isActivated = !user
         log.addView(item)
+        // The latest exchange is what shows by default: your words small, her answer large
+        if (user) { youLatest.text = text; youLatest.visibility = if (text.isBlank()) View.GONE else View.VISIBLE; aresLatest.text = ""; actions.removeAllViews() }
+        else { aresLatest.text = text; aresLatest.scrollTo(0, 0) }
         while (log.childCount > 80) log.removeViewAt(0)
         scrollDown()
         return body
