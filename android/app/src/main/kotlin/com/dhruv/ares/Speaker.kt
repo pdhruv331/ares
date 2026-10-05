@@ -15,7 +15,7 @@ import kotlin.math.sqrt
  * Plays ARES's voice: raw 24kHz 16-bit mono PCM, streamed a chunk at a time, gapless. Music ducks
  * while she speaks. `onSpeaking` and `onLevel` are called from the audio thread.
  */
-class Speaker(ctx: Context, private val onSpeaking: (Boolean) -> Unit = {}, private val onLevel: (Float) -> Unit = {}) {
+class Speaker(ctx: Context, private val onSpeaking: (Boolean) -> Unit = {}, private val onLevel: (Float) -> Unit = {}, private val onClip: (Int) -> Unit = {}) {
     private val audio = ctx.getSystemService(AudioManager::class.java)
     private val attrs = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_ASSISTANT)
@@ -33,7 +33,8 @@ class Speaker(ctx: Context, private val onSpeaking: (Boolean) -> Unit = {}, priv
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
     }.getOrNull().also { created = it }
-    private val queue = LinkedBlockingQueue<ByteArray>()
+    private val queue = LinkedBlockingQueue<Pair<ByteArray, Int>>() // pcm, the sentence (clip) it belongs to
+    private var currentClip = -1
     @Volatile private var stopping = false
     @Volatile private var alive = true
     @Volatile var speaking = false
@@ -43,12 +44,14 @@ class Speaker(ctx: Context, private val onSpeaking: (Boolean) -> Unit = {}, priv
     init {
         thread(name = "ares-voice", isDaemon = true) {
             while (alive) {
-                val chunk = queue.poll(80, TimeUnit.MILLISECONDS)
+                val item = queue.poll(80, TimeUnit.MILLISECONDS)
+                val chunk = item?.first
                 if (stopping) { reset(); continue }
                 val track = if (chunk != null) track() else created
                 if (chunk != null) {
                     if (track == null) continue // no audio output right now: skip this bit of her voice
                     if (!speaking) setSpeaking(true)
+                    if (item.second != currentClip) { currentClip = item.second; onClip(currentClip) } // this sentence starts playing now
                     if (runCatching { track.play(); track.write(chunk, 0, chunk.size) }.isFailure) { created = null; runCatching { track.release() }; continue }
                     written += chunk.size / 2
                     onLevel(level(chunk))
@@ -61,7 +64,7 @@ class Speaker(ctx: Context, private val onSpeaking: (Boolean) -> Unit = {}, priv
         }
     }
 
-    fun play(pcm: ByteArray) { if (pcm.size >= 2) queue.offer(pcm) }
+    fun play(pcm: ByteArray, clip: Int = -1) { if (pcm.size >= 2) queue.offer(pcm to clip) }
 
     /** Stop talking now (the user interrupted, or the screen closed). */
     fun stop() {
@@ -76,6 +79,7 @@ class Speaker(ctx: Context, private val onSpeaking: (Boolean) -> Unit = {}, priv
         queue.clear()
         runCatching { created?.pause(); created?.flush() }
         written = 0
+        currentClip = -1
         stopping = false
         if (speaking) setSpeaking(false)
         onLevel(0f)

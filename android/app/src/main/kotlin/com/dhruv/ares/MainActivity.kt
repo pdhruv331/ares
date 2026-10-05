@@ -45,7 +45,7 @@ class MainActivity : Activity(), Session.Ui {
     private lateinit var inputRow: View
     private var statusPoll: Thread? = null
     private var lastState = State.IDLE
-    private val fadeCaption = Runnable { caption.animate().alpha(0f).setDuration(600).start() }
+    private val fadeCaption = Runnable { caption.animate().alpha(0f).setDuration(600).start(); schematic.dimBottom = false }
     private val jobsChanged = { showJobs() }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -221,10 +221,8 @@ class MainActivity : Activity(), Session.Ui {
     private fun showCaption(text: String, fadeAfterMs: Long? = null) {
         caption.removeCallbacks(fadeCaption)
         caption.animate().cancel()
-        // One line only: the sentence being said now (the whole thing is in COMMS)
-        val flat = text.replace(Regex("\\s+"), " ").trim()
-        val parts = flat.split(Regex("(?<=[.!?…])\\s+")).filter { it.isNotBlank() }
-        caption.text = parts.lastOrNull() ?: flat
+        caption.text = text.replace(Regex("\\s+"), " ").trim()
+        schematic.dimBottom = true
         caption.alpha = 1f
         if (fadeAfterMs != null) caption.postDelayed(fadeCaption, fadeAfterMs)
     }
@@ -232,14 +230,17 @@ class MainActivity : Activity(), Session.Ui {
     override fun heard(text: String, final: Boolean) {
         val v = heardView ?: add("YOU", text, user = true).also { heardView = it }
         v.text = text
-        showCaption(text)
+        // Your words as you say them: when they outgrow two lines, the start goes (at a word boundary), the newest stay
+        val flat = text.replace(Regex("\\s+"), " ").trim()
+        showCaption(if (flat.length <= 100) flat else "…" + flat.takeLast(100).substringAfter(' '))
         if (final) heardView = null
     }
+
+    override fun caption(text: String) { showCaption(text, if (session.state == State.SPEAKING) null else 6000) }
 
     override fun reply(text: String, final: Boolean) {
         val v = replyView ?: add("ARES", "", user = false).also { replyView = it }
         v.text = text
-        showCaption(text, if (final && session.state != State.SPEAKING) 7000 else null) // typed (no voice): read it, then it goes
         if (final) replyView = null
         scrollDown()
         setStatus("online")

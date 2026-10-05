@@ -51,9 +51,9 @@
                 <com.dhruv.ares.BrainView android:id="@+id/reactor" android:layout_width="match_parent" android:layout_height="match_parent"
                     android:contentDescription="ARES. Tap to stop her talking; tap a job's orb to open it."/>
                 <TextView android:id="@+id/caption" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_gravity="bottom|center_horizontal"
-                    android:layout_marginStart="10dp" android:layout_marginEnd="10dp" android:gravity="center" android:alpha="0"
-                    android:textColor="@color/text" android:textSize="12sp" android:singleLine="true" android:ellipsize="start"
-                    android:shadowColor="#E602060A" android:shadowRadius="10" android:shadowDx="0" android:shadowDy="0"/>
+                    android:layout_marginStart="12dp" android:layout_marginEnd="12dp" android:layout_marginBottom="14dp" android:gravity="center" android:alpha="0"
+                    android:textColor="@color/cyan" android:textSize="10.5sp" android:letterSpacing="0.06" android:lineSpacingMultiplier="1.35" android:maxLines="2" android:fontFamily="monospace"
+                    android:shadowColor="#663EE6FF" android:shadowRadius="10" android:shadowDx="0" android:shadowDy="0"/>
             </FrameLayout>
 
             <TextView android:id="@+id/stateText" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:layout_marginBottom="8dp"

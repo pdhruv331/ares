@@ -30,6 +30,7 @@ class Session(private val ctx: Context, private val ui: Ui) {
         fun offline(message: String)
         fun attached() {} // the pending attachment went with the question
         fun handsFree(on: Boolean, why: String) {} // hands-free conversation switched on or off
+        fun caption(text: String) {} // what to show over the reactor right now (her sentence as she says it, your words as you say them)
     }
 
     /** Extra context for the next question: something shared from another app, or your screen. */
@@ -53,7 +54,71 @@ class Session(private val ctx: Context, private val ui: Ui) {
         private set
     private val speaker = Speaker(ctx,
         onSpeaking = { on -> main.post { if (on) set(State.SPEAKING) else if (!busy && state == State.SPEAKING) { set(State.IDLE); relisten() } } },
-        onLevel = { level = it })
+        onLevel = { level = it },
+        onClip = { n -> main.post { captionClip(n) } })
+
+    // ---- Captions ---------------------------------------------------------------------------------------------------
+    // The Mac speaks her reply one sentence per audio clip, split exactly like `segments` below. When clip n starts
+    // playing, sentence n goes on screen; a sentence too long for two lines is shown clause by clause, paced by its
+    // words. Typed replies (no voice) are paged the same way. Nothing is ever cut short.
+    private var replyText = ""
+    private var voiceTurn = false
+    private val captionQueue = ArrayList<Runnable>()
+    private val MAX_CAPTION = 96 // about two lines at the caption's size
+
+    /** The Mac's sentence split (phoneAsk in main.js): the same boundaries, so clip n is sentence n. */
+    private fun segments(text: String, final: Boolean): List<String> {
+        val out = ArrayList<String>()
+        var consumed = 0
+        for (m in Regex("[.!?…]+[\"')\\]]*\\s+").findAll(text)) {
+            val end = m.range.last + 1
+            if (text.substring(consumed, end).trim().length < 6) continue
+            out += text.substring(consumed, end).trim()
+            consumed = end
+        }
+        if (final && text.length > consumed && text.substring(consumed).isNotBlank()) out += text.substring(consumed).trim()
+        else if (!final && text.length > consumed) out += text.substring(consumed).trim() // the sentence still arriving
+        return out.filter { it.isNotBlank() }
+    }
+
+    /** Break a long sentence at clauses (commas, colons, dashes), then at words, into pieces that fit two lines. */
+    private fun clauses(s: String): List<String> {
+        if (s.length <= MAX_CAPTION) return listOf(s)
+        val out = ArrayList<String>()
+        var cur = StringBuilder()
+        for (piece in s.split(Regex("(?<=[,;:—–])\\s+"))) {
+            if (cur.isNotEmpty() && cur.length + 1 + piece.length > MAX_CAPTION) { out += cur.toString(); cur = StringBuilder() }
+            if (piece.length > MAX_CAPTION) { // one clause still too long: by words
+                for (w in piece.split(' ')) {
+                    if (cur.isNotEmpty() && cur.length + 1 + w.length > MAX_CAPTION) { out += cur.toString(); cur = StringBuilder() }
+                    if (cur.isNotEmpty()) cur.append(' ')
+                    cur.append(w)
+                }
+            } else { if (cur.isNotEmpty()) cur.append(' '); cur.append(piece) }
+        }
+        if (cur.isNotEmpty()) out += cur.toString()
+        return out
+    }
+
+    private fun clearCaptions() { for (r in captionQueue) main.removeCallbacks(r); captionQueue.clear() }
+
+    /** Show a sentence: its clauses one after another, each for as long as its words take to say. */
+    private fun showSentence(s: String, secondsPerWord: Double = 0.36) {
+        clearCaptions()
+        var at = 0L
+        for (c in clauses(s)) {
+            val r = Runnable { ui.caption(c) }
+            captionQueue += r
+            main.postDelayed(r, at)
+            at += (c.split(' ').size * secondsPerWord * 1000).toLong().coerceAtLeast(900)
+        }
+    }
+
+    private fun captionClip(n: Int) {
+        if (n < 0) return
+        val segs = segments(replyText, final = !busy)
+        segs.getOrNull(n)?.let { showSentence(it) }
+    }
 
     // ---- Hands-free conversation: she listens again by herself after each answer ----------------------------------
     // On until you say "that's all" (or similar), switch it off, leave the screen, or say nothing for a few minutes.
@@ -100,16 +165,30 @@ class Session(private val ctx: Context, private val ui: Ui) {
         val text = if (extra != null) "$said\n\n${extra.note}" else said
         val images = extra?.images.orEmpty()
         speaker.stop()
+        clearCaptions()
+        replyText = ""
+        voiceTurn = voice
         set(State.THINKING)
         val mine = AtomicBoolean().also { cancel = it }
         Ares.saveLast(ctx, said, null)
         thread(name = "ares-ask") {
             try {
                 client.ask(text, voice, images, mine, AresClient.Listener(
-                    text = { t -> main.post { if (!mine.get()) ui.reply(t, false) } },
-                    audio = { pcm -> if (!mine.get()) speaker.play(pcm) },
+                    text = { t -> main.post { if (!mine.get()) { replyText = t; ui.reply(t, false) } } },
+                    audio = { pcm, clip -> if (!mine.get()) speaker.play(pcm, clip) },
                     action = { url, label -> main.post { if (!mine.get()) ui.action(url, label) } },
-                    done = { t -> Ares.saveLast(ctx, null, t); main.post { if (!mine.get()) ui.reply(t, true) } },
+                    done = { t -> Ares.saveLast(ctx, null, t); main.post { if (!mine.get()) {
+                        replyText = t
+                        ui.reply(t, true)
+                        if (!voiceTurn || !speaker.speaking) { // nothing being said aloud: page the whole reply at reading pace
+                            clearCaptions()
+                            var at = 0L
+                            for (s in segments(t, true)) for (c in clauses(s)) {
+                                val r = Runnable { ui.caption(c) }; captionQueue += r; main.postDelayed(r, at)
+                                at += (c.split(' ').size * 0.42 * 1000).toLong().coerceAtLeast(1500)
+                            }
+                        }
+                    } } },
                 ))
                 Ares.setStatus(ctx, "online")
             } catch (e: NotPairedException) {

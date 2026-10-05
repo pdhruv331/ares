@@ -35,6 +35,9 @@ class SchematicView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet?
     private val dashes = listOf(DashPathEffect(floatArrayOf(4f, 12f), 0f), DashPathEffect(floatArrayOf(2f, 10f), 0f), null, DashPathEffect(floatArrayOf(12f, 20f), 0f), null, DashPathEffect(floatArrayOf(8f, 8f), 0f))
     private val ringR = floatArrayOf(1.14f, 1.3f, 1.62f, 1.95f, 2.4f, 0.5f)
     private val ringA = intArrayOf(70, 50, 36, 26, 18, 50)
+    /** While a caption shows, the bottom callouts step back so the words have the floor. */
+    var dimBottom = false
+    private var bottomAlpha = 1f
     private var sweep = 0f
     private var last = 0L
     private var glow: RadialGradient? = null
@@ -46,6 +49,7 @@ class SchematicView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet?
         val dt = if (last == 0L) 0f else ((now - last) / 1e9f).coerceAtMost(0.05f)
         last = now
         sweep += dt * 28f
+        bottomAlpha += ((if (dimBottom) 0.15f else 1f) - bottomAlpha) * (dt * 6f).coerceAtMost(1f)
         val (cx, cy, r) = center.let { Triple(it[0], it[1], it[2]) }
         if (r <= 0f) return
 
@@ -98,13 +102,14 @@ class SchematicView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet?
             val (label, value) = readouts.getOrNull(i) ?: continue
             val bx = box[0]; val by = box[1].coerceIn(60f * dp, h - 20f * dp)
             val dir = if (align == Paint.Align.LEFT) 1f else -1f
-            line.alpha = 90; line.strokeWidth = 1f
+            val k = if (i >= 2) bottomAlpha else 1f
+            line.alpha = (90 * k).toInt(); line.strokeWidth = 1f
             canvas.drawLine(anchor[0], anchor[1], bx + dir * 6f * dp, by, line)
             canvas.drawLine(bx + dir * 6f * dp, by, bx + dir * 70f * dp, by, line)
-            fill.alpha = 230; canvas.drawCircle(anchor[0], anchor[1], 2.5f * dp, fill)
+            fill.alpha = (230 * k).toInt(); canvas.drawCircle(anchor[0], anchor[1], 2.5f * dp, fill)
             text.textAlign = align
-            text.textSize = 8f * dp; text.alpha = 220; canvas.drawText(label, bx, by - 5f * dp, text)
-            text.textSize = 8f * dp; text.alpha = 130; canvas.drawText(value, bx, by + 10f * dp, text)
+            text.textSize = 8f * dp; text.alpha = (220 * k).toInt(); canvas.drawText(label, bx, by - 5f * dp, text)
+            text.textSize = 8f * dp; text.alpha = (130 * k).toInt(); canvas.drawText(value, bx, by + 10f * dp, text)
         }
         fill.alpha = 255
         if (isShown) postInvalidateOnAnimation()

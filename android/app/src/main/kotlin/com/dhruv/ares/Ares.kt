@@ -118,7 +118,7 @@ class AresClient(private val ctx: Context) {
 
     class Listener(
         val text: (String) -> Unit = {},
-        val audio: (ByteArray) -> Unit = {},
+        val audio: (pcm: ByteArray, clip: Int) -> Unit = { _, _ -> },
         val action: (url: String, label: String) -> Unit = { _, _ -> },
         val done: (String) -> Unit = {},
     )
@@ -139,7 +139,7 @@ class AresClient(private val ctx: Context) {
                     val m = JSONObject(line)
                     when (m.optString("type")) {
                         "text" -> { reply += m.optString("delta"); on.text(reply) }
-                        "audio" -> on.audio(android.util.Base64.decode(m.optString("pcm"), android.util.Base64.DEFAULT))
+                        "audio" -> on.audio(android.util.Base64.decode(m.optString("pcm"), android.util.Base64.DEFAULT), m.optInt("clip", -1))
                         "action" -> on.action(m.optString("url"), m.optString("label"))
                         "done" -> { reply = m.optString("text", reply); on.done(reply) }
                     }
