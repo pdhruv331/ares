@@ -255,7 +255,7 @@ class Theme {
     const items = await run(this.bar.sketchybar || '/usr/bin/false', ['--query', 'default_menu_items']).then(parse(null), () => null);
     this.mirrorAllowed = Array.isArray(items);
     this.aliasNames = (items || []).filter((n) => this.opts.mirror.some((owner) => n.startsWith(`${owner},`)))
-      .filter((n) => !n.startsWith('Control Center,') || /BentoBox/.test(n));
+      .filter((n) => !n.startsWith('Control Center,') || /BentoBox|Bluetooth/.test(n)); // Control Center itself and Bluetooth
   }
 
   // ---- Menus in the bar ----------------------------------------------------------------------------------------

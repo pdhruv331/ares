@@ -132,8 +132,8 @@ exec ${q(this.offlineFile)}
   click_script="${click(`menu?i=${i}`)}" script=${P('menu.sh')} ${popupStyle} --subscribe menu.${i} mouse.entered mouse.exited mouse.exited.global`).join('\n');
     // Control Center and Tailscale: the real items are still there, under the bar. The bar shows a small label of its own
     // (no screen capture, so no "capturing your screen" indicator); a click has ARES press the real one through Accessibility
-    const short = (name) => ({ 'Control Center': 'CC', Tailscale: 'TS' })[name] || name.replace(/[^A-Z0-9]/gi, '').slice(0, 3).toUpperCase();
-    const aliases = (this.aliases() || []).map((a, k) => `sketchybar --add item extra.${k} right --set extra.${k} icon.drawing=off label=${q(short(a.split(',').slice(1).join(',')))} \\
+    const short = (full) => { const [owner, item = ''] = full.split(','); return /bluetooth/i.test(item) ? 'BT' : owner === 'Control Center' ? 'CC' : owner === 'Tailscale' ? 'TS' : owner.replace(/[^A-Z0-9]/gi, '').slice(0, 3).toUpperCase(); };
+    const aliases = (this.aliases() || []).map((a, k) => `sketchybar --add item extra.${k} right --set extra.${k} icon.drawing=off label=${q(short(a))} \\
   label.font='${font('Semibold', 9.5)}' label.color=${C.cyan} padding_left=4 padding_right=4 click_script="${click(`extra?k=${k}`)}"`).join('\n');
     const pool = OWNERS.map((o) => {
       const rows = Array.from({ length: ROWS }, (_, k) => `${o}.p.${k}`);
