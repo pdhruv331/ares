@@ -172,10 +172,10 @@ class FakeJobs extends EventEmitter {
   // ---- Optional: one real, tiny project with Claude Code (haiku) --------------------------------------------------------------
   if (process.argv.includes('--real')) {
     console.log('  -- real project run (haiku), this uses a little Claude usage…');
+    process.env.ARES_CODE_MODEL = process.env.ARES_CODE_MODEL || 'haiku'; // before jobs.js reads it
     const { Jobs } = require(path.join(root, 'jobs.js'));
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ares-auto-work-'));
-    process.env.ARES_CODE_MODEL = 'haiku';
-    const { workerTools } = require(path.join(root, 'worker-tools.js'));
+    const { registry: workerTools } = require(path.join(root, 'worker-tools.js'));
     const cli = [path.join(os.homedir(), '.local/bin/claude'), '/opt/homebrew/bin/claude', '/usr/local/bin/claude'].find((p) => fs.existsSync(p)) || 'claude';
     // A real bridge, so the session's edits and commands go through the real gate (tier 1 runs, tier 3 would wait)
     const { startBridge } = require(path.join(root, 'bridge.js'));
