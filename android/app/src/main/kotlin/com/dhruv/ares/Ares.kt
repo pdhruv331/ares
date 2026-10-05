@@ -105,6 +105,8 @@ class AresClient(private val ctx: Context) {
 
     /** Throws NotPairedException if the Mac no longer knows this phone. */
     fun me(): JSONObject = open("/api/me").check().json()
+    /** Host, battery and Claude usage, for the schematic's corner readouts. */
+    fun status(): JSONObject = open("/api/status").check().json()
 
     data class Line(val who: String, val text: String, val source: String?)
 

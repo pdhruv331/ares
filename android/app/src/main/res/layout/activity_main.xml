@@ -21,74 +21,80 @@
             android:textColor="@color/amber" android:textSize="13sp"/>
     </LinearLayout>
 
-    <!-- The app: space behind, the reactor centred in the free space, captions only while she speaks -->
+    <!-- The app: the schematic sheet behind, the reactor centred in the stage, one-line captions, COMMS as a drawer -->
     <FrameLayout android:id="@+id/app" android:layout_width="match_parent" android:layout_height="match_parent">
-        <com.dhruv.ares.SpaceView android:layout_width="match_parent" android:layout_height="match_parent"/>
+        <com.dhruv.ares.SchematicView android:id="@+id/schematic" android:layout_width="match_parent" android:layout_height="match_parent"/>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
-            android:orientation="vertical" android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingBottom="12dp">
+            android:orientation="vertical" android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingBottom="6dp">
 
-            <LinearLayout android:layout_width="match_parent" android:layout_height="52dp" android:gravity="center_vertical" android:orientation="horizontal">
-                <FrameLayout android:layout_width="9dp" android:layout_height="9dp" android:background="@drawable/dot" android:layout_marginEnd="10dp"/>
-                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                    android:text="A.R.E.S" android:textColor="@color/cyan" android:textStyle="bold" android:textSize="14sp" android:letterSpacing="0.3"/>
-                <TextView android:id="@+id/commsBtn" android:layout_width="wrap_content" android:layout_height="34dp" android:layout_marginEnd="8dp"
-                    android:background="@drawable/bg_chip" android:gravity="center" android:paddingStart="10dp" android:paddingEnd="10dp"
-                    android:text="COMMS" android:textColor="@color/cyan" android:textSize="10sp" android:letterSpacing="0.15" android:contentDescription="Comms: the conversation"/>
-                <TextView android:id="@+id/callsBtn" android:layout_width="wrap_content" android:layout_height="34dp" android:layout_marginEnd="8dp"
-                    android:background="@drawable/bg_chip" android:gravity="center" android:paddingStart="10dp" android:paddingEnd="10dp"
-                    android:text="CALLS" android:textColor="@color/cyan" android:textSize="10sp" android:letterSpacing="0.15" android:contentDescription="Calls on your ARES line"/>
-                <TextView android:id="@+id/workBtn" android:layout_width="wrap_content" android:layout_height="34dp" android:layout_marginEnd="10dp"
-                    android:background="@drawable/bg_chip" android:gravity="center" android:paddingStart="10dp" android:paddingEnd="10dp"
-                    android:text="WORK" android:textColor="@color/cyan" android:textSize="10sp" android:letterSpacing="0.15" android:contentDescription="Work: your background jobs"/>
-                <TextView android:id="@+id/status" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:textColor="@color/status" android:textSize="10sp" android:letterSpacing="0.15"/>
-                <ImageView android:id="@+id/menu" android:layout_width="40dp" android:layout_height="40dp" android:padding="8dp" android:layout_marginStart="4dp"
+            <LinearLayout android:layout_width="match_parent" android:layout_height="44dp" android:gravity="center_vertical" android:orientation="horizontal">
+                <FrameLayout android:layout_width="8dp" android:layout_height="8dp" android:background="@drawable/dot" android:layout_marginEnd="10dp"/>
+                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:singleLine="true"
+                    android:text="A.R.E.S" android:textColor="@color/cyan" android:textStyle="bold" android:textSize="13sp" android:letterSpacing="0.3"/>
+                <TextView android:id="@+id/workBtn" android:layout_width="wrap_content" android:layout_height="28dp" android:layout_marginEnd="10dp"
+                    android:background="@drawable/bg_chip" android:gravity="center" android:paddingStart="9dp" android:paddingEnd="9dp"
+                    android:text="WORK" android:textColor="@color/cyan" android:textSize="9sp" android:letterSpacing="0.15" android:contentDescription="Work: your background jobs"/>
+                <TextView android:id="@+id/status" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginEnd="6dp"
+                    android:textColor="@color/status" android:textSize="9sp" android:letterSpacing="0.15"/>
+                <ImageView android:id="@+id/menu" android:layout_width="36dp" android:layout_height="36dp" android:padding="8dp"
                     android:src="@drawable/ic_menu" android:contentDescription="Menu" android:background="?android:attr/selectableItemBackgroundBorderless"/>
             </LinearLayout>
 
             <TextView android:id="@+id/setup" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone"
-                android:background="@drawable/bg_setup" android:padding="12dp" android:textColor="@color/purple" android:textSize="13sp"/>
+                android:background="@drawable/bg_setup" android:padding="10dp" android:textColor="@color/purple" android:textSize="12sp"/>
 
-            <!-- The stage: the reactor (or the 3D brain), captions over it, and COMMS when opened -->
-            <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+            <!-- The stage: the reactor (or the 3D brain), one line of caption at its foot -->
+            <FrameLayout android:id="@+id/stage" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
                 <com.dhruv.ares.ReactorView android:id="@+id/reactorFallback" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone"
-                    android:contentDescription="ARES. Tap to stop her talking."/>
+                    android:layout_marginTop="36dp" android:layout_marginBottom="36dp" android:contentDescription="ARES. Tap to stop her talking."/>
                 <com.dhruv.ares.BrainView android:id="@+id/reactor" android:layout_width="match_parent" android:layout_height="match_parent"
                     android:contentDescription="ARES. Tap to stop her talking; tap a job's orb to open it."/>
                 <TextView android:id="@+id/caption" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_gravity="bottom|center_horizontal"
-                    android:layout_marginStart="8dp" android:layout_marginEnd="8dp" android:layout_marginBottom="8dp" android:gravity="center" android:alpha="0"
-                    android:textColor="@color/text" android:textSize="16sp" android:lineSpacingMultiplier="1.25" android:maxLines="5" android:ellipsize="end"
-                    android:shadowColor="#CC02060A" android:shadowRadius="12" android:shadowDx="0" android:shadowDy="0"
-                    android:background="@drawable/bg_caption" android:paddingStart="14dp" android:paddingEnd="14dp" android:paddingTop="8dp" android:paddingBottom="8dp"/>
-                <FrameLayout android:id="@+id/history" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone"
-                    android:background="@drawable/bg_glass" android:padding="12dp">
-                    <ScrollView android:id="@+id/scroll" android:layout_width="match_parent" android:layout_height="match_parent" android:fadingEdgeLength="24dp" android:requiresFadingEdge="vertical">
-                        <LinearLayout android:id="@+id/log" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingTop="6dp" android:paddingBottom="36dp"/>
-                    </ScrollView>
-                    <TextView android:id="@+id/historyClose" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="bottom|end"
-                        android:background="@drawable/bg_chip" android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingTop="6dp" android:paddingBottom="6dp"
-                        android:text="‹ CLOSE" android:textColor="@color/cyan" android:textSize="10sp" android:letterSpacing="0.2"/>
-                </FrameLayout>
+                    android:layout_marginStart="10dp" android:layout_marginEnd="10dp" android:gravity="center" android:alpha="0"
+                    android:textColor="@color/text" android:textSize="12sp" android:singleLine="true" android:ellipsize="start"
+                    android:shadowColor="#E602060A" android:shadowRadius="10" android:shadowDx="0" android:shadowDy="0"/>
             </FrameLayout>
 
-            <TextView android:id="@+id/stateText" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:layout_marginBottom="6dp"
-                android:gravity="center" android:textColor="@color/cyan" android:textSize="10sp" android:letterSpacing="0.45"/>
+            <TextView android:id="@+id/stateText" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:layout_marginBottom="8dp"
+                android:gravity="center" android:textColor="@color/cyan" android:textSize="9sp" android:letterSpacing="0.5" android:alpha="0.85"/>
 
             <!-- Typing, behind the keyboard button -->
-            <LinearLayout android:id="@+id/inputRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="4dp" android:visibility="gone">
-                <EditText android:id="@+id/input" style="@style/AresInput" android:layout_width="0dp" android:layout_height="48dp" android:layout_weight="1"
+            <LinearLayout android:id="@+id/inputRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="8dp" android:visibility="gone">
+                <EditText android:id="@+id/input" style="@style/AresInput" android:layout_width="0dp" android:layout_height="44dp" android:layout_weight="1" android:textSize="14sp"
                     android:hint="@string/type_hint" android:imeOptions="actionSend" android:inputType="textCapSentences|textAutoCorrect" android:singleLine="true"/>
-                <ImageView android:id="@+id/send" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginStart="8dp" android:padding="12dp"
+                <ImageView android:id="@+id/send" android:layout_width="44dp" android:layout_height="44dp" android:layout_marginStart="8dp" android:padding="11dp"
                     android:background="@drawable/bg_round" android:src="@drawable/ic_send" android:contentDescription="Send"/>
             </LinearLayout>
 
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="10dp" android:gravity="center_vertical">
-                <ImageView android:id="@+id/kbBtn" android:layout_width="56dp" android:layout_height="56dp" android:layout_marginEnd="10dp" android:padding="16dp"
+            <!-- Controls: a small keyboard ring and a short talk pill -->
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center">
+                <ImageView android:id="@+id/kbBtn" android:layout_width="40dp" android:layout_height="40dp" android:layout_marginEnd="12dp" android:padding="11dp" android:alpha="0.8"
                     android:background="@drawable/bg_round" android:src="@drawable/ic_keyboard" android:contentDescription="Type instead"/>
-                <TextView android:id="@+id/talk" style="@style/AresButton" android:layout_width="0dp" android:layout_weight="1" android:layout_height="64dp"
-                    android:text="TAP TO TALK" android:drawableStart="@drawable/ic_mic" android:paddingStart="24dp" android:paddingEnd="48dp"/>
+                <TextView android:id="@+id/talk" android:layout_width="190dp" android:layout_height="40dp" android:background="@drawable/bg_pill"
+                    android:gravity="center" android:text="◉   TAP TO TALK" android:textColor="@color/cyan" android:textSize="10sp" android:letterSpacing="0.2" android:fontFamily="monospace"/>
             </LinearLayout>
+
+            <!-- The COMMS handle -->
+            <TextView android:id="@+id/commsHandle" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:padding="4dp"
+                android:gravity="center" android:text="︿\nCOMMS" android:textColor="@color/cyan" android:textSize="9sp" android:letterSpacing="0.35" android:alpha="0.6" android:lineSpacingMultiplier="0.9"/>
         </LinearLayout>
+
+        <!-- COMMS: the conversation, slid up from the bottom like the Mac's drawer -->
+        <FrameLayout android:id="@+id/drawer" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="invisible">
+            <View android:id="@+id/drawerScrim" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#6602060A"/>
+            <LinearLayout android:id="@+id/drawerPanel" android:layout_width="match_parent" android:layout_height="0dp" android:layout_gravity="bottom" android:orientation="vertical"
+                android:background="@drawable/bg_drawer" android:paddingStart="18dp" android:paddingEnd="18dp" android:paddingTop="10dp" android:paddingBottom="10dp">
+                <TextView android:id="@+id/drawerClose" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:padding="2dp"
+                    android:text="﹀" android:textColor="@color/cyan" android:textSize="13sp" android:alpha="0.7"/>
+                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="8dp">
+                    <TextView android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="⟨ COMMS ⟩" android:textColor="@color/cyan" android:textSize="10sp" android:letterSpacing="0.3"/>
+                    <TextView android:id="@+id/drawerClear" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="CLEAR" android:textColor="@color/muted" android:textSize="9sp" android:letterSpacing="0.2" android:padding="2dp"/>
+                </LinearLayout>
+                <ScrollView android:id="@+id/scroll" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fadingEdgeLength="24dp" android:requiresFadingEdge="vertical">
+                    <LinearLayout android:id="@+id/log" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingTop="4dp" android:paddingBottom="12dp"/>
+                </ScrollView>
+            </LinearLayout>
+        </FrameLayout>
     </FrameLayout>
 </FrameLayout>

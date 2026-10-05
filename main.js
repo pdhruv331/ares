@@ -965,6 +965,19 @@ function findPhoneUrl() {
   });
 }
 
+/** What the phone's schematic shows in its corners: the host, its battery, Claude's windows (jobs come from the live line). */
+async function phoneStatus() {
+  const batt = await new Promise((r) => require('child_process').execFile('/usr/bin/pmset', ['-g', 'batt'], { timeout: 5000 }, (e, out) => r(e ? '' : String(out))));
+  const pct = Number(batt.match(/(\d+)%/)?.[1]);
+  const usage = claudeUsage?.snapshot?.() || { windows: {} };
+  return {
+    host: os.hostname().replace(/\.local$/, ''),
+    battery: Number.isFinite(pct) ? { pct, charging: /charging|charged|AC Power/i.test(batt) && !/discharging/i.test(batt) } : null,
+    claude: { fiveHour: usage.windows.five_hour?.pct ?? null, week: usage.windows.seven_day?.pct ?? null },
+    reachable: readSettings().stayReachable !== false,
+  };
+}
+
 function startPhone() {
   phone = new PhoneServer({
     port: PHONE_PORT,
@@ -981,6 +994,7 @@ function startPhone() {
     calls,
     firebase: () => relay.firebase(),
     fileFor: (id) => control?.fileFor(id),
+    status: phoneStatus,
     log,
   });
   phone.on('fcm', (d) => {

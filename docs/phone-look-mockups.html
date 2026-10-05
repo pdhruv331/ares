@@ -1,0 +1,164 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>ARES phone looks</title>
+<style>
+  body { margin: 0; background: #0b0f14; color: #cfefff; font-family: ui-monospace, Menlo, monospace; padding: 24px; }
+  h1 { font-size: 14px; letter-spacing: .3em; color: #3ee6ff; font-weight: 600; margin: 0 0 18px; }
+  .row { display: flex; gap: 28px; flex-wrap: wrap; }
+  .phone { width: 375px; height: 812px; border-radius: 38px; border: 2px solid #22303a; position: relative; overflow: hidden; background: #040a10; box-shadow: 0 30px 80px #000; }
+  .phone canvas { position: absolute; inset: 0; }
+  .ui { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 48px 16px 16px; box-sizing: border-box; }
+  .head { display: flex; align-items: center; gap: 10px; height: 44px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #3ee6ff; box-shadow: 0 0 10px #3ee6ff; }
+  .name { flex: 1; color: #3ee6ff; font-weight: 700; letter-spacing: .3em; font-size: 14px; }
+  .chip { border: 1px solid #3ee6ff59; background: #3ee6ff14; border-radius: 18px; padding: 8px 10px; font-size: 10px; letter-spacing: .15em; color: #3ee6ff; }
+  .menu { width: 18px; height: 12px; border-top: 2px solid #3ee6ff; border-bottom: 2px solid #3ee6ff; position: relative; }
+  .menu:after { content: ""; position: absolute; left: 0; right: 0; top: 5px; border-top: 2px solid #3ee6ff; }
+  .stage { flex: 1; position: relative; }
+  .caption { position: absolute; left: 8px; right: 8px; bottom: 6px; text-align: center; font-size: 15px; color: #cfefff; text-shadow: 0 0 12px #02060a; background: #04090f8c; border-radius: 14px; padding: 8px 14px; }
+  .state { text-align: center; font-size: 10px; letter-spacing: .45em; color: #3ee6ff; margin: 6px 0; }
+  .controls { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+  .kb { width: 56px; height: 56px; border-radius: 50%; border: 1px solid #3ee6ff59; background: #3ee6ff14; display: grid; place-items: center; color: #3ee6ff; font-size: 18px; }
+  .talk { flex: 1; height: 64px; border-radius: 12px; border: 1px solid #3ee6ff59; background: #3ee6ff14; display: grid; place-items: center; color: #3ee6ff; letter-spacing: .15em; font-size: 14px; }
+  .handle { text-align: center; color: #3ee6ff; font-size: 11px; letter-spacing: .3em; margin-top: 10px; opacity: .8; }
+  .handle b { display: block; font-size: 14px; }
+  .label { margin-top: 10px; font-size: 12px; color: #8fb3c1; width: 375px; line-height: 1.5; }
+  .label b { color: #3ee6ff; }
+  .drawer { position: absolute; left: 0; right: 0; bottom: 0; height: 62%; background: #060e16e6; border-top: 1px solid #3ee6ff59; border-radius: 24px 24px 0 0; padding: 14px 18px; box-sizing: border-box; font-size: 12px; line-height: 1.5; }
+  .drawer .t { color: #3ee6ff; letter-spacing: .3em; font-size: 10px; display: flex; justify-content: space-between; margin-bottom: 10px; }
+  .drawer .who { color: #5d8797; font-size: 9px; letter-spacing: .2em; margin-top: 8px; }
+  .drawer .ares { color: #cfefff; }
+  .drawer .you { color: #8fb3c1; }
+</style></head>
+<body>
+<h1>ARES · PHONE LOOKS</h1>
+<div class="row">
+  <div>
+    <div class="phone" id="p1"><canvas width="375" height="812"></canvas>
+      <div class="ui">
+        <div class="head"><div class="dot"></div><div class="name">A.R.E.S</div><div class="chip">WORK · 2</div><div class="chip" style="border:none;background:none;color:#3ee6ff99">ONLINE</div><div class="menu"></div></div>
+        <div class="stage"><div class="caption">The report's on your phone, sir. Anything else?</div></div>
+        <div class="state">SPEAKING</div>
+        <div class="controls"><div class="kb">⌨</div><div class="talk">◉  TAP TO TALK</div></div>
+        <div class="handle"><b>︿</b>COMMS</div>
+      </div>
+    </div>
+    <div class="label"><b>1 · BLUEPRINT GRID</b><br>Navy drafting sheet, fine grid with heavy fifths, edge coordinates, dimension ticks and labels on the reactor, a slow plotter sweep.</div>
+  </div>
+  <div>
+    <div class="phone" id="p2"><canvas width="375" height="812"></canvas>
+      <div class="ui">
+        <div class="head"><div class="dot"></div><div class="name">A.R.E.S</div><div class="chip">WORK · 2</div><div class="chip" style="border:none;background:none;color:#3ee6ff99">ONLINE</div><div class="menu"></div></div>
+        <div class="stage"></div>
+        <div class="state">LISTENING</div>
+        <div class="controls"><div class="kb">⌨</div><div class="talk">◉  LISTENING… TAP TO SEND</div></div>
+        <div class="handle"><b>︿</b>COMMS</div>
+      </div>
+    </div>
+    <div class="label"><b>2 · HOLOGRAPHIC SCHEMATIC</b><br>Construction circles and crosshairs behind the reactor, angle marks, callout lines to small readouts in the corners.</div>
+  </div>
+  <div>
+    <div class="phone" id="p3"><canvas width="375" height="812"></canvas>
+      <div class="ui">
+        <div class="head"><div class="dot"></div><div class="name">A.R.E.S</div><div class="chip">WORK · 2</div><div class="chip" style="border:none;background:none;color:#3ee6ff99">ONLINE</div><div class="menu"></div></div>
+        <div class="stage"></div>
+        <div class="state"></div>
+        <div class="controls"><div class="kb">⌨</div><div class="talk">◉  TAP TO TALK</div></div>
+        <div class="handle"><b>﹀</b>COMMS</div>
+        <div class="drawer">
+          <div class="t"><span>⟨ COMMS ⟩</span><span>TODAY</span></div>
+          <div class="who">YOU</div><div class="you">what did I download yesterday?</div>
+          <div class="who">ARES</div><div class="ares">Three things: the ARES architecture PDF, a bank statement and a screenshot. Want any of them on your phone?</div>
+          <div class="who">YOU</div><div class="you">send the pdf</div>
+          <div class="who">ARES</div><div class="ares">Done, sir. It's in your notifications.</div>
+        </div>
+      </div>
+    </div>
+    <div class="label"><b>3 · HUD FRAME + the COMMS drawer open</b><br>Corner brackets, scanlines, a readout strip, near-black so the reactor glows. Drawer slides up from the bottom like the Mac's.</div>
+  </div>
+</div>
+<script>
+const CY = '#3ee6ff';
+function reactor(ctx, cx, cy, r, t) {
+  ctx.save();
+  // ticks
+  for (let i = 0; i < 90; i++) { const a = i * 4 * Math.PI / 180; const lit = Math.max(0, 1 - (((t * 80 - i * 4) % 360 + 360) % 360) / 70);
+    ctx.strokeStyle = CY; ctx.globalAlpha = 0.18 + lit * 0.7; ctx.lineWidth = 1.2; const inner = i % 9 === 0 ? r * 0.9 : r * 0.945;
+    ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner); ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); ctx.stroke(); }
+  const rings = [[0.86, 28, 14, 9, 3.5], [0.78, 7, 7, -16, 1.5], [0.66, 52, 30, 24, 4.2], [0.56, 12, 24, -38, 2]];
+  for (const [rad, on, off, sp, w] of rings) { const rr = r * rad; const circ = 2 * Math.PI * rr;
+    ctx.setLineDash([circ * on / 360, circ * off / 360]); ctx.lineWidth = w; ctx.globalAlpha = 0.75; ctx.strokeStyle = CY;
+    ctx.beginPath(); ctx.arc(cx, cy, rr, t * sp / 10, t * sp / 10 + Math.PI * 2); ctx.stroke(); }
+  ctx.setLineDash([]);
+  for (let i = 0; i < 10; i++) { const a = i * 36 * Math.PI / 180; const d = ((t * 200 - i * 36) % 360 + 360) % 360; const lit = Math.max(0, 1 - d / 110);
+    ctx.globalAlpha = 0.25 + lit * 0.7; ctx.lineWidth = r * 0.045; ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r * 0.365, cy + Math.sin(a) * r * 0.365); ctx.lineTo(cx + Math.cos(a) * r * 0.435, cy + Math.sin(a) * r * 0.435); ctx.stroke(); }
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 0.34); g.addColorStop(0, '#fff'); g.addColorStop(0.42, CY); g.addColorStop(1, 'rgba(62,230,255,0)');
+  ctx.globalAlpha = 1; ctx.shadowColor = CY; ctx.shadowBlur = 40; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r * 0.3, 0, 7); ctx.fill();
+  ctx.restore();
+}
+function text(ctx, s, x, y, size = 8, alpha = 0.5, align = 'left') { ctx.save(); ctx.globalAlpha = alpha; ctx.fillStyle = CY; ctx.font = `${size}px ui-monospace, Menlo, monospace`; ctx.textAlign = align; ctx.fillText(s, x, y); ctx.restore(); }
+const W = 375, H = 812, CX = 187.5, CYc = 400, R = 150;
+
+// 1 · Blueprint grid
+(() => { const c = document.querySelector('#p1 canvas').getContext('2d');
+  c.fillStyle = '#071526'; c.fillRect(0, 0, W, H);
+  for (let x = 0; x <= W; x += 15) { c.strokeStyle = CY; c.globalAlpha = (x / 15) % 5 === 0 ? 0.16 : 0.07; c.lineWidth = (x / 15) % 5 === 0 ? 1 : 0.5; c.beginPath(); c.moveTo(x + 0.5, 0); c.lineTo(x + 0.5, H); c.stroke(); }
+  for (let y = 0; y <= H; y += 15) { c.strokeStyle = CY; c.globalAlpha = (y / 15) % 5 === 0 ? 0.16 : 0.07; c.lineWidth = (y / 15) % 5 === 0 ? 1 : 0.5; c.beginPath(); c.moveTo(0, y + 0.5); c.lineTo(W, y + 0.5); c.stroke(); }
+  c.globalAlpha = 1;
+  for (let y = 75; y < H; y += 75) text(c, String(y).padStart(3, '0'), 4, y - 3, 7, 0.35);
+  for (let x = 75; x < W; x += 75) text(c, String(x).padStart(3, '0'), x + 2, H - 4, 7, 0.35);
+  // plotter sweep
+  const sg = c.createLinearGradient(0, 0, W, H); sg.addColorStop(0.35, 'rgba(62,230,255,0)'); sg.addColorStop(0.45, 'rgba(62,230,255,0.08)'); sg.addColorStop(0.5, 'rgba(62,230,255,0)');
+  c.fillStyle = sg; c.fillRect(0, 0, W, H);
+  // construction + dimensions
+  c.save(); c.setLineDash([3, 4]); c.strokeStyle = CY; c.globalAlpha = 0.35; c.lineWidth = 1;
+  c.beginPath(); c.moveTo(CX, CYc - R - 40); c.lineTo(CX, CYc + R + 40); c.moveTo(CX - R - 40, CYc); c.lineTo(CX + R + 40, CYc); c.stroke();
+  c.beginPath(); c.arc(CX, CYc, R * 1.08, 0, 7); c.stroke();
+  c.setLineDash([]); c.beginPath(); c.moveTo(CX - R, CYc + R + 22); c.lineTo(CX + R, CYc + R + 22); c.stroke();
+  for (const x of [CX - R, CX + R]) { c.beginPath(); c.moveTo(x, CYc + R + 16); c.lineTo(x, CYc + R + 28); c.stroke(); }
+  c.restore();
+  text(c, 'Ø 300 · REACTOR MK.IV', CX, CYc + R + 40, 8, 0.6, 'center');
+  text(c, 'RING 01 · 0.86R', CX + R * 0.62, CYc - R * 0.62, 7, 0.55);
+  text(c, 'CORE', CX + 16, CYc - 4, 7, 0.6);
+  text(c, 'SHEET 01 · A.R.E.S · REV 2026.10', 16, 118, 7, 0.5);
+  text(c, 'SCALE 1:1', W - 16, 118, 7, 0.5, 'right');
+  reactor(c, CX, CYc, R, 1.3);
+})();
+
+// 2 · Holographic schematic
+(() => { const c = document.querySelector('#p2 canvas').getContext('2d');
+  c.fillStyle = '#03080e'; c.fillRect(0, 0, W, H);
+  const v = c.createRadialGradient(CX, CYc, 0, CX, CYc, 420); v.addColorStop(0, 'rgba(62,230,255,0.10)'); v.addColorStop(1, 'rgba(62,230,255,0)'); c.fillStyle = v; c.fillRect(0, 0, W, H);
+  c.save(); c.strokeStyle = CY; c.lineWidth = 1;
+  for (const [rr, a, dash] of [[1.18, 0.25, [2, 6]], [1.32, 0.18, [1, 5]], [1.5, 0.12, []], [0.5, 0.2, [4, 4]]]) { c.globalAlpha = a; c.setLineDash(dash); c.beginPath(); c.arc(CX, CYc, R * rr, 0, 7); c.stroke(); }
+  c.setLineDash([]); c.globalAlpha = 0.3;
+  c.beginPath(); c.moveTo(CX, CYc - R * 1.5); c.lineTo(CX, CYc + R * 1.5); c.moveTo(CX - R * 1.5, CYc); c.lineTo(CX + R * 1.5, CYc); c.stroke();
+  for (let i = 0; i < 36; i++) { const a = i * 10 * Math.PI / 180; const l = i % 9 === 0 ? 14 : i % 3 === 0 ? 8 : 4; c.globalAlpha = i % 9 === 0 ? 0.6 : 0.3;
+    c.beginPath(); c.moveTo(CX + Math.cos(a) * R * 1.32, CYc + Math.sin(a) * R * 1.32); c.lineTo(CX + Math.cos(a) * (R * 1.32 + l), CYc + Math.sin(a) * (R * 1.32 + l)); c.stroke();
+    if (i % 9 === 0) text(c, `${i * 10}°`, CX + Math.cos(a) * (R * 1.32 + 24), CYc + Math.sin(a) * (R * 1.32 + 24) + 3, 7, 0.6, 'center'); }
+  // callouts
+  const callout = (ax, ay, bx, by, lines, align) => { c.globalAlpha = 0.45; c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.lineTo(bx + (align === 'right' ? -60 : 60), by); c.stroke();
+    c.globalAlpha = 0.9; c.beginPath(); c.arc(ax, ay, 2.5, 0, 7); c.fillStyle = CY; c.fill(); lines.forEach((s, i) => text(c, s, bx + (align === 'right' ? -2 : 2), by - 6 + i * 11, 8, i ? 0.5 : 0.85, align)); };
+  callout(CX - R * 0.62, CYc - R * 0.62, 30, 180, ['HOST', 'MACBOOK PRO · ONLINE'], 'left');
+  callout(CX + R * 0.6, CYc - R * 0.72, W - 30, 168, ['JOBS', '2 WORKING · 1 NEEDS OK'], 'right');
+  callout(CX - R * 0.3, CYc + R * 0.9, 30, 620, ['CLAUDE', '5H 38% · WEEK 12%'], 'left');
+  callout(CX + R * 0.55, CYc + R * 0.75, W - 30, 632, ['BATTERY', '82% · ON POWER'], 'right');
+  c.restore();
+  reactor(c, CX, CYc, R, 0.4);
+})();
+
+// 3 · HUD frame
+(() => { const c = document.querySelector('#p3 canvas').getContext('2d');
+  c.fillStyle = '#02060a'; c.fillRect(0, 0, W, H);
+  for (let y = 0; y < H; y += 3) { c.fillStyle = 'rgba(62,230,255,0.035)'; c.fillRect(0, y, W, 1); }
+  c.save(); c.strokeStyle = CY; c.lineWidth = 2; c.globalAlpha = 0.8;
+  const br = (x, y, sx, sy) => { c.beginPath(); c.moveTo(x, y + 26 * sy); c.lineTo(x, y); c.lineTo(x + 26 * sx, y); c.stroke(); };
+  br(14, 100, 1, 1); br(W - 14, 100, -1, 1); br(14, H - 120, 1, -1); br(W - 14, H - 120, -1, -1);
+  c.lineWidth = 1; c.globalAlpha = 0.35; c.beginPath(); c.moveTo(14, 140); c.lineTo(W - 14, 140); c.stroke();
+  c.restore();
+  ['HOST ONLINE', 'JOBS 2', 'OK 1', '5H 38%'].forEach((s, i) => text(c, s, 20 + i * 88, 132, 8, 0.7));
+  const v = c.createRadialGradient(CX, 370, 0, CX, 370, 260); v.addColorStop(0, 'rgba(62,230,255,0.12)'); v.addColorStop(1, 'rgba(62,230,255,0)'); c.fillStyle = v; c.fillRect(0, 0, W, H);
+  reactor(c, CX, 370, 140, 2.1);
+})();
+</script>
+</body></html>

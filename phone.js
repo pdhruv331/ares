@@ -176,6 +176,8 @@ class PhoneServer extends EventEmitter {
     if (!url.pathname.startsWith('/api/')) return res.writeHead(404).end();
     if (!this.authed(req)) return json(401, { ok: false, error: 'not paired' });
 
+    // The phone's corner readouts: host, battery, Claude windows (control.js has the fuller system_info tool)
+    if (req.method === 'GET' && url.pathname === '/api/status') return json(200, { ok: true, ...(await (this.status?.() ?? {})) });
     if (req.method === 'GET' && url.pathname === '/api/me') {
       return json(200, { ok: true, push: Boolean(this.device(req).subscription), reduceMotion: Boolean(this.readSettings().reduceMotion),
         firebase: this.firebase?.() || null, calls: Boolean(this.calls?.ready) });
