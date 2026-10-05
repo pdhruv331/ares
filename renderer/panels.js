@@ -23,7 +23,7 @@ const PanelViews = (() => {
 
   // ---- CALENDAR ----------------------------------------------------------------------------------------------------------
   // One panel, three views switched by text tabs in the header. It collapses back to DAY after a while without a touch.
-  const Cal = { view: 'day', sel: null, weekOff: 0, timer: null, snapTimer: null, release: null };
+  const Cal = { view: 'day', sel: null, month: null, weekOff: 0, timer: null, snapTimer: null, release: null }; // sel: a clicked day; month: the month being browsed
   const calEl = (p) => p.parts.view;
 
   function calHeader(view, titleText) {
@@ -38,6 +38,14 @@ const PanelViews = (() => {
       ${ev.location && !/https?:/.test(ev.location) ? `<span class="cal-where">${esc(ev.location.split(',')[0])}</span>` : ''}</div>`;
   }
   const nowLine = () => '<div class="cal-now"><i></i></div>';
+  /** The picked day's events under a WEEK or MONTH grid (only once a day has been clicked). */
+  function agenda(events, sel, now) {
+    if (sel == null) return '';
+    const list = onDay(events, sel).sort((a, b) => (a.allDay ? -1 : b.allDay ? 1 : a.start - b.start));
+    const sd = new Date(sel);
+    return `<div class="cal-agenda"><span class="cal-sub">${sel === startOfDay(now) ? 'TODAY' : `${WD[(sd.getDay() + 6) % 7]} ${sd.getDate()} ${MONTHS[sd.getMonth()]}`}</span>`
+      + (list.length ? list.map((e) => eventRow(e, now, events.indexOf(e))).join('') : '<div class="cal-empty">nothing that day</div>') + '</div>';
+  }
 
   function renderDay(events, now) {
     const today = startOfDay(now);
@@ -81,7 +89,7 @@ const PanelViews = (() => {
       const isToday = t === startOfDay(now);
       const evs = onDay(events, t);
       const allDay = evs.filter((e) => e.allDay);
-      html += `<div class="cal-col${isToday ? ' today' : ''}" data-act="day:${t}"><div class="cal-colhead"><b>${WD[(d.getDay() + 6) % 7].slice(0, 2)}</b><em>${d.getDate()}</em>${allDay.length ? `<i class="cal-alld k-${kindOf(allDay[0])}" title="${esc(allDay.map((e) => e.title).join(', '))}"></i>` : ''}</div><div class="cal-grid">`;
+      html += `<div class="cal-col${isToday ? ' today' : ''}${t === Cal.sel ? ' sel' : ''}"><div class="cal-colhead" data-act="pick:${t}"><b>${WD[(d.getDay() + 6) % 7].slice(0, 2)}</b><em>${d.getDate()}</em>${allDay.length ? `<i class="cal-alld k-${kindOf(allDay[0])}" title="${esc(allDay.map((e) => e.title).join(', '))}"></i>` : ''}</div><div class="cal-grid">`;
       for (let i = 0; i < hours; i++) html += `<i class="cal-line" style="top:${i * PX}px"></i>`;
       for (const e of evs.filter((x) => !x.allDay)) {
         const top = Math.max(0, ((Math.max(e.start, t) - t) / 3_600_000 - h0) * PX), bottom = Math.min(hours * PX, ((Math.min(e.end, t + DAY) - t) / 3_600_000 - h0) * PX);
@@ -91,13 +99,14 @@ const PanelViews = (() => {
       html += '</div></div>';
     }
     html += '</div></div>';
+    html += agenda(events, Cal.sel, now);
     html += `<div class="cal-foot"><span data-act="week:-1">‹ PREV</span><span data-act="week:0" class="${Cal.weekOff ? '' : 'dim'}">TODAY</span><span data-act="week:1">NEXT ›</span></div>`;
     return html;
   }
 
   function renderMonth(events, now) {
-    const sel = Cal.sel ?? startOfDay(now);
-    const base = new Date(sel); base.setDate(1);
+    const sel = Cal.sel;
+    const base = new Date(Cal.month ?? sel ?? startOfDay(now)); base.setDate(1);
     const month0 = base.getTime();
     const first = startOfWeek(month0);
     let html = calHeader('month', `${MONTHS[base.getMonth()]} ${base.getFullYear()}`);
@@ -111,18 +120,15 @@ const PanelViews = (() => {
       html += `<span class="cal-day${d.getMonth() !== base.getMonth() ? ' other' : ''}${t === startOfDay(now) ? ' today' : ''}${t === sel ? ' sel' : ''}" data-act="pick:${t}"><em>${d.getDate()}</em><b>${dots}</b></span>`;
     }
     html += '</div></div>';
-    const list = onDay(events, sel).sort((a, b) => (a.allDay ? -1 : b.allDay ? 1 : a.start - b.start));
-    const sd = new Date(sel);
-    html += `<div class="cal-agenda"><span class="cal-sub">${sel === startOfDay(now) ? 'TODAY' : `${WD[(sd.getDay() + 6) % 7]} ${sd.getDate()} ${MONTHS[sd.getMonth()]}`}</span>`;
-    html += list.length ? list.map((e) => eventRow(e, now, events.indexOf(e))).join('') : '<div class="cal-empty">nothing that day</div>';
-    html += `</div><div class="cal-foot"><span data-act="month:-1">‹</span><span data-act="month:0" class="${sel === startOfDay(now) ? 'dim' : ''}">TODAY</span><span data-act="month:1">›</span></div>`;
+    html += agenda(events, sel, now);
+    html += `<div class="cal-foot"><span data-act="month:-1">‹</span><span data-act="month:0" class="${!Cal.month && sel == null ? 'dim' : ''}">TODAY</span><span data-act="month:1">›</span></div>`;
     return html;
   }
 
   function armCollapse(ctx) {
     clearTimeout(Cal.timer);
     const secs = Number(settings.collapseSec) || 60;
-    Cal.timer = setTimeout(() => { Cal.view = 'day'; Cal.weekOff = 0; Cal.sel = null; ctx.refresh(); Cal.release?.(); }, secs * 1000);
+    Cal.timer = setTimeout(() => { Cal.view = 'day'; Cal.weekOff = 0; Cal.sel = null; Cal.month = null; ctx.refresh(); Cal.release?.(); }, secs * 1000);
   }
   function switchView(p, ctx, next, patch = {}) {
     const host = calEl(p);
@@ -138,7 +144,7 @@ const PanelViews = (() => {
 
   const calendar = {
     size: { w: 250, h: 150 },
-    sig: (p, ctx) => `${Cal.view}|${Cal.sel}|${Cal.weekOff}|${Math.floor(ctx.now / 60_000)}|${(ctx.model.events || []).map((e) => `${e.start}${e.end}${e.title}`).join()}`,
+    sig: (p, ctx) => `${Cal.view}|${Cal.sel}|${Cal.month}|${Cal.weekOff}|${Math.floor(ctx.now / 60_000)}|${(ctx.model.events || []).map((e) => `${e.start}${e.end}${e.title}`).join()}`,
     render(p, host, ctx) {
       const events = (ctx.model.events || []).slice().sort((a, b) => a.start - b.start);
       host.className = `dp-view cal cal-v-${Cal.view}`;
@@ -161,13 +167,14 @@ const PanelViews = (() => {
     act(p, action, el, ctx) {
       const [what, arg] = action.split(':');
       const events = ctx.model.events || [];
-      if (what === 'view') switchView(p, ctx, arg);
-      else if (what === 'day') switchView(p, ctx, 'month', { sel: Number(arg) });
-      else if (what === 'pick') switchView(p, ctx, 'month', { sel: Number(arg), animate: false });
-      else if (what === 'week') { Cal.weekOff = arg === '0' ? 0 : Cal.weekOff + Number(arg); switchView(p, ctx, 'week', { animate: true }); }
+      // Tabs just expand (no list until a day is clicked); a clicked day lists its events under the grid, the view stays
+      if (what === 'view') switchView(p, ctx, arg, { sel: null });
+      else if (what === 'day') switchView(p, ctx, 'week', { sel: Number(arg), weekOff: 0 }); // the DAY strip: that day in this week
+      else if (what === 'pick') switchView(p, ctx, Cal.view === 'week' ? 'week' : 'month', { sel: Cal.sel === Number(arg) ? null : Number(arg), animate: false });
+      else if (what === 'week') { Cal.weekOff = arg === '0' ? 0 : Cal.weekOff + Number(arg); switchView(p, ctx, 'week', { sel: null, animate: true }); }
       else if (what === 'month') {
-        if (arg === '0') Cal.sel = null;
-        else { const d = new Date(Cal.sel ?? startOfDay(ctx.now)); d.setDate(1); d.setMonth(d.getMonth() + Number(arg)); Cal.sel = d.getTime(); }
+        if (arg === '0') { Cal.month = null; Cal.sel = null; }
+        else { const d = new Date(Cal.month ?? Cal.sel ?? startOfDay(ctx.now)); d.setDate(1); d.setMonth(d.getMonth() + Number(arg)); Cal.month = d.getTime(); Cal.sel = null; }
         switchView(p, ctx, 'month', { animate: true });
       } else if (what === 'event') {
         const ev = events.slice().sort((a, b) => a.start - b.start)[Number(arg)];
@@ -178,11 +185,11 @@ const PanelViews = (() => {
     /** "Show me my week", "what's on the 20th?": from voice or the brain. opts: { view, date (ms), weekOffset } */
     open(p, opts, ctx) {
       const patch = {};
-      if (opts.date) patch.sel = startOfDay(opts.date);
+      if (opts.date) { patch.sel = startOfDay(opts.date); patch.month = null; }
       if (Number.isFinite(opts.weekOffset)) patch.weekOff = opts.weekOffset;
       switchView(p, ctx, opts.view || (opts.date ? 'month' : opts.weekOffset ? 'week' : 'day'), { ...patch, animate: true });
     },
-    collapse(p, ctx) { switchView(p, ctx, 'day', { weekOff: 0, sel: null }); },
+    collapse(p, ctx) { switchView(p, ctx, 'day', { weekOff: 0, sel: null, month: null }); },
     state: () => ({ view: Cal.view, sel: Cal.sel, weekOff: Cal.weekOff }),
     setRelease(fn) { Cal.release = fn; },
     settings,

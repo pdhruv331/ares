@@ -705,6 +705,9 @@ html[data-hands="engaged"] .ear::after { content: " · HANDS"; color: var(--cyan
 .cal-cols { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
 .cal-col { position: relative; border-radius: 2px; }
 .cal-col.today { background: rgba(var(--c), 0.06); box-shadow: inset 0 0 0 1px rgba(var(--c), 0.18); }
+.cal-col.sel { background: rgba(var(--c), 0.14); }
+.cal-colhead:hover { background: rgba(var(--c), 0.1); border-radius: 2px; }
+.cal-week + .cal-agenda { margin-top: 6px; border-top: 1px solid rgba(var(--c), 0.14); }
 .cal-colhead { height: 22px; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; position: relative; }
 .cal-colhead b { font-weight: 500; font-size: 7px; letter-spacing: 0.18em; color: rgba(207, 239, 255, 0.5); }
 .cal-colhead em { font-style: normal; font-size: 10px; color: #effcff; margin-top: 2px; }
