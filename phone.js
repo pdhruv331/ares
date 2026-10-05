@@ -39,6 +39,7 @@ class PhoneServer extends EventEmitter {
    * @param {object} o.work            the Mac's jobs, for the phone's Work view (main.js phoneWork)
    * @param {object} o.calls           the phone line, for the app's Calls screen (main.js phoneCalls)
    * @param {() => object|null} o.firebase  Firebase options for the Android app's push (relay.js)
+   * @param {(id: string) => object|null} [o.fileFor]  a file sent to the phone (control.js): { path, name, mime, size }
    * @param {Function} o.log
    */
   constructor(o) {
@@ -226,6 +227,19 @@ class PhoneServer extends EventEmitter {
     if (req.method === 'GET' && url.pathname === '/api/history') return json(200, { ok: true, history: this.history() });
 
     if (url.pathname === '/api/jobs' || url.pathname.startsWith('/api/jobs/')) return this.jobRoute(req, res, url, json);
+    // "Send this to my phone": a file the Mac registered for this one send (control.js sendbox), never a public link
+    if (req.method === 'GET' && url.pathname.startsWith('/api/files/')) {
+      const f = this.fileFor?.(url.pathname.slice('/api/files/'.length));
+      if (!f) return json(404, { ok: false, error: 'That file is no longer available from the Mac.' });
+      const inline = !url.searchParams.has('download') && /^(image\/|application\/pdf|text\/plain)/.test(f.mime);
+      res.writeHead(200, {
+        'Content-Type': f.mime, 'Content-Length': f.size, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-cache', 'Referrer-Policy': 'no-referrer',
+        'Content-Security-Policy': "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox",
+        'Content-Disposition': `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(f.name)}`,
+      });
+      this.log('phone file download', { name: f.name, device: this.device(req).name });
+      return fs.createReadStream(f.path).pipe(res);
+    }
     if (url.pathname.startsWith('/api/claude/')) return this.claudeRoute(req, res, url, json);
 
     if (req.method === 'POST' && url.pathname === '/api/stt') {

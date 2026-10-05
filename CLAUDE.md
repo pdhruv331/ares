@@ -121,3 +121,20 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   In a harness, `Hands.test(clip)` in the window replays a clip through the live engine (`vision.replay`; the camera rules hold
   off for 30 s after). The main process doesn't hot-reload hands.js: restart the harness after engine changes.
 - The helper is a real .app bundle ("ARES Vision.app", in Resources): a bare binary is refused the camera without a prompt. The prompt names ARES Vision.
+
+## Full Mac control and remote-first (docs/autonomy-prompt.md, sections R and 0)
+
+- `control.js` (main) does everything: folder scope (Desktop, Documents, Downloads, iCloud Drive + `control.folders` in settings;
+  blocklist: ~/Library, dot-folders, keys, .env, password stores, ARES's code and support folder), the tiers (1 acts, 2 needs the
+  owner and is logged, 3 needs the user's own "yes" through the bridge's `confirm`), the audit log (`audit.js` →
+  `<support>/audit.jsonl`), and the sendbox (`/api/files/<id>` on the phone server, paired phones only, 24 h). The brain's tools
+  are `tools/control-tools.js` (registered by `tools/mac.js`) → bridge `/control/<route>` → `control.handle`.
+- `native/AresControl.swift` (`ares-control`): lock/sleep state, windows, window moves, the Accessibility element tree and actions,
+  CGEvent clicks/typing/keys, PDF text (OCR for scans), OCR, the on-screen highlight. Screenshots are `screencapture -l <wid>`.
+- UI automation: `ui_elements` then one `ui_act` per step, highlighted; RISKY titles / `irreversible: true` are tier 3. "Stop" (voice,
+  `stopSpeaking`) and Esc (armed only while she drives) call `control.abort()`, which holds `ui_act` for that bridge turn.
+- Screen-needing tools say plainly when the screen is locked/asleep (`screenNeeded`); everything else is designed to work locked.
+- "Stay Reachable From My Phone" (settings `stayReachable`, default on) = `applyReachable()`: no idle sleep on power only.
+- Testing: `npx electron scripts/test-control.js` (reads only, scratch folder in ~/Downloads, fake push, no Claude call; `--live` adds
+  the highlight). Never run `--live` or UI automation tests while someone is using the Mac. Android: Files.kt (file buttons download
+  through the paired connection and open), Outbox (asks queued while the Mac is offline, sent on `hello`, answered as notifications).

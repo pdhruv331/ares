@@ -93,7 +93,11 @@ object Notes {
             val openJob = btn.optString("job")
             val api = btn.optString("api")
             val reply = btn.optString("reply")
+            // A file from the Mac: { api, name, mime, size } (arrives as an object live, as a JSON string over Firebase)
+            val file = btn.optJSONObject("file") ?: btn.optString("file").takeIf { it.startsWith("{") }?.let { runCatching { JSONObject(it) }.getOrNull() }
             when {
+                file != null && file.optString("api").startsWith("/api/files/") -> b.addAction(Notification.Action.Builder(null, title,
+                    AresService.fileIntent(c, file.optString("api"), file.optString("name", "file"), file.optString("mime"), id)).build())
                 // Open: the job in the app. Yes / No, Send to Mac: straight to the Mac's job API, no brain turn;
                 // tapping it is the answer (the Mac only accepts it for the exact request that's waiting)
                 openJob.isNotBlank() -> b.addAction(Notification.Action.Builder(null, title, activity(c, WorkActivity.intent(c, openJob))).build())

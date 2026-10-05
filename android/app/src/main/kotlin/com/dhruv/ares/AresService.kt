@@ -38,6 +38,7 @@ class AresService : Service() {
         private const val ACTION_BUBBLE = "com.dhruv.ares.BUBBLE"
         private const val ACTION_RECONNECT = "com.dhruv.ares.RECONNECT"
         private const val ACTION_API = "com.dhruv.ares.API"
+        private const val ACTION_FILE = "com.dhruv.ares.FILE"
         private const val KEY_TEXT = "text"
 
         // Android can refuse to start it from the background; it's started again when you next open ARES
@@ -56,6 +57,10 @@ class AresService : Service() {
             c, Notes.nextId(), Intent(c, AresService::class.java).setAction(ACTION_REPLY).putExtra("prefix", prefix).putExtra("id", id),
             PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         fun replyInput(label: String = "Reply…"): RemoteInput = RemoteInput.Builder(KEY_TEXT).setLabel(label).build()
+        /** A notification button that downloads a file the Mac sent (through the paired connection) and opens it. */
+        fun fileIntent(c: Context, api: String, name: String, mime: String, id: Int): PendingIntent = PendingIntent.getService(
+            c, Notes.nextId(), Intent(c, AresService::class.java).setAction(ACTION_FILE).putExtra("api", api).putExtra("name", name).putExtra("mime", mime).putExtra("id", id),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         fun restart(c: Context) { if (Ares.paired(c)) runCatching { c.startForegroundService(Intent(c, AresService::class.java).setAction(ACTION_RECONNECT)) } }
     }
 
@@ -107,6 +112,10 @@ class AresService : Service() {
                 nm.cancel(intent.getIntExtra("id", 0))
                 callApi(intent.getStringExtra("api") ?: "", intent.getStringExtra("body") ?: "{}")
             }
+            ACTION_FILE -> {
+                nm.cancel(intent.getIntExtra("id", 0))
+                Files.fetch(this, intent.getStringExtra("api") ?: "", intent.getStringExtra("name") ?: "file", intent.getStringExtra("mime") ?: "")
+            }
             ACTION_BUBBLE -> Ares.prefs(this).edit().putBoolean("bubble", bubble == null).apply()
             ACTION_RECONNECT -> { line?.set(true); wake() }
         }
@@ -140,6 +149,8 @@ class AresService : Service() {
                             // Firebase (for pushes with the Mac off): the Mac hands over the app config; the token goes back
                             Push.configure(this, m.optJSONObject("firebase"), resend = !m.optBoolean("fcm"))
                             thread { runCatching { JobStore.replaceAll(this, client.jobs()) } }
+                            // Requests queued while the Mac was away: send them now, answers come as notifications
+                            for (text in Outbox.drain(this)) askInBackground(text, queued = true)
                         }
                         "update" -> Updater.offer(this, m.optJSONObject("app"))
                         "notify" -> main.post { show(m) }
@@ -256,8 +267,11 @@ class AresService : Service() {
 
     private fun safe(url: String) = Uri.parse(url).scheme in setOf("https", "http", "tel", "sms", "smsto", "mailto")
 
-    /** Asked from the notification: ARES answers as a notification, no screen needed. */
-    private fun askInBackground(text: String) {
+    /**
+     * Asked from the notification: ARES answers as a notification, no screen needed. If the Mac can't be reached the
+     * request is queued (Outbox) and goes when the live line is back; `queued` marks such a replay.
+     */
+    private fun askInBackground(text: String, queued: Boolean = false) {
         if (text.isBlank()) return
         asking = text
         refresh()
@@ -272,8 +286,13 @@ class AresService : Service() {
                     done = { reply = it },
                 ))
                 Ares.setStatus(this, "online")
+            } catch (e: NotPairedException) {
+                reply = "This phone isn't paired with the Mac any more."
             } catch (e: Exception) {
-                reply = "I can't reach the Mac right now, sir. Is it awake, and is Tailscale on?"
+                Ares.setStatus(this, "offline")
+                if (!queued) Outbox.add(this, text)
+                reply = if (queued) "Your Mac went away again before I could answer; I'll try once more when it's back."
+                else "Your Mac is offline right now, sir. I've kept this and will send it the moment it's back${Outbox.count(this).let { if (it > 1) " ($it waiting)" else "" }}."
             }
             Ares.saveLast(this, null, reply)
             main.post {
@@ -282,7 +301,7 @@ class AresService : Service() {
                 val b = Notification.Builder(this, CH_REPLIES)
                     .setSmallIcon(R.drawable.ic_ares)
                     .setColor(Color.parseColor("#3EE6FF"))
-                    .setContentTitle(text.take(80))
+                    .setContentTitle((if (queued) "While your Mac was away: " else "") + text.take(80))
                     .setContentText(reply)
                     .setStyle(Notification.BigTextStyle().bigText(reply))
                     .setAutoCancel(true)

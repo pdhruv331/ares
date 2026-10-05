@@ -24,8 +24,13 @@ async function bridge(path, body) {
 
 const ok = (text) => ({ content: [{ type: 'text', text }] });
 const fail = (err) => ({ content: [{ type: 'text', text: `Failed: ${err.message}` }], isError: true });
+// A tool returns a string, or { message, image: { data (base64), mimeType } } when there's a picture for the brain to look at
 const tool = (name, description, inputSchema, fn) => server.registerTool(name, { description, inputSchema }, async (args) => {
-  try { return ok(await fn(args)); } catch (err) { return fail(err); }
+  try {
+    const r = await fn(args);
+    if (r && typeof r === 'object') return { content: [{ type: 'text', text: r.message || '' }, ...(r.image ? [{ type: 'image', data: r.image.data, mimeType: r.image.mimeType }] : [])] };
+    return ok(r);
+  } catch (err) { return fail(err); }
 });
 
 const server = new McpServer({ name: 'ares', version: '1.0.0' });
@@ -307,6 +312,9 @@ tool('answer_job_approval',
   'Only approve when their own latest words are a clear yes.',
   { job: z.string().optional().describe('The job\'s id or a word from its title (default: the one waiting)'), approve: z.boolean() },
   async (args) => (await bridge('/work/answer', args)).message);
+
+// ---- Full Mac control: files, windows, browser, screen, UI automation, system, clipboard, Shortcuts, send to phone ----
+require('./control-tools').register({ tool, bridge });
 
 // ---- Permission gate -------------------------------------------------------------------------
 // Claude Code asks this tool before running anything not pre-approved (calendar changes, email

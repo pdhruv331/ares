@@ -90,7 +90,10 @@ class Session(private val ctx: Context, private val ui: Ui) {
                 main.post { ui.notPaired() }
             } catch (e: Exception) {
                 Ares.setStatus(ctx, "offline")
-                main.post { ui.offline("I can't reach the Mac right now, sir. Is it awake, and is Tailscale on?") }
+                // Keep it: the service sends it when the Mac is back, and the answer arrives as a notification
+                Outbox.add(ctx, text)
+                val n = Outbox.count(ctx)
+                main.post { ui.offline("I can't reach the Mac right now, sir. I've kept that and will send it the moment it's back${if (n > 1) " ($n waiting)" else ""}; the answer will come as a notification.") }
             } finally {
                 main.post {
                     busy = false

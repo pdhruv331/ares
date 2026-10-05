@@ -107,6 +107,10 @@
         <activity android:name=".UpdateActivity" android:exported="false" android:theme="@style/Theme.Ares.Floating"
             android:taskAffinity="com.dhruv.ares.update" android:excludeFromRecents="true" android:launchMode="singleTask"/>
         <receiver android:name=".UpdateReceiver" android:exported="false"/>
+        <!-- Files the Mac sent ("send this to my phone"): opened when their download finishes -->
+        <receiver android:name=".DownloadReceiver" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.DOWNLOAD_COMPLETE"/></intent-filter>
+        </receiver>
 
         <service android:name=".AresTile" android:exported="true" android:label="@string/tile_label" android:icon="@drawable/ic_ares"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">

@@ -11,7 +11,7 @@ const SAFE_WRITES = /^(create_draft|draft_)/i;
 // What counts as the user saying "yes" (must be how their latest message starts).
 const AFFIRMATIVE = /^\s*(yes|yeah|yep|yup|sure|go ahead|do it|send it|book it|delete it|move it|confirm(ed)?|please do|ok(ay)?|absolutely|correct|that'?s right|affirmative|go for it)\b/i;
 
-function startBridge({ onTimerDone, onTimers = () => {}, onPhoneAction, onNotify, findContact, memory, teachPhrase, work, calls, claudeUsage, claude = () => null, log }) {
+function startBridge({ onTimerDone, onTimers = () => {}, onPhoneAction, onNotify, findContact, memory, teachPhrase, work, calls, claudeUsage, claude = () => null, control = null, log }) {
   const token = crypto.randomBytes(24).toString('hex');
   const timers = new Map(); // label -> { handle, endsAt }
   let lastUserText = '';
@@ -132,30 +132,39 @@ function startBridge({ onTimerDone, onTimers = () => {}, onPhoneAction, onNotify
     '/approve': ({ tool }) => {
       const action = String(tool).split('__').pop();
       if (READ_VERBS.test(action) || SAFE_WRITES.test(action)) return { allow: true };
-      if (approvedTurn === turn || AFFIRMATIVE.test(lastUserText)) {
-        approvedTurn = turn; // one "yes" covers the actions in that turn
-        log('gate allow', { tool, said: lastUserText.slice(0, 40) });
-        return { allow: true };
-      }
-      log('gate hold', { tool });
-      return {
-        allow: false,
-        message: "Not confirmed yet. Tell the user in one short sentence exactly what you're about to do " +
-          '(who, what, when) and ask them to confirm. Only do it after they say yes.',
-      };
+      return confirm(tool);
     },
   };
 
+  /** Tier 3: the user's latest words have to be a clear yes (one yes covers the actions in that turn). */
+  function confirm(what) {
+    if (approvedTurn === turn || AFFIRMATIVE.test(lastUserText)) {
+      approvedTurn = turn;
+      log('gate allow', { what: String(what).slice(0, 60), said: lastUserText.slice(0, 40) });
+      return { allow: true, said: lastUserText.slice(0, 80) };
+    }
+    log('gate hold', { what: String(what).slice(0, 60) });
+    return {
+      allow: false,
+      message: "Not confirmed yet. Tell the user in one short sentence exactly what you're about to do " +
+        '(who, what, when) and ask them to confirm. Only do it after they say yes.',
+    };
+  }
+  // Full Mac control (control.js): /control/<route>, with who's asking and the yes-gate
+  const controlRoute = (name) => (args) => control.handle(name, args, { source, verified, turn, confirm: (what) => confirm(what) });
+
   const server = http.createServer((req, res) => {
-    if (req.headers.authorization !== `Bearer ${token}` || req.method !== 'POST' || !routes[req.url]) {
+    const isControl = control && req.url.startsWith('/control/');
+    if (req.headers.authorization !== `Bearer ${token}` || req.method !== 'POST' || (!routes[req.url] && !isControl)) {
       res.writeHead(404).end();
       return;
     }
+    const handler = isControl ? controlRoute(req.url.slice('/control/'.length)) : routes[req.url];
     let body = '';
     req.on('data', (c) => { body += c; if (body.length > 1e6) req.destroy(); });
     req.on('end', () => {
       Promise.resolve()
-        .then(() => routes[req.url](JSON.parse(body || '{}')))
+        .then(() => handler(JSON.parse(body || '{}')))
         .then((out) => res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(out)))
         .catch((err) => res.writeHead(400).end(JSON.stringify({ error: err.message })));
     });
@@ -167,6 +176,8 @@ function startBridge({ onTimerDone, onTimers = () => {}, onPhoneAction, onNotify
       token,
       /** Record what the user just said, so a following "yes" can approve an action. */
       userSaid(text, from = 'mac', isOwner = false) { lastUserText = text; source = from; verified = isOwner; turn++; },
+      /** The conversation turn now (control.js holds UI automation for the turn a "stop" landed in). */
+      turn: () => turn,
       timers: timerList,
       timerAction,
       /** A reminder from the dashboard ("remind me later"): an ordinary timer she announces on the Mac. */

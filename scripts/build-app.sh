@@ -23,6 +23,10 @@ echo "› Compiling theme helper (ARES OS theme: app icons, custom icons, runnin
 xcrun swiftc -O -swift-version 5 native/AresTheme.swift -o native/build/ares-theme
 codesign --force --sign "$SIGN" native/build/ares-theme
 
+echo "› Compiling control helper (full Mac control: windows, Accessibility, input, PDF text, OCR)"
+xcrun swiftc -O -swift-version 5 native/AresControl.swift -o native/build/ares-control
+codesign --force --sign "$SIGN" native/build/ares-control
+
 echo "› Compiling camera helper (hand gestures: joints only, frames never leave it)"
 # A real .app bundle: macOS only grants the camera to something it can name (a bare binary is refused without a prompt)
 VISION="native/build/ARES Vision.app"
@@ -46,6 +50,7 @@ npx electron-packager . ARES \
   --extra-resource=native/build/ares-listener \
   --extra-resource=native/build/ares-desktop \
   --extra-resource=native/build/ares-theme \
+  --extra-resource=native/build/ares-control \
   --extra-resource="native/build/ARES Vision.app" \
   --extra-resource=models/speaker-titanet-small.onnx \
   --extra-resource=models/intent \

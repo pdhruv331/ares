@@ -41,6 +41,7 @@ const { Voice } = require('./voice');
 const { Voicemail } = require('./voicemail');
 const { Wallpaper } = require('./wallpaper');
 const { Theme } = require('./theme');
+const { Control } = require('./control');
 const { ClaudeUsage } = require('./claude-usage');
 const { ClaudeSessions } = require('./claude-sessions');
 const { ClaudeControl } = require('./claude-control');
@@ -80,6 +81,7 @@ let claudeUsage; // the Claude plan's 5-hour/weekly limits, from Claude Code's r
 let desk;      // desk mode (desk.js): no wake word needed while the user is at the Mac
 let vision;    // hand gestures (vision.js): the camera helper and the gesture engine, only while desk mode is active
 let surface;   // where the ARES window lives: the live desktop, lifted above the apps, or a window (surface.js)
+let control;   // full Mac control (control.js): files, windows, screen, UI automation, system, send to phone
 let theme;     // the ARES OS theme (theme.js): the menu bar, window glow, dock, icons, notifications and system look
 let speech;    // her voice (voice.js): Katherine on ElevenLabs, the local Kokoro backup, budget mode, phrase cache, credit watch
 
@@ -278,6 +280,8 @@ function menuSections() {
       { label: 'Unpair Phone', visible: remoteState === 'online', click: unpairRemote },
       { label: phone?.devices.length ? `Phone app: ${phone.devices.length} paired` : 'Phone app: not paired', enabled: false },
       { label: 'Pair a Phone…', click: pairPhone },
+      { label: 'Stay Reachable From My Phone (no idle sleep on power)', type: 'checkbox', checked: readSettings().stayReachable !== false,
+        click: (item) => { writeSettings({ stayReachable: item.checked }); applyReachable(); refreshTray(); } },
       { label: 'Unpair All Phones', visible: Boolean(phone?.devices.length), click: () => { phone.unpairAll(); relay.ready && relay.unregisterAll().catch(() => {}); refreshTray(); } },
       { type: 'separator' },
       { label: 'Open Calls Log…', visible: Boolean(calls?.ready), click: () => shell.openPath(calls.dir) },
@@ -291,6 +295,11 @@ function menuSections() {
       { label: 'Open Memory…', click: () => { require('electron').shell.openPath(memory.file); } },
       { label: 'Clear Memory…', click: clearMemory },
       { label: 'My Phrases…', enabled: Boolean(intents?.ready), click: () => { require('electron').shell.openPath(intents.phrasesFile); } },
+      { type: 'separator' },
+      { label: `Folders ARES May Use: ${(readSettings().control?.folders || []).length ? `Desktop, Documents, Downloads, iCloud + ${(readSettings().control?.folders || []).length} more` : 'Desktop, Documents, Downloads, iCloud Drive'}`, enabled: false },
+      { label: 'Add a Folder ARES May Use…', click: addControlFolder },
+      { label: 'Forget Added Folders', visible: Boolean((readSettings().control?.folders || []).length), click: () => { writeSettings({ control: { ...(readSettings().control || {}), folders: [] } }); refreshTray(); } },
+      { label: 'Open Action Log…', click: () => shell.openPath(path.join(app.getPath('userData'), 'audit.jsonl')) },
       { type: 'separator' },
       {
         label: 'Launch at Login',
@@ -451,6 +460,7 @@ async function onBarge(evt) {
 }
 /** Her voice stops wherever it's playing, and the brain's reply with it (a barge-in, or a raised palm). */
 function stopSpeaking() {
+  control?.abort('stop'); // a "stop" also halts anything ARES is doing in an app's window
   for (const id of speaking.keys()) cancelledClips.add(id);
   for (const abort of ttsAborts.values()) abort();
   listener.stopPlay();
@@ -717,6 +727,14 @@ async function transcribe(audio, type = 'audio/ogg') {
 }
 
 let keepAwake = null;
+/** Section R: stay reachable from the phone. No idle sleep while ARES runs on power (a setting, default on); battery sleeps as usual. */
+function applyReachable() {
+  const want = readSettings().stayReachable !== false && !powerMonitor.isOnBatteryPower();
+  if (want && keepAwake == null) { keepAwake = powerSaveBlocker.start('prevent-app-suspension'); log('stay reachable', { on: true }); }
+  if (!want && keepAwake != null) { powerSaveBlocker.stop(keepAwake); keepAwake = null; log('stay reachable', { on: false, battery: powerMonitor.isOnBatteryPower() }); }
+}
+powerMonitor.on('on-ac', applyReachable);
+powerMonitor.on('on-battery', applyReachable);
 function startRemote() {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) return;
@@ -760,12 +778,11 @@ function startRemote() {
   });
   remote.on('error', () => { remoteState = 'off'; pushIntegrations(); });
   remote.start();
-  // Stay reachable: stop the Mac idle-sleeping while remote access is on (closing the lid on battery still sleeps)
-  keepAwake ??= powerSaveBlocker.start('prevent-app-suspension');
+  applyReachable(); // stay reachable while remote access is on (closing the lid on battery still sleeps)
 }
 // ---- Phone app (served to your phone over Tailscale) -------------------------------------------------
 const PHONE_PORT = Number(process.env.ARES_PHONE_PORT) || 8765;
-const PHONE_NOTE = "(ARES note: the user is using the ARES app on their phone, away from the Mac. Keep replies concise. To open, call, text, message, navigate or play something, use the phone_action tool so it happens on their phone, not the Mac; use notify_phone for anything they should be reminded of later.)\n\n";
+const PHONE_NOTE = "(ARES note: the user is using the ARES app on their phone, away from the Mac. Keep replies concise. To open, call, text, message, navigate or play something, use the phone_action tool so it happens on their phone, not the Mac; use notify_phone for anything they should be reminded of later. Anything they want to SEE goes to the phone: files with send_to_phone, their screen with look_at_screen to_phone: true, a page with send_to_phone kind link. Mac work (files, apps, windows, Shortcuts, system, jobs) still happens on the Mac; if its screen is locked and a step needs it, say so plainly and offer the alternatives.)\n\n";
 let phoneUrl = process.env.ARES_PHONE_URL || null; // https://<mac>.<tailnet>.ts.net once Tailscale is set up
 
 /** Stream one sentence of speech (raw 24kHz PCM) into `out.chunks`, in whichever voice is speaking now. */
@@ -963,6 +980,7 @@ function startPhone() {
     claude: () => claudeCtl,
     calls,
     firebase: () => relay.firebase(),
+    fileFor: (id) => control?.fileFor(id),
     log,
   });
   phone.on('fcm', (d) => {
@@ -978,7 +996,7 @@ function startPhone() {
   phone.start();
   if (!app.isPackaged && process.env.ARES_TEST_PAIR_CODE) phone.code = process.env.ARES_TEST_PAIR_CODE; // dev testing only
   findPhoneUrl();
-  keepAwake ??= powerSaveBlocker.start('prevent-app-suspension'); // stay reachable from the phone
+  applyReachable(); // stay reachable from the phone
 }
 async function importContacts() {
   const { dialog } = require('electron');
@@ -991,6 +1009,20 @@ async function importContacts() {
   } catch (err) {
     notice(`I couldn't import that file: ${err.message}.`);
   }
+  refreshTray();
+}
+
+/** "Folders ARES May Use": the scope of her file tools (control.js), beyond Desktop, Documents, Downloads and iCloud Drive. */
+async function addControlFolder() {
+  const { dialog } = require('electron');
+  const pick = await dialog.showOpenDialog({ title: 'Folders ARES may read and organise', defaultPath: os.homedir(), properties: ['openDirectory', 'multiSelections', 'createDirectory'] });
+  if (pick.canceled || !pick.filePaths.length) return;
+  const control0 = readSettings().control || {};
+  const folders = [...new Set([...(control0.folders || []), ...pick.filePaths])];
+  const refused = pick.filePaths.filter((f) => control.classify(f) === 'blocked');
+  writeSettings({ control: { ...control0, folders: folders.filter((f) => !refused.includes(f)) } });
+  log('control folders', { count: folders.length, refused: refused.length });
+  if (refused.length) notice(`I can't take ${refused.map((f) => path.basename(f)).join(', ')}, sir: keys, Library and my own files stay off limits.`);
   refreshTray();
 }
 
@@ -1909,9 +1941,16 @@ app.whenReady().then(async () => {
   speech.start();
   relay = new Relay({ log, firebaseFile: path.join(app.getPath('userData'), 'google-services.json') });
   calls = createCalls();
+  control = new Control({
+    helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-control') : path.join(__dirname, 'native', 'build', 'ares-control'),
+    themeHelper: app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(__dirname, 'native', 'build', 'ares-theme'),
+    supportDir: app.getPath('userData'), appDir: __dirname, readSettings, writeSettings, log,
+    push: (n) => pushToPhones(n), phoneUrl: () => phoneUrl, notice: (line) => notice(line),
+  });
   bridge = await startBridge({
     log,
     memory,
+    control,
     teachPhrase: ({ phrase, meaning }) => learnPhrase(phrase, meaning, 'corrected in conversation'),
     findContact: (name) => {
       const hits = contacts.find(name);
@@ -1941,6 +1980,7 @@ app.whenReady().then(async () => {
       theme?.toast({ kind: 'day', label: 'TIMER', tag: 'DONE', value: label && label !== 'timer' ? `Your ${label} timer is done.` : 'Your timer is done.', urgent: true });
     },
   });
+  control.attach({ turn: bridge.turn });
   const mcpConfigPath = path.join(app.getPath('userData'), 'mcp.json');
   fs.writeFileSync(mcpConfigPath, JSON.stringify({
     mcpServers: {
@@ -1953,6 +1993,7 @@ app.whenReady().then(async () => {
   }), { mode: 0o600 });
   claude.init(path.join(app.getPath('userData'), 'workspace'), { mcpConfigPath, memory: () => memory.facts() }); // isolated dir: no project files or CLAUDE.md
   await startWork();
+  control.workDir = jobs?.dir; // a job's files may be sent to the phone too
 
   // First run of the installed app: start at login by default (can be switched off in the menu bar).
   if (app.isPackaged && readSettings().launchAtLogin === undefined) setLaunchAtLogin(true);
