@@ -113,6 +113,8 @@ class Session(private val ctx: Context, private val ui: Ui) {
         if (listening) return
         speaker.stop() // talking over her stops her, like on the Mac
         heard = ""
+        transcript = ""
+        continuing = false
         stopAsked = false
         // First the phone's own default recogniser (as the Galaxy is set up), then each one explicitly
         candidates = listOf<android.content.ComponentName?>(null) + Speech.components(ctx)
@@ -128,6 +130,44 @@ class Session(private val ctx: Context, private val ui: Ui) {
     private var english = true
     private var failures = mutableListOf<Int>()
     private var stopAsked = false // you tapped to finish: an error then isn't a reason to retry
+
+    // The phone's recogniser stops at the first pause it hears, which cuts people off mid-sentence. So a result
+    // isn't the end: it's kept as a segment and listening starts again straight away; only a real pause (nothing
+    // more for GRACE_MS after the restart) or a tap finishes and sends everything heard, joined.
+    private var transcript = ""
+    private var continuing = false
+    private var finishTimer: Runnable? = null
+    private val GRACE_MS = 2200L
+
+    private fun armFinish(r: SpeechRecognizer) {
+        finishTimer?.let(main::removeCallbacks)
+        val t = Runnable { if (recognizer === r && state == State.LISTENING) finish() }
+        finishTimer = t
+        main.postDelayed(t, GRACE_MS)
+    }
+    private fun heardMore() { finishTimer?.let(main::removeCallbacks); finishTimer = null }
+
+    /** A recogniser result: one more segment. Keep listening unless you tapped to send. */
+    private fun segment(text: String) {
+        transcript = listOf(transcript, text.trim()).filter { it.isNotBlank() }.joinToString(" ")
+        heard = ""
+        if (transcript.isNotBlank()) ui.heard(transcript, false)
+        if (stopAsked || transcript.isBlank()) return finish()
+        continuing = true
+        set(State.LISTENING)
+        next() // the same recogniser again; a long pause now ends it
+    }
+
+    /** Send everything heard so far (or go idle if nothing was). */
+    private fun finish() {
+        heardMore()
+        recognizer?.destroy(); recognizer = null
+        continuing = false
+        level = 0f
+        val text = listOf(transcript, heard.trim()).filter { it.isNotBlank() }.joinToString(" ")
+        transcript = ""; heard = ""
+        if (text.isNotBlank()) { ui.heard(text, true); ask(text, voice = true) } else set(State.IDLE)
+    }
 
     private fun next() {
         if (attempt == 0) failures.clear()
@@ -149,11 +189,13 @@ class Session(private val ctx: Context, private val ui: Ui) {
     /** Finish now and send what was heard (the recogniser also stops by itself when you pause). */
     fun stopListening() {
         stopAsked = true
-        recognizer?.stopListening()
+        if (recognizer != null) recognizer?.stopListening() else if (transcript.isNotBlank()) finish() // between segments: send now
         recorder?.let { finishRecording() }
     }
 
     fun cancelListening() {
+        heardMore()
+        transcript = ""; continuing = false
         recognizer?.destroy(); recognizer = null
         recorder?.let { runCatching { it.stop() }; it.release() }; recorder = null
         if (state == State.LISTENING) set(State.IDLE)
@@ -162,25 +204,27 @@ class Session(private val ctx: Context, private val ui: Ui) {
     private fun listenOnPhone(r: SpeechRecognizer) {
         recognizer = r
         r.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) { started = true; set(State.LISTENING) }
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) { level = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f) }
+            override fun onReadyForSpeech(params: Bundle?) { started = true; set(State.LISTENING); if (continuing) armFinish(r) }
+            override fun onBeginningOfSpeech() { heardMore() }
+            override fun onRmsChanged(rmsdB: Float) { level = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f); if (rmsdB > 4f) heardMore() }
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() { level = 0f }
             override fun onPartialResults(partial: Bundle?) {
-                best(partial)?.let { heard = it; ui.heard(it, false) }
+                best(partial)?.let { heardMore(); heard = it; ui.heard(listOf(transcript, it).filter { s -> s.isNotBlank() }.joinToString(" "), false) }
             }
             override fun onResults(results: Bundle?) {
                 val text = best(results) ?: heard
                 done()
-                if (text.isNotBlank()) { ui.heard(text, true); ask(text, voice = true) } else set(State.IDLE)
+                segment(text)
             }
             override fun onError(error: Int) {
                 done()
                 val soft = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
-                if (heard.isNotBlank()) { ui.heard(heard, true); ask(heard, voice = true) }
+                if (heard.isNotBlank()) segment(heard) // it heard words but gave up on them: keep them, keep listening
+                else if (continuing && soft) finish() // a real pause after what you said: send it
                 else if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) { set(State.IDLE); ui.offline("I need microphone access on the phone, sir.") }
-                else if ((soft && started) || stopAsked) set(State.IDLE) // you didn't say anything
+                else if ((soft && started) || stopAsked) finish() // you didn't say anything (or tapped to send)
+                else if (transcript.isNotBlank()) finish() // the recogniser broke mid-way: send what there is
                 else retry(error) // the recogniser itself failed: try another way
             }
             private var started = false
@@ -193,7 +237,10 @@ class Session(private val ctx: Context, private val ui: Ui) {
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             .apply { if (english) putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-GB") }
             .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1400L))
+            // Longer pauses before it decides you're done (recognisers may ignore these; the segment loop above covers that)
+            .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
+            .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
+            .putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 15_000L))
     }
 
     /** No speech recogniser on the phone: record, and let the Mac transcribe it. */
@@ -233,7 +280,7 @@ class Session(private val ctx: Context, private val ui: Ui) {
                 if (amp > 1800) { spoke = true; quietSince = 0L }
                 else if (spoke && quietSince == 0L) quietSince = now
                 when {
-                    spoke && quietSince > 0 && now - quietSince > 1500 -> finishRecording()
+                    spoke && quietSince > 0 && now - quietSince > 2200 -> finishRecording() // a real pause, not a breath
                     !spoke && now - start > 8000 -> { cancelListening(); ui.heard("(I didn't hear anything)", true) }
                     now - start > 30_000 -> finishRecording()
                     else -> main.postDelayed(this, 100)
