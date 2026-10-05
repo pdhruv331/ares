@@ -198,7 +198,7 @@ function writeSettings(patch) {
 /** What the window needs to know about the interface: motion, magnetic panel slots, where panels were left. */
 function uiPrefs() {
   const s = readSettings();
-  return { reduceMotion: Boolean(s.reduceMotion), magnetic: s.ui?.magnetic !== false, panels: s.ui?.[panelsKey()] || {}, maxPins: Number(s.ui?.maxPins) || 3,
+  return { reduceMotion: Boolean(s.reduceMotion), magnetic: s.ui?.magnetic !== false, panels: s.ui?.[panelsKey()] || {}, maxPins: Number(s.ui?.maxPins) || 3, calendarCollapseSec: Number(s.ui?.calendarCollapseSec) || 60,
     owner: process.env.ARES_OWNER_NAME || 'Dhruv', themeBar: Boolean(theme?.live) }; // the ARES bar has the top row's items
 }
 /** Panel positions are remembered separately for the desktop (and lifted) and for the window. */
