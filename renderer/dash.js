@@ -444,6 +444,18 @@ const Dash = (() => {
   // Views the user asked for that aren't pinned ("show me my week") stay until they collapse or are thrown away
   const opened = new Set();
   function release(name) { if (opened.delete(name)) reconcile(); }
+  /** Open a view ("show me my week", "what's on the 20th?"): shows its panel if it isn't up and hands it the options. */
+  function openView(name, opts = {}) {
+    const view = views[name];
+    if (!view) return false;
+    opened.add(name);
+    reconcile();
+    const p = panels.get(name);
+    if (!p) return false;
+    touched(p);
+    view.open?.(p, opts, viewCtx(p));
+    return true;
+  }
   /** The user interacted with a panel: it keeps its place for a while, and views reset their idle timers. */
   function touched(p) { p.touchedAt = Date.now(); views[p.spec.view]?.touched?.(p, viewCtx(p)); }
 
@@ -1661,6 +1673,7 @@ const Dash = (() => {
       case 'weather': setWeather(msg.weather); break;
       case 'events': data.events = msg.events || []; break;
       case 'calendar': data.calendar = msg.calendar; break;
+      case 'open-view': setTimeout(() => openView(msg.name, msg.opts || {}), 0); break;
       case 'leave': data.leave = msg.leave; break;
       case 'music': data.music = msg.music; break;
       case 'timers': data.timers = msg.timers || []; break;
@@ -1781,17 +1794,7 @@ const Dash = (() => {
     /** Register a view (calendar, tasks, custom templates): panels whose spec.view names it are drawn by it at FULL density. */
     view(name, def) { views[name] = def; for (const p of panels.values()) if (p.spec.view === name) fill(p); },
     /** Open a view ("show me my week", "what's on the 20th?"): shows its panel if it isn't up and hands it the options. */
-    open(name, opts = {}) {
-      const view = views[name];
-      if (!view) return false;
-      opened.add(name);
-      reconcile();
-      const p = panels.get(name);
-      if (!p) return false;
-      touched(p);
-      view.open?.(p, opts, viewCtx(p));
-      return true;
-    },
+    open: (name, opts = {}) => openView(name, opts),
     /** "Collapse it": the calendar back to DAY (and away, if it was only opened by voice). */
     collapseView(name) {
       const p = panels.get(name);

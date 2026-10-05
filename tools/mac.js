@@ -315,6 +315,8 @@ tool('answer_job_approval',
 
 // ---- Full Mac control: files, windows, browser, screen, UI automation, system, clipboard, Shortcuts, send to phone ----
 require('./control-tools').register({ tool, bridge });
+// ---- Panels v2: the calendar through macOS (EventKit), tasks, custom panels --------------------------------------------
+require('./panel-tools').register({ tool, bridge });
 // ---- Autonomy: projects, goals, routines, the kill switch ---------------------------------------------------------
 require('./autonomy-tools').register({ tool, bridge });
 

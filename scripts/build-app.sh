@@ -35,6 +35,13 @@ xcrun swiftc -O -swift-version 5 native/AresVision.swift -o "$VISION/Contents/Ma
 cp native/Vision-Info.plist "$VISION/Contents/Info.plist"
 codesign --force --sign "$SIGN" "$VISION"
 
+echo "› Compiling calendar helper (EventKit: calendars, reminders, live changes; the Keychain for tokens)"
+CAL="native/build/ARES Calendar.app"
+mkdir -p "$CAL/Contents/MacOS"
+xcrun swiftc -O -swift-version 5 native/AresCalendar.swift -o "$CAL/Contents/MacOS/ares-calendar"
+cp native/Calendar-Info.plist "$CAL/Contents/Info.plist"
+codesign --force --sign "$SIGN" "$CAL"
+
 echo "› Backup voice model (Kokoro, downloaded once into the support folder)"
 zsh scripts/get-voice-model.sh
 
@@ -52,6 +59,7 @@ npx electron-packager . ARES \
   --extra-resource=native/build/ares-theme \
   --extra-resource=native/build/ares-control \
   --extra-resource="native/build/ARES Vision.app" \
+  --extra-resource="native/build/ARES Calendar.app" \
   --extra-resource=models/speaker-titanet-small.onnx \
   --extra-resource=models/intent \
   --ignore='^/relay(/|$)' --ignore='^/(native|android|scripts|dist|assets|models|\.env.*|\.gitignore)' \

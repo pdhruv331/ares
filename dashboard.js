@@ -134,6 +134,7 @@ class Dashboard extends EventEmitter {
    * The run must actually have called the tool, so a model that answers without looking can't invent a schedule.
    */
   refreshCalendar(why) {
+    if (this.external?.()) return null; // EventKit is live (calendar.js): nothing to ask Claude for
     if (this.calendarRun) return this.calendarRun;
     if (why !== 'changed' && this.calendarAt && Date.now() - this.calendarAt < 5 * 60_000) return null; // just looked
     const h = new Date().getHours();
