@@ -6,7 +6,7 @@
 // The bar COVERS the macOS menu bar (drawn above it, exactly its height): the macOS menu bar stays on screen underneath
 // (so windows never go under the bar) but is never seen. What it offered comes back in the bar: the front app's menus
 // (read and pressed through Accessibility, theme.js), ARES's own menus while ARES is in front, and mirrored menu-bar
-// icons (SketchyBar aliases: Control Center, Tailscale; they need Screen Recording for SketchyBar).
+// icons (Control Center, Tailscale) as small labels that press the real items (no screen capture).
 //
 // LIVE-FED: ARES pushes every change (`sketchybar --set …`, `borders active_color=…`); the bar never polls ARES. The
 // clock, battery and Wi-Fi are SketchyBar's own items. Clicks call back into ARES over a local URL with a token.
@@ -130,9 +130,11 @@ exec ${q(this.offlineFile)}
     const menuItems = Array.from({ length: MENUS }, (_, i) => `sketchybar --add item menu.${i} left --set menu.${i} drawing=off icon.drawing=off \\
   label.font='${font(i === 0 ? 'Bold' : 'Semibold', 11.5)}' label.color=${i === 0 ? C.cyan : C.text} padding_left=${i === 0 ? 12 : 2} padding_right=2 \\
   click_script="${click(`menu?i=${i}`)}" script=${P('menu.sh')} ${popupStyle} --subscribe menu.${i} mouse.entered mouse.exited mouse.exited.global`).join('\n');
-    // A mirrored icon is a picture of the real one (still there, under the bar): a click has ARES press the real one
-    const aliases = (this.aliases() || []).map((a, k) => `sketchybar --add alias ${q(a)} right --set ${q(a)} alias.color=${C.cyan} padding_left=0 padding_right=0 \\
-  click_script="${click(`extra?k=${k}`)}"`).join('\n');
+    // Control Center and Tailscale: the real items are still there, under the bar. The bar shows a small label of its own
+    // (no screen capture, so no "capturing your screen" indicator); a click has ARES press the real one through Accessibility
+    const short = (name) => ({ 'Control Center': 'CC', Tailscale: 'TS' })[name] || name.replace(/[^A-Z0-9]/gi, '').slice(0, 3).toUpperCase();
+    const aliases = (this.aliases() || []).map((a, k) => `sketchybar --add item extra.${k} right --set extra.${k} icon.drawing=off label=${q(short(a.split(',').slice(1).join(',')))} \\
+  label.font='${font('Semibold', 9.5)}' label.color=${C.cyan} padding_left=4 padding_right=4 click_script="${click(`extra?k=${k}`)}"`).join('\n');
     const pool = OWNERS.map((o) => {
       const rows = Array.from({ length: ROWS }, (_, k) => `${o}.p.${k}`);
       return `sketchybar ${rows.map((r) => `--add item ${r} popup.${o}`).join(' ')} \\
