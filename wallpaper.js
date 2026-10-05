@@ -35,7 +35,7 @@ class Wallpaper extends EventEmitter {
     this.screenLocked = false;
     this.suspended = false;
     this.jobList = [];
-    this.lastScene = { state: { type: 'state', state: 'idle' }, attention: { type: 'attention', on: false } };
+    this.lastScene = { state: { type: 'state', state: 'idle' }, attention: { type: 'attention', on: false }, spot: { type: 'spot', dx: 0, dy: 0, s: 1 } };
     this.watcher = null;
     this.stillTimer = null;
     this.main = null; // { win, wid, name, mode } the ARES window, while it's the desktop or lifted
@@ -131,6 +131,7 @@ class Wallpaper extends EventEmitter {
     send('wp-prefs', this.backdropPrefs(view));
     send('wp-scene', this.lastScene.state);
     send('wp-scene', this.lastScene.attention);
+    send('wp-scene', this.lastScene.spot);
     send('wp-jobs', this.jobList);
     this.refreshModes();
   }
@@ -144,6 +145,7 @@ class Wallpaper extends EventEmitter {
   scene(msg) {
     if (msg.type === 'state') this.lastScene.state = msg;
     if (msg.type === 'attention') this.lastScene.attention = msg;
+    if (msg.type === 'spot') this.lastScene.spot = msg; // where the window's brain sits (shifted aside for panels or icons)
     if (!this.views.size) return;
     this.send('wp-scene', msg);
     if (msg.type === 'state') this.refreshModes(); // 60 fps while listening or speaking

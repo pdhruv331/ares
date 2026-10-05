@@ -347,6 +347,7 @@ const Dash = (() => {
     core.style.setProperty('--bx', `${Math.round(spot.dx)}px`);
     core.style.setProperty('--by', `${Math.round(spot.dy)}px`);
     core.style.setProperty('--bs', String(spot.s));
+    window.ares.scene?.({ type: 'spot', dx: Math.round(spot.dx), dy: Math.round(spot.dy), s: spot.s }); // the backdrop's brain follows (one brain, not two rings)
   }
   function setWalls() {
     clusterIcons();
@@ -552,16 +553,23 @@ const Dash = (() => {
       minTier: p.spec.minTier, tier: card?.p === p && !card.closing ? p.tier : undefined }));
     const fixed = free.map((p) => { const { w, h } = sizeOf(p); return { x: p.tx, y: p.ty, w, h }; });
     if (card && !card.closing && !card.p.slot) fixed.push({ x: card.box.left, y: card.box.top, w: card.box.width, h: card.box.height });
-    // A column wider than the usual panel (a calendar in WEEK, an open card): the brain shifts aside for it
+    const solve = () => Flow.solve({ W, H, pad: PAD, top: TOP, gap: GAP, brain: brain(), walls, fixed, items });
+    let r = solve();
+    // A column wider than the usual panel (a calendar in WEEK, an open card) that can't be shown in full beside the brain:
+    // the brain shifts aside for it (and stays aside while that panel is there, so nothing see-saws)
+    const wide = items.filter((it) => it.sizes.full.w > TIERS.full.w);
+    const squeezed = wide.some((it) => !r.places[it.id] || r.places[it.id].tier !== 'full');
     const want = { left: 0, right: 0 };
-    for (const p of docked) want[p.slot.side] = Math.max(want[p.slot.side], TIERS.full.w, sizeOf(p, 'full').w);
+    for (const it of wide) want[it.side] = Math.max(want[it.side], it.sizes.full.w);
+    for (const p of docked) if (p.slot.side === 'left' ? want.left : want.right) want[p.slot.side] = Math.max(want[p.slot.side], TIERS.full.w); // (that side's column, the other side keeps its room)
     const strips = [];
-    if (want.left > TIERS.full.w || want.right > TIERS.full.w) { // (both columns, so one side's room isn't taken for the other's)
+    if (squeezed || (brainStrips.length && wide.length)) {
       if (want.left) strips.push({ x: 0, y: 0, w: PAD + want.left + GAP, h: H });
       if (want.right) strips.push({ x: W - PAD - want.right - GAP, y: 0, w: PAD + want.right + GAP, h: H });
+      const other = want.left ? 'right' : 'left';
+      if (docked.some((p) => p.slot.side === other)) strips.push(other === 'left' ? { x: 0, y: 0, w: PAD + TIERS.full.w + GAP, h: H } : { x: W - PAD - TIERS.full.w - GAP, y: 0, w: PAD + TIERS.full.w + GAP, h: H });
     }
-    if (JSON.stringify(strips) !== JSON.stringify(brainStrips)) placeBrain(strips);
-    const r = Flow.solve({ W, H, pad: PAD, top: TOP, gap: GAP, brain: brain(), walls, fixed, items });
+    if (JSON.stringify(strips) !== JSON.stringify(brainStrips)) { placeBrain(strips); r = solve(); }
     edges = r.edges;
     for (const p of docked) {
       const pl = r.places[p.id];
@@ -766,6 +774,7 @@ const Dash = (() => {
   const GRAB_MOVE = 5, HOLD_MS = 250, HOLD_MOVE = 2;
   function press(p, e) {
     if (e.button !== 0 || p.mode !== 'rest' || hand.p) return;
+    if (p.flex && p.tier === 'full' && e.target.closest?.('[data-act], [data-url]')) return; // a view's own control: its click handles it
     e.preventDefault();
     p.press = { x: e.clientX, y: e.clientY, at: performance.now() };
     // Follow the pointer at the window level (pointer capture alone proved unreliable once the panel folds away)

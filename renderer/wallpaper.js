@@ -58,6 +58,12 @@
       case 'attention':
         HUD.attention(msg.on);
         break;
+      case 'spot': { // the window's brain moved or shrank (panels, icons): this one goes with it, so there's one brain
+        const core = document.querySelector('.core');
+        if (core) { core.style.transition = 'transform 1.4s cubic-bezier(.3,.7,.4,1)'; core.style.transform = `translate(${msg.dx || 0}px, ${msg.dy || 0}px) scale(${msg.s || 1})`; }
+        drawUntil = performance.now() + 1600;
+        break;
+      }
     }
   }
 
