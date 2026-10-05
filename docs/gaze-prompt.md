@@ -1,4 +1,4 @@
-Give ARES GAZE: I look at something, a soft EDITH bracket settles on it, and I can say "summarise this", "send that to my phone", "close that", "what's this error?" and she acts on the highlighted thing. See the project notes and CLAUDE.md. This comes AFTER hand tracking (docs/hand-tracking-prompt.md): reuse its camera helper (native/AresVision.swift) and its feedback style. Phases 2 and 3 need the full Mac control tools from docs/autonomy-prompt.md section 0; if they aren't built yet, build phase 1 only and tell me. Commit after each working step.
+Give ARES GAZE: I look at something, a soft EDITH bracket settles on it, and I can say "summarise this", "send that to my phone", "close that", "what's this error?" and she acts on the highlighted thing. See the project notes and CLAUDE.md. Gaze does NOT depend on hand gestures (they're parked; hands.enabled stays off): reuse only the camera helper from that work (native/AresVision.swift, "ARES Vision.app", the one camera owner) and add face/gaze to its request list, independent of the hands switch. Read docs/gaze-research.md first if it exists and follow its recommendations where they differ from this prompt. The full Mac control tools (docs/autonomy-prompt.md section 0, control.js / ares-control) are built, so phases 2 and 3 can use them. Commit after each working step.
 
 HARD RULES:
 - Opt-in: a ◉ menu toggle "Gaze highlight", default OFF. Same camera rules as hand tracking: frames stay in the helper, nothing stored or sent, camera off when locked/idle/on a call/Low Power Mode/lid closed.
@@ -22,7 +22,7 @@ HARD RULES:
 - Targets: panels, orbs, the brain, COMMS, details views. ARES already knows their rectangles.
 - The highlight: brighter EDITH brackets on the target (the same as mouse hover, slightly warmer).
 - Voice: "close that", "expand this", "send this to my phone", "what's that about?", "move that to the left" → resolved to the frozen target.
-- With hand tracking: GAZE + PINCH, i.e. look at a panel and pinch anywhere in the air to grab it (Vision Pro style). Gaze picks the target, the pinch acts.
+- LATER, only if hand gestures are resumed: GAZE + PINCH (look at a panel, pinch in the air to grab it). Not part of this build.
 
 3. PHASE 2: WINDOWS
 - A click-through overlay window above all apps that draws the bracket (never takes focus or clicks; hidden from screenshots of the window ARES sends to Claude).
