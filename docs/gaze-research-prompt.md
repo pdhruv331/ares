@@ -2,11 +2,23 @@ DEEP RESEARCH, NO IMPLEMENTATION: is webcam gaze good enough for ARES's "look at
 
 THE FEATURE (for context): I look at something on my Mac, a soft bracket settles on it, and I say "summarise this", "close that", "what's this error?", "send that to my phone". Gaze is only a pointer, never a trigger; voice acts. Targets snap to real things (ARES panels, windows, UI elements), so the question is whether gaze can reliably pick the right one of a handful of nearby targets.
 
+WORK IN TWO STAGES. STAGE A is sections 1 and 1b: research only (no prototypes, no camera). Then STOP and REPORT TO ME in chat:
+- what's possible today and how accurate it really is, in plain words;
+- the BEST USE CASES FOR MY PRODUCTIVITY (section 1b), ranked;
+- what you'd measure in stage B.
+Wait for my go (and my picks of use cases) before STAGE B (sections 2–4), and focus the measurements on the use cases I pick.
+
 1. STATE OF THE ART (search the web, papers, GitHub; cite sources with links and dates)
 - Webcam gaze estimation methods today: geometric (iris + head pose), appearance-based deep models (e.g. ETH-XGaze, L2CS-Net, GazeNet/MPIIGaze, newer 2024–2026 models), WebGazer.js, MediaPipe Face Mesh / Face Landmarker iris, Apple Vision face landmarks, commercial SDKs (Tobii's webcam products, Eyeware Beam, GazeRecorder, etc.).
 - For each: typical accuracy after calibration (degrees and cm at laptop distance), robustness to head movement/glasses/lighting, calibration needed, license, whether it runs on-device on Apple Silicon (Core ML / ANE / Metal), CPU/energy cost, latency.
 - What macOS itself offers: Vision framework face landmarks and pupils, any gaze/attention APIs (e.g. ARKit face tracking needs TrueDepth, which Macs lack; check what's actually available on macOS 26), Accessibility's Eye Tracking (iOS/iPadOS feature; does macOS have it now? could ARES use it?), Continuity Camera (iPhone as webcam: better camera, maybe TrueDepth data?).
 - How real products handle coarse gaze: target snapping/"gravity", dwell, the "Midas touch" problem, gaze + voice multimodal systems (research on "put-that-there" style interaction), Vision Pro's look + pinch design guidance.
+
+1b. BEST USE CASES FOR MY PRODUCTIVITY (part of stage A)
+- How I work: a MacBook, ARES as the live desktop with desk mode (talking to her without a wake word), full Mac control (files, windows, browser, UI automation, send to phone), Claude Code sessions, coding in VS Code/Terminal, Chrome. Read the project notes for more.
+- Find what gaze can actually do for productivity: research (HCI papers, accessibility tools, Vision Pro, Tobii's productivity features, eye-tracking power users) and brainstorm for my setup. Examples to evaluate, not limit you: "summarise/explain/fix this" on what I'm looking at; "send that to my phone"; focus follows gaze (the window I look at gets keyboard focus, or scrolls); auto-scroll while reading; "where was I?" (remember what I last read when I come back); attention-aware notifications (hold them while I'm focused, show them where I'm looking); presence (pause/resume, dim when away, better desk mode); reading assist (define/translate the word I'm looking at); a focus/distraction report ("you spent 40 min on X").
+- For each: the time it saves or friction it removes, how accurate gaze must be for it (does it work with coarse gaze?), the effort to build, privacy concerns, and whether a mouse/keyboard shortcut already does it just as well (be honest).
+- Rank them: the top 3–5 worth building first, and the ones to skip.
 
 2. MEASURE IT ON MY MAC (prototypes in ~/ARES Projects/gaze-lab; tell me before anything needs the camera so I can sit for it)
 - Build the 2–3 most promising candidates as minimal prototypes (e.g. Apple Vision geometric, MediaPipe iris + head pose regression, one appearance-based model via Core ML/ONNX).
@@ -28,4 +40,4 @@ THE FEATURE (for context): I look at something on my Mac, a soft bracket settles
 - A verdict per phase of docs/gaze-prompt.md: phase 1 (ARES panels), phase 2 (windows), phase 3 (elements inside windows): worth building / build with limits / not worth it.
 - Concrete edits to docs/gaze-prompt.md (as a proposed diff in the research doc; don't edit the prompt itself).
 
-DELIVERABLE: docs/gaze-research.md with a one-paragraph summary at the top (the verdict), then sources, measurements (tables), recommendations and the proposed prompt changes. Keep the prototypes in ~/ARES Projects/gaze-lab with a README on how to rerun the accuracy test. Tell me the verdict in plain words at the end.
+DELIVERABLE: docs/gaze-research.md with a one-paragraph summary at the top (the verdict), then the ranked productivity use cases, sources, measurements (tables), recommendations and the proposed prompt changes. Write the stage A part of it before the stage A report, and add stage B after. Keep the prototypes in ~/ARES Projects/gaze-lab with a README on how to rerun the accuracy test. Tell me the verdict in plain words at the end.
