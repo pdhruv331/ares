@@ -60,7 +60,11 @@
         break;
       case 'spot': { // the window's brain moved or shrank (panels, icons): this one goes with it, so there's one brain
         const core = document.querySelector('.core');
-        if (core) { core.style.transition = 'transform 1.4s cubic-bezier(.3,.7,.4,1)'; core.style.transform = `translate(${msg.dx || 0}px, ${msg.dy || 0}px) scale(${msg.s || 1})`; }
+        if (core) { // the first placement lands at once (no slide at launch); later moves glide like the window's
+          core.style.transition = core.dataset.spot ? 'transform 1.4s cubic-bezier(.3,.7,.4,1)' : 'none';
+          core.style.transform = `translate(${msg.dx || 0}px, ${msg.dy || 0}px) scale(${msg.s || 1})`;
+          core.dataset.spot = '1';
+        }
         drawUntil = performance.now() + 1600;
         break;
       }
