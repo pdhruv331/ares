@@ -396,7 +396,8 @@ const Dash = (() => {
     for (const en of entries) {
       const p = panels.get(en.target.closest('.dp')?.dataset.id);
       if (!p || !p.flex || p.tier !== 'full') continue;
-      const w = Math.ceil(en.contentRect.width), h = Math.ceil(en.contentRect.height);
+      const box = en.borderBoxSize?.[0];
+      const w = Math.ceil(box ? box.inlineSize : en.target.offsetWidth), h = Math.ceil(box ? box.blockSize : en.target.offsetHeight);
       if (!w || !h) continue;
       if (p.natural?.w !== w || p.natural?.h !== h) { p.natural = { w, h }; changed = true; }
     }
@@ -428,13 +429,21 @@ const Dash = (() => {
   // ---- Views: panels drawn by their own renderer (calendar, tasks, custom templates) inside the standard brackets ------
   // A view: { render(p, host, ctx), act?(p, action, el, ctx), size?: {w,h} (an estimate before the first measurement) }.
   const views = {};
-  const viewCtx = (p) => ({ data, say, act, ask, hhmm, pad2, esc, up, now: Date.now(), tier: p.tier, model: p.spec.model, spec: p.spec,
-    openCard: () => openCard(p), closeCard, show, hide, update: (patch) => show(p.id, patch), touched: () => touched(p), reduce: reduce() });
+  const viewCtx = (p) => ({ data, say, act, ask, hhmm, pad2, esc, up, now: Date.now(), tier: p.tier, model: p.spec.model || {}, spec: p.spec, prefs,
+    openCard: () => openCard(p), closeCard, show, hide, update: (patch) => show(p.id, patch), touched: () => touched(p), reduce: reduce(),
+    refresh: () => { p.viewSig = null; renderView(p); }, release: () => release(p.spec.view) });
   function renderView(p) {
     const view = views[p.spec.view];
     if (!view) return;
-    try { view.render(p, p.parts.view, viewCtx(p)); } catch (err) { console.error('panel view failed', p.id, err); p.parts.view.textContent = '—'; }
+    const ctx = viewCtx(p);
+    const sig = `${p.tier}|${view.sig ? view.sig(p, ctx) : JSON.stringify(ctx.model)}`;
+    if (p.viewSig === sig) return; // nothing changed since the last draw (reconcile refills every second)
+    p.viewSig = sig;
+    try { view.render(p, p.parts.view, ctx); } catch (err) { console.error('panel view failed', p.id, err); p.parts.view.textContent = '—'; }
   }
+  // Views the user asked for that aren't pinned ("show me my week") stay until they collapse or are thrown away
+  const opened = new Set();
+  function release(name) { if (opened.delete(name)) reconcile(); }
   /** The user interacted with a panel: it keeps its place for a while, and views reset their idle timers. */
   function touched(p) { p.touchedAt = Date.now(); views[p.spec.view]?.touched?.(p, viewCtx(p)); }
 
@@ -585,17 +594,16 @@ const Dash = (() => {
   function remember(p) {
     const k = kindKey(p.id);
     const was = prefs.panels[k] || {};
-    const next = p.slot ? (p.pinned ? { pinned: true, side: p.slot.side, rank: p.rank } : null)
-      : { ...(p.pinned ? { pinned: true } : {}), fx: +(p.x / W).toFixed(4), fy: +(p.y / H).toFixed(4) };
+    const next = p.slot ? (p.pinned ? { pinned: true, side: p.slot.side, rank: p.rank } : was.pinned === false ? { pinned: false } : null)
+      : { ...(p.pinned ? { pinned: true } : was.pinned === false ? { pinned: false } : {}), fx: +(p.x / W).toFixed(4), fy: +(p.y / H).toFixed(4) };
     if (next) prefs.panels[k] = next; else delete prefs.panels[k];
-    if (was.pinned && !next?.pinned && p.pinned) prefs.panels[k] = { ...prefs.panels[k], pinned: true };
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => window.ares.dash.savePanels(prefs.panels), 400);
   }
 
   /** "Tidy up": every panel glides back home (pins stay pinned, in their default order). */
   function tidy() {
-    prefs.panels = Object.fromEntries(Object.entries(prefs.panels).filter(([, v]) => v.pinned).map(([k]) => [k, { pinned: true }]));
+    prefs.panels = Object.fromEntries(Object.entries(prefs.panels).filter(([, v]) => 'pinned' in v).map(([k, v]) => [k, { pinned: v.pinned }]));
     window.ares.dash.savePanels(prefs.panels);
     const all = resting();
     for (const side of ['left', 'right']) {
@@ -611,7 +619,7 @@ const Dash = (() => {
     const k = kindKey(p.id);
     if (on && !p.pinned && pinnedCount() >= MAX_PINS()) { say(`${MAX_PINS()} pinned already: unpin one first`, 'needs'); return false; }
     p.pinned = Boolean(on);
-    if (!p.pinned) { const v = prefs.panels[k]; if (v) { delete v.pinned; if (!Number.isFinite(v.fx) && !Number.isFinite(v.rank)) delete prefs.panels[k]; } }
+    if (!p.pinned) prefs.panels[k] = { ...(prefs.panels[k] || {}), pinned: false }; // explicit: a default pin (the calendar) stays off
     if (p.pinned && !prefs.panels[k]) prefs.panels[k] = { pinned: true };
     else if (p.pinned) prefs.panels[k].pinned = true;
     for (const q of panels.values()) if (kindKey(q.id) === k) { q.pinned = p.pinned; fill(q); }
@@ -626,7 +634,7 @@ const Dash = (() => {
     const key = alias[n] || n;
     const p = panels.get(key) || [...panels.values()].find((q) => kindKey(q.id) === key || q.id === key)
       || [...panels.values()].find((q) => title(q).toLowerCase() === key || up(q.spec.label).toLowerCase().includes(key));
-    if (!p) { if (!on && prefs.panels[key]?.pinned) { delete prefs.panels[key].pinned; window.ares.dash.savePanels(prefs.panels); return true; } return false; }
+    if (!p) { if (!on && prefs.panels[key]?.pinned) { prefs.panels[key].pinned = false; window.ares.dash.savePanels(prefs.panels); reconcile(); return true; } return false; }
     return setPinned(p, on);
   }
   // What a pinned panel shows when its source has nothing right now (contextual panels otherwise come and go)
@@ -831,6 +839,7 @@ const Dash = (() => {
     p.mode = 'absorbing';
     p.abs = { t: 0, a0: Math.atan2(p.oy - b.y, p.ox - b.x), r0: Math.hypot(p.ox - b.x, p.oy - b.y) };
     if (p.pinned) { setPinned(p, false); window.ares.comms.note('ares', `${title(p)} unpinned.`, { notice: true }); }
+    if (p.spec.view) { opened.delete(p.spec.view); views[p.spec.view]?.collapse?.(p, viewCtx(p)); }
     dismissed.add(p.spec.dismissKey || p.id);
     p.spec.onDismiss?.();
     closeHint.hidden = true;
@@ -1087,6 +1096,33 @@ const Dash = (() => {
               run: () => act('remind', { label: ev.title, seconds: Math.max(60, (ev.start - now) / 1000 - 15 * 60) }),
               say: `reminder set for ${hhmm(Math.max(now + 60_000, ev.start - 15 * 60_000))}` },
           ].filter(Boolean) };
+      }
+      case 'event': {
+        const ev = d.ev;
+        const loc = ev.location || '';
+        const when = ev.allDay ? 'all day' : `${hhmm(ev.start)} → ${hhmm(ev.end)}`;
+        const day = new Date(ev.start).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+        return { ...base, label: 'EVENT', tag: day.toUpperCase(), value: ev.title,
+          rows: [['When', `${day} · ${when}${ev.start > now && ev.start - now < 12 * 3_600_000 ? ` · in ${countdown(ev.start - now).slice(2)} min` : ''}`],
+            ['Where', loc], ['With', (ev.attendees || []).join(', ')], ['Calendar', ev.calendar || ''], ['Join', ev.link ? host(ev.link) : '', ev.link]],
+          text: ev.notes ? [ev.notes] : [],
+          actions: [
+            ev.link && { label: 'JOIN', run: () => act('url', { url: ev.link }) },
+            physical(loc) && { label: 'DIRECTIONS', run: () => act('url', { url: maps(loc) }) },
+            { label: 'PREP ME', title: 'A short brief from your notes and email', run: () => ask(`Prep me for "${ev.title}" (${day} ${when}${(ev.attendees || []).length ? `, with ${ev.attendees.join(', ')}` : ''}): a short brief from my notes and recent email about it.`) },
+            { label: 'MOVE', title: 'ARES asks you when', run: () => ask(`I want to move "${ev.title}" (currently ${day} ${when}). Ask me when it should be, then move it.`) },
+          ].filter(Boolean) };
+      }
+      case 'calendar': {
+        const evs = (data.calendar?.events?.length ? data.calendar.events : data.events).filter((e) => e.end > now && e.start < new Date().setHours(23, 59, 59, 999));
+        return { ...base, label: 'CALENDAR', tag: data.calendar?.source === 'eventkit' ? 'LIVE' : data.calendar?.source ? up(data.calendar.source) : 'CONNECTOR', value: evs.length ? `${evs.length} more today` : 'Nothing more today',
+          rows: [['Source', data.calendar?.source === 'eventkit' ? `macOS Calendar${data.calendar.calendars?.length ? ` · ${data.calendar.calendars.length} calendars` : ''}` : 'Google Calendar connector (Claude)'],
+            ['Updated', data.calendar?.at ? hhmm(data.calendar.at) : '']],
+          text: data.calendar?.error ? [data.calendar.error] : [],
+          actions: [
+            { label: 'REFRESH', run: () => act('calendar-refresh', {}), close: false, say: 'refreshing your calendar…' },
+            { label: 'ADD AN EVENT', title: 'ARES asks what and when, then asks you to confirm', run: () => ask('I want to add an event to my calendar. Ask me what and when, then add it.') },
+          ] };
       }
       case 'timer': {
         const tm = data.timers.find((t) => t.label === d.label);
@@ -1482,7 +1518,9 @@ const Dash = (() => {
   });
 
   // ---- Data → panels --------------------------------------------------------------------------------------------
-  const data = { events: [], leave: null, music: null, timers: [], call: null, jobs: [], steps: new Map(), emails: [] };
+  const data = { events: [], leave: null, music: null, timers: [], call: null, jobs: [], steps: new Map(), emails: [], calendar: null };
+  /** Every event known for the calendar views: the wide EventKit range when it's there, else the NEXT panel's near ones. */
+  const calEvents = () => (data.calendar?.events?.length ? data.calendar.events : data.events);
   const EST = { small: 4, medium: 10, large: 25 }; // minutes: a rough job length when the worker keeps no checklist
 
   function countdown(ms) {
@@ -1587,6 +1625,20 @@ const Dash = (() => {
       });
     }
 
+    // CALENDAR: pinned (the default), or opened by voice ("show me my week") until it collapses
+    if (prefs.panels.calendar?.pinned || opened.has('calendar')) {
+      const evs = calEvents();
+      const todayEnd = new Date().setHours(23, 59, 59, 999);
+      const left = evs.filter((e) => !e.allDay && e.end > now && e.start <= todayEnd);
+      const nx = left.find((e) => e.start > now) || left[0];
+      want.set('calendar', {
+        kind: 'day', side: 'left', anim: 'materialize', label: 'CALENDAR', title: 'Calendar', tag: left.length ? pad2(left.length) : '', short: 'CAL',
+        value: nx ? `${nx.title} · ${nx.start <= now ? 'now' : hhmm(nx.start)}` : 'Nothing more today', detail: left.length > 1 ? `${left.length} more today` : '',
+        miniValue: left.length ? `${left.length} TODAY` : 'CLEAR', view: 'calendar', model: { events: evs }, minTier: 'compact',
+        dismissKey: 'calendar',
+      });
+      want.get('calendar').info = panels.get('calendar')?.spec.info?.type === 'event' ? panels.get('calendar').spec.info : { type: 'calendar' };
+    }
     // Pinned kinds with nothing to show right now stay, in their idle form (the id is the kind itself)
     const kindsWanted = new Set([...want.keys()].map(kindKey));
     for (const [k, v] of Object.entries(prefs.panels)) {
@@ -1604,10 +1656,11 @@ const Dash = (() => {
   // Things ARES creates: launched from the brain, and gone after a while
   function transient(id, spec) { show(id, { anim: 'launch', side: 'right', ...spec }); blip(spec.kind); }
 
-  window.ares.dash.on((msg) => {
+  function onDash(msg) {
     switch (msg.type) {
       case 'weather': setWeather(msg.weather); break;
       case 'events': data.events = msg.events || []; break;
+      case 'calendar': data.calendar = msg.calendar; break;
       case 'leave': data.leave = msg.leave; break;
       case 'music': data.music = msg.music; break;
       case 'timers': data.timers = msg.timers || []; break;
@@ -1631,7 +1684,8 @@ const Dash = (() => {
       case 'claude': claudeInfo = msg.lines || []; if (!$('statusPanel').hidden) renderFixes(); reportStatus(); break;
     }
     reconcile();
-  });
+  }
+  window.ares.dash.on(onDash);
 
   // Work: jobs, their latest step, and results launched from the brain when a job finishes
   window.ares.work.list().then((all) => { data.jobs = all; reconcile(); });
@@ -1666,6 +1720,8 @@ const Dash = (() => {
     // The ARES theme's bar carries the mark, weather, clock, status and WORK: the window's top row keeps the rest
     if ('themeBar' in p) document.documentElement.classList.toggle('theme-bar', Boolean(p.themeBar));
     prefs = { ...prefs, ...p, panels: p.panels || prefs.panels };
+    if (!('calendar' in prefs.panels)) prefs.panels.calendar = { pinned: true }; // the calendar is pinned by default
+    if (views.calendar?.settings && p.calendarCollapseSec) views.calendar.settings.collapseSec = p.calendarCollapseSec;
     greet();
     if (hadMagnet !== prefs.magnetic) layout();
   };
@@ -1673,7 +1729,7 @@ const Dash = (() => {
     applyPrefs(p);
     window.ares.dash.state().then((s) => {
       setWeather(s.weather);
-      Object.assign(data, { events: s.events || [], leave: s.leave, music: s.music, timers: s.timers || [], call: s.call, emails: s.inbox || [] });
+      Object.assign(data, { events: s.events || [], leave: s.leave, music: s.music, timers: s.timers || [], call: s.call, emails: s.inbox || [], calendar: s.calendar || null });
       claudeInfo = s.claude || [];
       reportStatus();
       reconcile();
@@ -1721,12 +1777,33 @@ const Dash = (() => {
       return true;
     },
     get card() { return card && { id: card.p.id, text: card.el.innerText }; },
-    show, hide, // for testing and tuning from the console
+    show, hide, feed: onDash, // for testing and tuning from the console (feed: a dashboard message, as from the main process)
     /** Register a view (calendar, tasks, custom templates): panels whose spec.view names it are drawn by it at FULL density. */
     view(name, def) { views[name] = def; for (const p of panels.values()) if (p.spec.view === name) fill(p); },
+    /** Open a view ("show me my week", "what's on the 20th?"): shows its panel if it isn't up and hands it the options. */
+    open(name, opts = {}) {
+      const view = views[name];
+      if (!view) return false;
+      opened.add(name);
+      reconcile();
+      const p = panels.get(name);
+      if (!p) return false;
+      touched(p);
+      view.open?.(p, opts, viewCtx(p));
+      return true;
+    },
+    /** "Collapse it": the calendar back to DAY (and away, if it was only opened by voice). */
+    collapseView(name) {
+      const p = panels.get(name);
+      if (!p) return false;
+      views[name]?.collapse?.(p, viewCtx(p));
+      release(name);
+      return true;
+    },
     /** Pin or unpin a panel by kind, id or title ("pin my calendar"). True when something changed. */
     pin: (name, on = true) => pinByName(name, on),
     get pinned() { return Object.entries(prefs.panels).filter(([, v]) => v.pinned).map(([k]) => k); },
+    get events() { return calEvents(); },
     layout,
     get desk() { return { walls, spot, brain: brain(), edges, surface: surfaceName }; },
     get reduceMotion() { return reduce(); },

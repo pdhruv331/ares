@@ -347,6 +347,37 @@ function localCommand(raw) {
   if (/^(please\s+)?(tidy up|tidy( up)? (the |your )?(panels|screen|dashboard)|clean up (the |your )?(panels|screen|dashboard)|reset (the )?panels)$/i.test(text)) {
     return { reply: '', after: () => { Dash.tidy(); window.ares.resumeListening(); } };
   }
+  // The calendar panel: "show me my week", "show the month", "what's on the 20th?", "what about next week?", "collapse it"
+  if (/^(?:please\s+)?(?:show|open|pull up)(?: me)?(?: my| the)? (?:week|weekly view|week view|calendar week)\b/i.test(text)) {
+    return { reply: '', after: () => { Dash.open('calendar', { view: 'week' }); window.ares.resumeListening(); } };
+  }
+  if (/^(?:please\s+)?(?:what(?:'s| is| about)|how(?:'s| is)|show(?: me)?)(?: my| the)? next week\b/i.test(text)) {
+    return { reply: '', after: () => { Dash.open('calendar', { view: 'week', weekOffset: 1 }); window.ares.resumeListening(); } };
+  }
+  if (/^(?:please\s+)?(?:show|open|pull up)(?: me)?(?: my| the)? (?:month|monthly view|month view|calendar month)\b/i.test(text)) {
+    return { reply: '', after: () => { Dash.open('calendar', { view: 'month' }); window.ares.resumeListening(); } };
+  }
+  if (/^(?:please\s+)?(?:show|open|pull up)(?: me)?(?: my| the)? (?:calendar|day|today'?s? (?:calendar|schedule|events))\b/i.test(text)) {
+    return { reply: '', after: () => { Dash.open('calendar', { view: 'day' }); window.ares.resumeListening(); } };
+  }
+  const nth = text.match(/^(?:please\s+)?what(?:'s| is| do i have)(?: on| for)?(?: the)? (\d{1,2})(?:st|nd|rd|th)?(?: of ([a-z]+))?\??$/i);
+  if (nth) {
+    const d = new Date(); d.setHours(0, 0, 0, 0);
+    const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    const m = nth[2] ? months.findIndex((x) => nth[2].toLowerCase().startsWith(x)) : -1;
+    if (m >= 0) d.setMonth(m);
+    d.setDate(Number(nth[1]));
+    if (m < 0 && d.getTime() < Date.now() - 86_400_000) d.setMonth(d.getMonth() + 1); // "the 2nd" on the 20th means next month
+    const date = d.getTime();
+    const evs = (Dash.events || []).filter((e) => e.start < date + 86_400_000 && e.end > date).sort((a, b) => a.start - b.start);
+    const when = d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
+    const fmt = (e) => (e.allDay ? e.title : `${e.title} at ${new Date(e.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
+    const reply = !evs.length ? `Nothing on ${when}, sir.` : evs.length === 1 ? `On ${when}: ${fmt(evs[0])}.` : `${evs.length} things on ${when}: ${evs.map(fmt).join(', ')}.`;
+    return { reply, after: () => { Dash.open('calendar', { view: 'month', date }); window.ares.resumeListening(); } };
+  }
+  if (/^(?:please\s+)?(?:collapse|shrink|fold)(?: it| that| the calendar| the panel)?$/i.test(text)) {
+    return { reply: '', after: () => { Dash.collapseView('calendar'); window.ares.resumeListening(); } };
+  }
   let pin = text.match(/^(?:please\s+)?(pin|unpin) (?:my |the )?(.+?)(?: panel)?$/i);
   if (pin) {
     const on = pin[1].toLowerCase() === 'pin';
