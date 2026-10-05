@@ -313,7 +313,7 @@ case "extra-press":
     // By name; Control Center's own icon ("BentoBox") is the one whose identifier says controlcenter; else the only one
     let pick = extras.first { text($0).contains(name) }
       ?? (name.contains("bentobox") ? extras.first { text($0).contains("controlcenter") } : nil)
-      ?? (extras.count == 1 ? extras[0] : nil)
+      ?? (extras.count == 1 && owner != "Control Center" ? extras[0] : nil) // (Control Center owns several: never guess)
     if let p = pick { pressed = AXUIElementPerformAction(p, kAXPressAction as CFString) == .success }
   }
   emit(["ok": pressed])
