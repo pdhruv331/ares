@@ -38,12 +38,11 @@ class MainActivity : Activity(), Session.Ui {
     private var heardView: TextView? = null
     private var pressedAt = 0L
     private lateinit var workBtn: TextView
-    private lateinit var youLatest: TextView
-    private lateinit var aresLatest: TextView
-    private lateinit var actions: LinearLayout
+    private lateinit var caption: TextView
     private lateinit var history: View
-    private lateinit var exchange: View
     private lateinit var inputRow: View
+    private var lastState = State.IDLE
+    private val fadeCaption = Runnable { caption.animate().alpha(0f).setDuration(600).start() }
     private val jobsChanged = { showJobs() }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -82,14 +81,10 @@ class MainActivity : Activity(), Session.Ui {
         stateText = findViewById(R.id.stateText)
         setup = findViewById(R.id.setup)
 
-        youLatest = findViewById(R.id.youLatest)
-        aresLatest = findViewById(R.id.aresLatest)
-        aresLatest.movementMethod = android.text.method.ScrollingMovementMethod()
-        actions = findViewById(R.id.actions)
+        caption = findViewById(R.id.caption)
         history = findViewById(R.id.history)
-        exchange = findViewById(R.id.exchange)
         inputRow = findViewById(R.id.inputRow)
-        findViewById<View>(R.id.historyBtn).setOnClickListener { showHistory(true) }
+        findViewById<View>(R.id.commsBtn).setOnClickListener { showHistory(history.visibility != View.VISIBLE) }
         findViewById<View>(R.id.historyClose).setOnClickListener { showHistory(false) }
         findViewById<View>(R.id.kbBtn).setOnClickListener {
             val show = inputRow.visibility != View.VISIBLE
@@ -192,6 +187,10 @@ class MainActivity : Activity(), Session.Ui {
     override fun state(s: State) {
         reactor.state = s
         fallback.state = s
+        // Captions: her words stay while she speaks, then fade; a listened-to question fades once she starts answering
+        if (s == State.IDLE && lastState == State.SPEAKING) caption.postDelayed(fadeCaption, 1200)
+        if (s == State.THINKING) { caption.removeCallbacks(fadeCaption); caption.postDelayed(fadeCaption, 2500) }
+        lastState = s
         stateText.text = when (s) { State.LISTENING -> "LISTENING"; State.THINKING -> "THINKING"; State.SPEAKING -> "SPEAKING"; State.OFFLINE -> "OFFLINE"; else -> "" }
         val hf = if (session.handsFree) "HANDS-FREE · " else ""
         talk.text = if (s == State.LISTENING) "${hf}LISTENING… TAP TO SEND" else if (session.handsFree) "HANDS-FREE · TAP TO TALK NOW" else "TAP TO TALK"
@@ -199,17 +198,26 @@ class MainActivity : Activity(), Session.Ui {
         if (s == State.THINKING) replyView = null
     }
 
+    /** Show words over the reactor now; they fade later (when she's done speaking, or after a while if typed). */
+    private fun showCaption(text: String, fadeAfterMs: Long? = null) {
+        caption.removeCallbacks(fadeCaption)
+        caption.animate().cancel()
+        caption.text = text
+        caption.alpha = 1f
+        if (fadeAfterMs != null) caption.postDelayed(fadeCaption, fadeAfterMs)
+    }
+
     override fun heard(text: String, final: Boolean) {
         val v = heardView ?: add("YOU", text, user = true).also { heardView = it }
         v.text = text
-        youLatest.text = text
+        showCaption(text)
         if (final) heardView = null
     }
 
     override fun reply(text: String, final: Boolean) {
         val v = replyView ?: add("ARES", "", user = false).also { replyView = it }
         v.text = text
-        aresLatest.text = text
+        showCaption(text, if (final && session.state != State.SPEAKING) 7000 else null) // typed (no voice): read it, then it goes
         if (final) replyView = null
         scrollDown()
         setStatus("online")
@@ -220,19 +228,13 @@ class MainActivity : Activity(), Session.Ui {
         card.text = "↗  $label"
         card.setOnClickListener { Ares.open(this, url) }
         log.addView(card)
-        // ...and under her latest answer, where you can tap it without opening the history
-        val chip = layoutInflater.inflate(R.layout.item_action, actions, false) as TextView
-        chip.text = "↗  $label"
-        chip.setOnClickListener { Ares.open(this, url) }
-        actions.addView(chip)
         scrollDown()
         Ares.open(this, url) // you just asked for it: open it straight away
     }
 
-    /** The full conversation over the brain, or just the latest exchange. */
+    /** COMMS: the whole conversation over the reactor. */
     private fun showHistory(open: Boolean) {
         history.visibility = if (open) View.VISIBLE else View.GONE
-        exchange.visibility = if (open) View.GONE else View.VISIBLE
         if (open) scrollDown()
     }
 
@@ -246,7 +248,7 @@ class MainActivity : Activity(), Session.Ui {
         setStatus("offline")
     }
 
-    private fun add(who: String, text: String, user: Boolean, source: String? = null): TextView {
+    private fun add(who: String, text: String, user: Boolean, source: String? = null, quiet: Boolean = false): TextView {
         val item = layoutInflater.inflate(R.layout.item_message, log, false)
         item.findViewById<TextView>(R.id.who).apply {
             this.text = if (source != null && source != "phone" && user) "$who · ${source.uppercase()}" else who
@@ -256,9 +258,7 @@ class MainActivity : Activity(), Session.Ui {
         body.text = text
         body.isActivated = !user
         log.addView(item)
-        // The latest exchange is what shows by default: your words small, her answer large
-        if (user) { youLatest.text = text; youLatest.visibility = if (text.isBlank()) View.GONE else View.VISIBLE; aresLatest.text = ""; actions.removeAllViews() }
-        else { aresLatest.text = text; aresLatest.scrollTo(0, 0) }
+        if (!user && !quiet && text.isNotEmpty()) showCaption(text, 7000) // a note from the app itself (offline, hands-free…): read it, then it goes
         while (log.childCount > 80) log.removeViewAt(0)
         scrollDown()
         return body
@@ -278,7 +278,7 @@ class MainActivity : Activity(), Session.Ui {
                 Ares.setStatus(this, "online")
                 runOnUiThread {
                     log.removeAllViews()
-                    for (l in lines) add(if (l.who == "ares") "ARES" else "YOU", l.text, l.who != "ares", l.source)
+                    for (l in lines) add(if (l.who == "ares") "ARES" else "YOU", l.text, l.who != "ares", l.source, quiet = true)
                     if (lines.isEmpty()) add("ARES", "At your service, sir. Tap the button and talk, or type below.", false)
                     setStatus("online")
                     state(State.IDLE)
