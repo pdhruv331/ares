@@ -233,6 +233,13 @@ class Tasks extends EventEmitter {
     if (!r.ok) throw new Error(j.error?.message || `Google Tasks ${r.status}`);
     return j;
   }
+  /** A new OAuth client (another Cloud project): forget the stored client and token, then set up again. */
+  async forgetClient() {
+    await this.keychain.delete(KC.refresh);
+    await this.keychain.delete(KC.client);
+    this.client = null; this.hasRefresh = false; this.access = null;
+    this.emit('update', this.message());
+  }
   async disconnect() {
     await this.keychain.delete(KC.refresh);
     this.hasRefresh = false; this.access = null; this.tasks = [];

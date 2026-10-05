@@ -273,6 +273,7 @@ function menuSections() {
       { label: tasks?.hasRefresh ? 'Reconnect Google Tasks…' : 'Connect Google Tasks…', click: () => connectGoogleTasks() },
       { label: 'Use Apple Reminders for Tasks', type: 'checkbox', checked: readSettings().tasks?.source === 'reminders', click: (item) => { if (item.checked) tasks.useReminders(); else { writeSettings({ tasks: { ...(readSettings().tasks || {}), source: undefined } }); tasks.refresh('menu'); } refreshTray(); } },
       { label: 'Disconnect Google Tasks', visible: Boolean(tasks?.hasRefresh), click: () => tasks.disconnect().then(refreshTray) },
+      { label: 'Replace Google Tasks Client JSON…', visible: Boolean(tasks), click: () => tasks.forgetClient().then(() => connectGoogleTasks()) },
     { label: 'Reduce Motion', type: 'checkbox', checked: Boolean(readSettings().reduceMotion), click: (item) => { writeSettings({ reduceMotion: item.checked }); win?.webContents.send('ui-prefs', uiPrefs()); wallpaper?.prefs(); refreshTray(); } },
       { label: 'Magnetic Panel Slots', type: 'checkbox', checked: readSettings().ui?.magnetic !== false, click: (item) => { writeUi({ magnetic: item.checked }); win?.webContents.send('ui-prefs', uiPrefs()); refreshTray(); } },
     ],
