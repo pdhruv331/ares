@@ -183,3 +183,31 @@ body.work-open #app { visibility: hidden; }
 /* Inside the Android app: only the Work view (its own header does the rest) */
 body.embed > header, body.embed #app, body.embed #pair { display: none !important; }
 body.embed #work { padding-top: 0; }
+
+/* Autonomy tabs, the kill switch, projects, goals, routines */
+.wk-tabs { display: flex; gap: 2px; margin: 0 0 8px; border-bottom: 1px solid var(--cyan-faint); }
+.wk-tabs button { flex: 1; background: none; border: 0; border-bottom: 2px solid transparent; color: var(--muted); font: 9px var(--mono); letter-spacing: 0.15em; padding: 8px 2px; }
+.wk-tabs button.active { color: var(--cyan); border-bottom-color: var(--cyan); }
+.wk-kill { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 0 0 8px; font: 9px var(--mono); letter-spacing: 0.12em; color: var(--muted); }
+.wk-kill.paused { color: var(--amber); }
+.wk-kill .icon-btn { color: var(--amber); border-color: rgba(255, 181, 71, 0.5); }
+.job.auto { display: block; }
+.job.auto .job-title { display: block; }
+.job.auto .job-meta { display: block; margin: 2px 0 0; }
+.goal-steps { margin: 6px 0 0 16px; padding: 0; font: 11px var(--mono); line-height: 1.7; color: var(--text); }
+.goal-steps li.done { color: #4ade80; } .goal-steps li.running { color: #c4b5fd; } .goal-steps li.failed { color: #f87171; }
+.goal-steps a { color: var(--cyan); margin-left: 4px; }
+.wk-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.switch { display: inline-flex; align-items: center; gap: 6px; font: 9px var(--mono); letter-spacing: 0.15em; color: var(--muted); }
+.switch i { width: 28px; height: 15px; border-radius: 8px; border: 1px solid var(--cyan-dim); position: relative; background: rgba(62, 230, 255, 0.05); }
+.switch i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); transition: left 0.2s; }
+.switch.on { color: var(--cyan); } .switch.on i { background: rgba(62, 230, 255, 0.25); } .switch.on i::after { left: 15px; background: var(--cyan); }
+.project-box { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--cyan-faint); border-radius: 8px; font: 11px var(--mono); color: var(--text); }
+.project-box b { color: var(--muted); letter-spacing: 0.12em; font-size: 9px; }
+.project-box .phase { color: var(--cyan); letter-spacing: 0.15em; }
+.project-box .ok { color: #4ade80; } .project-box .no { color: var(--amber); }
+.project-steps { display: flex; gap: 4px; grid-column: 1 / -1; margin-top: 4px; }
+.project-steps span { flex: 1; text-align: center; font-size: 8px; letter-spacing: 0.12em; padding: 3px 0; border: 1px solid var(--cyan-faint); border-radius: 4px; color: var(--muted); }
+.project-steps span.on { color: var(--cyan); border-color: var(--cyan-dim); } .project-steps span.past { color: #4ade80; }
+.approval-box { border-color: var(--amber); box-shadow: 0 0 20px rgba(255, 181, 71, 0.1); }
+.work-actions a.icon-btn { text-decoration: none; }

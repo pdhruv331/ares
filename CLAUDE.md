@@ -138,3 +138,21 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
 - Testing: `npx electron scripts/test-control.js` (reads only, scratch folder in ~/Downloads, fake push, no Claude call; `--live` adds
   the highlight). Never run `--live` or UI automation tests while someone is using the Mac. Android: Files.kt (file buttons download
   through the paired connection and open), Outbox (asks queued while the Mac is offline, sent on `hello`, answered as notifications).
+
+## Autonomy (docs/autonomy-prompt.md, sections 1-5)
+
+- `autonomy.js` (main) on top of jobs.js: PROJECTS = code jobs with `project` meta in `~/ARES Projects/<slug>` (git init, BRIEF.md,
+  `PROJECT_PROMPT` in jobs.js, the session keeps `.ares/status.json` {phase, note, tests, run, url} which `syncProject` polls);
+  on finish `verifyProject` grades against the definition of done with a one-shot (haiku/sonnet) and sends the session back once
+  (`verifyRounds`), then zips + pushes to the phone. GOALS = a one-shot plan of steps run as jobs in sequence (source `goal`).
+  ROUTINES = schedules ({daily hour/minute/days | interval | event unlock/wake}) ticked every 30 s, each run a job (source `routine`).
+  Suggestions: `observe`/`suggestion` notes a repeated request for the brain to OFFER a routine once; never creates one.
+- Tiers: `start_project` is tier 3 (the brief read back + the user's yes through the bridge gate); goals/routines tier 2 (owner);
+  code sessions: `sandbox.classifyCode` (push/deploy/publish = ask, installs = tier 2 logged). Everything goes to `audit.jsonl`
+  (Work panel LOG tab). Settings `autonomy`: maxProjects 1, maxJobs 2, maxRunMin 90, maxRunsPerDay 20, usagePauseAt 85.
+- Kill switch: "stop everything" (KILL_PHRASE in main.js, before the brain), ◉ menu "Pause All Autonomous Work", the phone's STOP ALL
+  and the notification's Resume all (`/api/autonomy/*`). `stopAll` pauses jobs (`jobs.pause`, status `paused`), holds goals and
+  routines; `resume` per item or everything. Near the usage limit, running projects pause and resume on their own.
+- UI: Work panel tabs JOBS/PROJECTS/GOALS/ROUTINES/LOG (renderer/work.js), project box + buttons, amber approval boxes, project orbs
+  larger (`ORB_SIZE.project`) with labels (work.js labelLoop); phone Work view tabs + STOP ALL (phone/work.js), Android "ROUTINES" chip.
+- Tests: `node scripts/test-autonomy.js` (fake runner, no Claude usage); `--real` runs one tiny haiku project end to end.

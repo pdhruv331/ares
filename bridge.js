@@ -11,7 +11,7 @@ const SAFE_WRITES = /^(create_draft|draft_)/i;
 // What counts as the user saying "yes" (must be how their latest message starts).
 const AFFIRMATIVE = /^\s*(yes|yeah|yep|yup|sure|go ahead|do it|send it|book it|delete it|move it|confirm(ed)?|please do|ok(ay)?|absolutely|correct|that'?s right|affirmative|go for it)\b/i;
 
-function startBridge({ onTimerDone, onTimers = () => {}, onPhoneAction, onNotify, findContact, memory, teachPhrase, work, calls, claudeUsage, claude = () => null, control = null, log }) {
+function startBridge({ onTimerDone, onTimers = () => {}, onPhoneAction, onNotify, findContact, memory, teachPhrase, work, calls, claudeUsage, claude = () => null, control = null, autonomy = () => null, log }) {
   const token = crypto.randomBytes(24).toString('hex');
   const timers = new Map(); // label -> { handle, endsAt }
   let lastUserText = '';
@@ -152,14 +152,17 @@ function startBridge({ onTimerDone, onTimers = () => {}, onPhoneAction, onNotify
   }
   // Full Mac control (control.js): /control/<route>, with who's asking and the yes-gate
   const controlRoute = (name) => (args) => control.handle(name, args, { source, verified, turn, confirm: (what) => confirm(what) });
+  // Autonomy (autonomy.js): /autonomy/<route>, same context
+  const autonomyRoute = (name) => (args) => { const a = autonomy(); return a ? a.handle(name, args, { source, verified, turn, confirm: (what) => confirm(what) }) : { message: 'Autonomy is still starting up.' }; };
 
   const server = http.createServer((req, res) => {
     const isControl = control && req.url.startsWith('/control/');
-    if (req.headers.authorization !== `Bearer ${token}` || req.method !== 'POST' || (!routes[req.url] && !isControl)) {
+    const isAutonomy = req.url.startsWith('/autonomy/');
+    if (req.headers.authorization !== `Bearer ${token}` || req.method !== 'POST' || (!routes[req.url] && !isControl && !isAutonomy)) {
       res.writeHead(404).end();
       return;
     }
-    const handler = isControl ? controlRoute(req.url.slice('/control/'.length)) : routes[req.url];
+    const handler = isControl ? controlRoute(req.url.slice('/control/'.length)) : isAutonomy ? autonomyRoute(req.url.slice('/autonomy/'.length)) : routes[req.url];
     let body = '';
     req.on('data', (c) => { body += c; if (body.length > 1e6) req.destroy(); });
     req.on('end', () => {

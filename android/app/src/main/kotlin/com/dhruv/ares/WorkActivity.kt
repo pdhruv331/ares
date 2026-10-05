@@ -76,6 +76,7 @@ class WorkActivity : Activity() {
         setUpWeb()
         findViewById<View>(R.id.back).setOnClickListener { finish() }
         findViewById<View>(R.id.gallery).setOnClickListener { showWeb("$base/?work=gallery&app=1") }
+        findViewById<View>(R.id.more).setOnClickListener { showWeb("$base/?work=routines&app=1") }
         findViewById<View>(R.id.attach).setOnClickListener {
             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
                 .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true), PICK_FILES)

@@ -25,7 +25,15 @@ const Work = (() => {
   let embedStart = 'job'; // what the app opened: one job, or the list
   const handBack = () => { location.hash = 'closed'; }; // the app watches for this
 
-  const STATUS = { queued: 'QUEUED', running: 'WORKING', approval: 'NEEDS YOUR OK', done: 'DONE', failed: 'FAILED', cancelled: 'CANCELLED' };
+  const STATUS = { queued: 'QUEUED', running: 'WORKING', approval: 'NEEDS YOUR OK', done: 'DONE', failed: 'FAILED', cancelled: 'CANCELLED', paused: 'PAUSED' };
+  // Autonomy on the phone (docs/autonomy-prompt.md §R, §5): projects, goals and routines tabs, the kill switch
+  let mode = 'jobs';   // 'jobs' | 'projects' | 'goals' | 'routines'
+  let auto = null;     // the Mac's autonomy state
+  const PHASES = ['plan', 'build', 'test', 'verify', 'report'];
+  const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const describeSchedule = (sc) => !sc ? '' : sc.kind === 'event' ? (sc.event === 'unlock' ? 'on unlock' : 'on wake') : sc.kind === 'interval' ? (sc.minutes % 60 === 0 ? `every ${sc.minutes / 60}h` : `every ${sc.minutes} min`)
+    : `${sc.days ? sc.days.map((d) => DAYS[d]).join('/') : 'daily'} ${String(sc.hour).padStart(2, '0')}:${String(sc.minute).padStart(2, '0')}`;
+  const autoAct = (name, args) => api('/api/autonomy/act', { name, args }).catch((err) => ({ error: err.message }));
   const when = (t) => new Date(t).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
   const took = (j) => {
     if (!j.started) return '';
@@ -80,12 +88,66 @@ const Work = (() => {
   }
 
   // ---- List and gallery --------------------------------------------------------------------------------
+  function tabsBar() {
+    let bar = $('wkTabs');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'wkTabs';
+      bar.className = 'wk-tabs';
+      bar.innerHTML = '<button data-tab="jobs">JOBS</button><button data-tab="projects">PROJECTS</button><button data-tab="goals">GOALS</button><button data-tab="routines">ROUTINES</button>';
+      $('wkSearch').insertAdjacentElement('beforebegin', bar);
+      const kill = document.createElement('div');
+      kill.id = 'wkKill';
+      kill.className = 'wk-kill';
+      kill.innerHTML = '<span id="wkKillText"></span><button class="icon-btn" id="wkKillBtn" type="button"></button>';
+      bar.insertAdjacentElement('afterend', kill);
+      bar.addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (!b) return; mode = b.dataset.tab; view = 'list'; refresh(); });
+      $('wkKillBtn').addEventListener('click', async () => {
+        const r = auto?.paused ? await api('/api/autonomy/resume', { what: 'everything' }) : await api('/api/autonomy/stop', {});
+        status(r.message || r.error || '');
+        loadAuto();
+      });
+    }
+    for (const b of bar.querySelectorAll('button')) b.classList.toggle('active', b.dataset.tab === mode);
+    $('wkKillText').textContent = auto?.paused ? 'EVERYTHING PAUSED' : `${auto ? `${auto.projects.filter((p) => ['running', 'queued', 'approval'].includes(p.status)).length} project · ${auto.goals.filter((g) => g.status === 'running').length} goals · ${auto.routines.filter((r) => r.enabled).length} routines on` : ''}`;
+    $('wkKillBtn').textContent = auto?.paused ? 'RESUME ALL' : 'STOP ALL';
+    $('wkKill').classList.toggle('paused', Boolean(auto?.paused));
+  }
+  async function loadAuto() {
+    const r = await api('/api/autonomy/state').catch(() => null);
+    if (r?.ok) { auto = r.state; refresh(); }
+  }
+
+  function renderAuto() {
+    const ul = $('wkJobs');
+    const items = mode === 'goals' ? auto?.goals || [] : auto?.routines || [];
+    ul.innerHTML = items.length ? '' : `<li class="empty">${!auto ? 'Loading…' : mode === 'goals' ? 'No goals. Tell ARES "my goal is…" and she plans the steps.' : 'No routines. Tell ARES "every weekday at 8, …".'}</li>`;
+    for (const it of [...items].reverse()) {
+      const li = document.createElement('li');
+      li.className = `job ${mode === 'goals' ? it.status : it.enabled ? 'running' : 'cancelled'} auto`;
+      if (mode === 'goals') {
+        li.innerHTML = `<span class="job-dot"></span><span class="job-title">${esc(it.title)}</span><span class="job-meta">${esc(String(it.status).toUpperCase())} · step ${Math.min(it.current + 1, it.steps.length)}/${it.steps.length}</span>
+          <ol class="goal-steps">${it.steps.map((st) => `<li class="${esc(st.status)}">${esc(st.title)}${st.jobId ? ` <a data-job="${esc(st.jobId)}">open</a>` : ''}</li>`).join('')}</ol>
+          ${['running', 'paused', 'stuck', 'waiting'].includes(it.status) ? `<div class="wk-row"><button class="icon-btn" data-auto="goal/cancel" data-args='${esc(JSON.stringify({ goal: it.id }))}'>CANCEL</button></div>` : ''}`;
+      } else {
+        li.innerHTML = `<span class="job-dot"></span><span class="job-title">${esc(it.title)}</span><span class="job-meta">${esc(describeSchedule(it.schedule))}${it.nextRun ? ` · next ${when(it.nextRun)}` : ''}</span>
+          <div class="wk-row"><label class="switch ${it.enabled ? 'on' : ''}" data-auto="routine/control" data-args='${esc(JSON.stringify({ routine: it.id, action: it.enabled ? 'off' : 'on' }))}'><i></i>${it.enabled ? 'ON' : 'OFF'}</label>
+            <button class="icon-btn" data-auto="routine/control" data-args='${esc(JSON.stringify({ routine: it.id, action: 'run' }))}'>RUN NOW</button>
+            <button class="icon-btn" data-auto="routine/control" data-args='${esc(JSON.stringify({ routine: it.id, action: 'delete' }))}'>DELETE</button></div>`;
+      }
+      ul.appendChild(li);
+    }
+  }
+
   function renderList() {
     const ul = $('wkJobs');
     $('wkGallery').hidden = true;
     ul.hidden = false;
     $('wkGalleryBtn').classList.toggle('active', false);
-    const shown = [...jobs].reverse().filter((j) => !filter || filter.has(j.id));
+    tabsBar();
+    if (mode === 'goals' || mode === 'routines') return renderAuto();
+    const pool = mode === 'projects' ? jobs.filter((j) => j.project) : jobs;
+    const shown = [...pool].reverse().filter((j) => !filter || filter.has(j.id));
     ul.innerHTML = shown.length ? '' : jobs.length ? '<li class="empty">Nothing matches that.</li>'
       : '<li class="empty">No jobs yet. Type one above, say "do this as a job" in the chat, or share something to ARES and choose Make it a job.</li>';
     for (const j of shown) {
@@ -93,7 +155,8 @@ const Work = (() => {
       li.className = `job ${j.status}${!j.seen && !isActive(j) ? ' unseen' : ''}`;
       li.dataset.job = j.id;
       const doing = j.status === 'running' ? ` · ${j.steps} steps` : '';
-      li.innerHTML = `<span class="job-dot"></span><span class="job-title">${esc(j.title)}</span><span class="job-meta">${STATUS[j.status]}${doing} · ${when(j.created)}</span>`;
+      const phase = j.project && ['running', 'paused', 'queued', 'approval'].includes(j.status) ? ` · ${String(j.project.phase || '').toUpperCase()}` : '';
+      li.innerHTML = `<span class="job-dot"></span><span class="job-title">${j.project ? '◈ ' : ''}${esc(j.title)}</span><span class="job-meta">${STATUS[j.status]}${phase}${doing} · ${when(j.created)}</span>`;
       ul.appendChild(li);
     }
   }
@@ -121,9 +184,19 @@ const Work = (() => {
     jobs = r.jobs;
     cards = new Map(r.gallery.map((c) => [c.id, c]));
     refresh();
+    loadAuto();
   }
 
   let searchTimer = null;
+  listView.addEventListener('click', async (e) => {
+    const a = e.target.closest('[data-auto]');
+    if (!a) return;
+    let args = {};
+    try { args = JSON.parse(a.dataset.args || '{}'); } catch {}
+    const r = await autoAct(a.dataset.auto, args);
+    status(r.message || r.error || '');
+    loadAuto();
+  });
   $('wkSearch').addEventListener('input', () => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(async () => {
@@ -250,8 +323,20 @@ const Work = (() => {
         <div class="approval-box"><div><b>Needs your OK:</b> ${esc(job.approval.what)}${job.approval.command ? `<pre class="approval-cmd">${esc(job.approval.command)}</pre>` : ''}</div>
           <div class="approval-btns"><button class="icon-btn yes" data-act="yes" data-at="${job.approval.at}">YES</button><button class="icon-btn" data-act="no" data-at="${job.approval.at}">NO</button></div></div>` : ''}
       ${job.status === 'failed' ? `<div class="approval-box failed">${esc(job.error || 'Failed')}</div>` : ''}
+      ${job.project ? `<div class="project-box">
+        <b>PHASE</b><span class="phase">${esc(String(job.project.phase || '?').toUpperCase())}${job.project.note ? ` · ${esc(job.project.note)}` : ''}</span>
+        <b>TESTS</b><span>${esc(job.project.tests || 'none yet')}</span>
+        <b>COMMIT</b><span>${esc(job.project.commit || 'none yet')}</span>
+        ${job.project.verified != null ? `<b>VERIFY</b><span class="${job.project.verified ? 'ok' : 'no'}">${job.project.verified ? 'passes the definition of done' : `not yet: ${esc(job.project.verifyNotes || '')}`}</span>` : ''}
+        <div class="project-steps">${PHASES.map((ph, i) => `<span class="${i < PHASES.indexOf(job.project.phase) || job.status === 'done' ? 'past' : ph === job.project.phase ? 'on' : ''}">${ph.toUpperCase()}</span>`).join('')}</div>
+      </div>` : ''}
       <div class="work-actions">
         ${isActive(job) ? '<button class="icon-btn" data-act="cancel">CANCEL</button>' : ''}
+        ${isActive(job) && job.status !== 'queued' ? '<button class="icon-btn" data-act="pause">PAUSE</button>' : ''}
+        ${job.status === 'paused' ? '<button class="icon-btn" data-act="resume">RESUME</button>' : ''}
+        ${job.project && job.project.run ? '<button class="icon-btn" data-act="run">RUN IT</button>' : ''}
+        ${job.project && job.project.url && job.project.running ? `<a class="icon-btn" href="/api/projects/${esc(job.id)}/preview/" target="_blank" rel="noopener">PREVIEW</a>` : ''}
+        ${job.project && done ? '<button class="icon-btn" data-act="zip">ZIP + PREVIEW</button>' : ''}
         ${done ? '<button class="icon-btn" data-act="continue">CONTINUE</button>' : ''}
         ${done ? '<button class="icon-btn" data-act="slides">MAKE SLIDES</button>' : ''}
         <button class="icon-btn" data-act="mac">SEND TO MAC</button>
@@ -333,6 +418,10 @@ const Work = (() => {
     let r = {};
     if (what === 'yes' || what === 'no') r = await act(openId, 'answer', { yes: what === 'yes', at: Number(btn.dataset.at) });
     if (what === 'cancel') r = await act(openId, 'cancel');
+    if (what === 'pause') r = await autoAct('project/control', { project: openId, action: 'pause' });
+    if (what === 'resume') r = await autoAct('resume', { what: openId }).then((x) => (x.message ? { said: x.message } : x));
+    if (what === 'run') r = await autoAct('project/control', { project: openId, action: 'run' }).then((x) => ({ said: x.message }));
+    if (what === 'zip') r = await autoAct('project/control', { project: openId, action: 'send_to_phone' }).then((x) => ({ said: x.message }));
     if (what === 'dismiss') { r = await act(openId, 'dismiss'); if (!r.error) return close(); }
     if (what === 'mac') { r = await act(openId, 'send-to-mac'); if (!r.error) r.said = r.now ? 'Open on your Mac now' : "It'll open on your Mac when you're back at it"; }
     if (what === 'slides') {
@@ -499,6 +588,9 @@ const Work = (() => {
       if (!isOpen() || m.id !== openId || detail.hidden) return;
       const ul = $('wkSteps');
       if (ul && m.evt.type !== 'done' && m.evt.type !== 'approval') ul.insertAdjacentHTML('beforeend', stepLine(m.evt));
+    } else if (m.type === 'autonomy') {
+      auto = m.state;
+      refresh();
     } else if (m.type === 'job-removed') {
       jobs = jobs.filter((j) => j.id !== m.id);
       if (openId === m.id && isOpen()) back();
@@ -559,7 +651,7 @@ const Work = (() => {
     if (EMBED) {
       embedStart = q.get('job') ? 'job' : 'list';
       if (q.get('job')) showJob(q.get('job'));
-      else { if (q.get('work') === 'gallery') view = 'gallery'; openList(); }
+      else { if (q.get('work') === 'gallery') view = 'gallery'; if (['projects', 'goals', 'routines'].includes(q.get('work'))) mode = q.get('work'); openList(); }
       return;
     }
     if (q.get('job')) { const id = q.get('job'); history.replaceState(null, '', '/'); setTimeout(() => showJob(id), 300); }

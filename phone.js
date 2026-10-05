@@ -40,6 +40,7 @@ class PhoneServer extends EventEmitter {
    * @param {object} o.calls           the phone line, for the app's Calls screen (main.js phoneCalls)
    * @param {() => object|null} o.firebase  Firebase options for the Android app's push (relay.js)
    * @param {(id: string) => object|null} [o.fileFor]  a file sent to the phone (control.js): { path, name, mime, size }
+   * @param {() => object|null} [o.autonomy]  autonomy.js: projects, goals, routines, the kill switch
    * @param {Function} o.log
    */
   constructor(o) {
@@ -229,6 +230,9 @@ class PhoneServer extends EventEmitter {
     if (req.method === 'GET' && url.pathname === '/api/history') return json(200, { ok: true, history: this.history() });
 
     if (url.pathname === '/api/jobs' || url.pathname.startsWith('/api/jobs/')) return this.jobRoute(req, res, url, json);
+    if (url.pathname.startsWith('/api/autonomy/')) return this.autonomyRoute(req, res, url, json);
+    // A running project's dev server, reachable from the phone only over Tailscale (never a public URL)
+    if (req.method === 'GET' && /^\/api\/projects\/[\w-]+\/preview(\/|$)/.test(url.pathname)) return this.previewRoute(req, res, url, json);
     // "Send this to my phone": a file the Mac registered for this one send (control.js sendbox), never a public link
     if (req.method === 'GET' && url.pathname.startsWith('/api/files/')) {
       const f = this.fileFor?.(url.pathname.slice('/api/files/'.length));
@@ -264,6 +268,36 @@ class PhoneServer extends EventEmitter {
     }
 
     return res.writeHead(404).end();
+  }
+
+  // ---- Autonomy: projects, goals, routines and the kill switch, from the phone (a paired phone is the owner) -------------
+  async autonomyRoute(req, res, url, json) {
+    const a = this.autonomy?.();
+    if (!a) return json(503, { ok: false, error: 'Autonomy is still starting up.' });
+    const name = url.pathname.slice('/api/autonomy/'.length);
+    const ctx = { source: 'phone', verified: true, turn: 0, confirm: () => ({ allow: true, said: 'tapped on the phone' }) };
+    if (req.method === 'GET' && name === 'state') return json(200, { ok: true, state: a.view() });
+    if (req.method !== 'POST') return json(405, { ok: false });
+    const b = JSON.parse((await this.body(req, 65536)).toString() || '{}');
+    if (name === 'stop') return json(200, { ok: true, ...(await a.handle('stop', {}, ctx)) });
+    if (name === 'resume') return json(200, { ok: true, ...(await a.handle('resume', { what: b.what }, ctx)) });
+    if (name === 'act' && typeof b.name === 'string' && /^(project|goal|routine)\//.test(b.name)) { this.log('phone autonomy', { name: b.name, device: this.device(req).name }); return json(200, { ok: true, ...(await a.handle(b.name, b.args || {}, ctx)) }); }
+    return json(404, { ok: false });
+  }
+  previewRoute(req, res, url, json) {
+    const a = this.autonomy?.();
+    const id = url.pathname.split('/')[3];
+    const target = a?.previewTarget(id);
+    if (!target) return json(404, { ok: false, error: 'That project isn\'t running right now ("run it" first).' });
+    const rest = url.pathname.replace(/^\/api\/projects\/[\w-]+\/preview/, '') || '/';
+    const proxy = http.request({ host: target.hostname, port: target.port || 80, path: rest + url.search, method: 'GET', headers: { ...req.headers, host: target.host, cookie: '' } }, (up) => {
+      const headers = { ...up.headers, 'cache-control': 'no-store' };
+      delete headers['set-cookie'];
+      res.writeHead(up.statusCode || 200, headers);
+      up.pipe(res);
+    });
+    proxy.on('error', () => { if (!res.headersSent) json(502, { ok: false, error: 'The project\'s server didn\'t answer.' }); else res.end(); });
+    proxy.end();
   }
 
   // ---- Calls: the ARES phone line (calls.js), from the phone ---------------------------------------------

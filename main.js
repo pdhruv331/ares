@@ -42,6 +42,7 @@ const { Voicemail } = require('./voicemail');
 const { Wallpaper } = require('./wallpaper');
 const { Theme } = require('./theme');
 const { Control } = require('./control');
+const { Autonomy, PROJECTS_DIR } = require('./autonomy');
 const { ClaudeUsage } = require('./claude-usage');
 const { ClaudeSessions } = require('./claude-sessions');
 const { ClaudeControl } = require('./claude-control');
@@ -81,6 +82,7 @@ let claudeUsage; // the Claude plan's 5-hour/weekly limits, from Claude Code's r
 let desk;      // desk mode (desk.js): no wake word needed while the user is at the Mac
 let vision;    // hand gestures (vision.js): the camera helper and the gesture engine, only while desk mode is active
 let surface;   // where the ARES window lives: the live desktop, lifted above the apps, or a window (surface.js)
+let autonomy;  // projects, goals, routines, the kill switch (autonomy.js)
 let control;   // full Mac control (control.js): files, windows, screen, UI automation, system, send to phone
 let theme;     // the ARES OS theme (theme.js): the menu bar, window glow, dock, icons, notifications and system look
 let speech;    // her voice (voice.js): Katherine on ElevenLabs, the local Kokoro backup, budget mode, phrase cache, credit watch
@@ -271,6 +273,10 @@ function menuSections() {
       { label: 'Quiet Hours for Claude Alerts (11 pm–7 am)', type: 'checkbox', checked: readSettings().claudeQuiet !== false,
         click: (item) => { writeSettings({ claudeQuiet: item.checked ? { from: 23, to: 7 } : false }); refreshTray(); } },
       { label: 'Always Also Notify My Phone', type: 'checkbox', checked: Boolean(readSettings().workAlwaysPhone), click: (item) => { writeSettings({ workAlwaysPhone: item.checked }); refreshTray(); } },
+      { type: 'separator' },
+      { label: autonomy?.state.paused ? 'KILL SWITCH ON: everything paused' : `Autonomy: ${autonomy ? `${autonomy.view().projects.filter((p) => ['running', 'queued', 'approval'].includes(p.status)).length} project, ${autonomy.state.goals.filter((g) => g.status === 'running').length} goals, ${autonomy.state.routines.filter((r) => r.enabled).length} routines on` : 'starting'}`, enabled: false },
+      { label: 'Pause All Autonomous Work (kill switch)', type: 'checkbox', checked: Boolean(autonomy?.state.paused), click: (item) => { if (item.checked) autonomy.stopAll('menu'); else autonomy.resumeAll(); refreshTray(); } },
+      { label: 'Open ARES Projects Folder…', click: () => { fs.mkdirSync(PROJECTS_DIR, { recursive: true }); shell.openPath(PROJECTS_DIR); } },
     ],
     phone: [
       {
@@ -653,6 +659,8 @@ function rememberIntent(text, r) {
  * put ahead of the brain prompt. `intent` is passed when the listener already classified it.
  */
 async function planRemark(text, source, { intent = null, afterBarge = false, addressed = true } = {}) {
+  const killed = killSwitch(text, source);
+  if (killed) return { r: intent, quick: { reply: killed }, notes: '' };
   const budget = budgetCommand(text);
   if (budget) {
     remember('user', text, source); remember('ares', budget, source, true);
@@ -995,6 +1003,7 @@ function startPhone() {
     firebase: () => relay.firebase(),
     fileFor: (id) => control?.fileFor(id),
     status: phoneStatus,
+    autonomy: () => autonomy,
     log,
   });
   phone.on('fcm', (d) => {
@@ -1261,9 +1270,23 @@ async function clearMemory() {
 // "Do this as a job", "…in the background": the user wants a background worker, whatever the brain thinks
 const JOB_PHRASE = /\b(as an? (background )?job|in the background|start an? job|make (it|this|that) an? job)\b/i;
 const JOB_NOTE = '(ARES note: the user asked for this to be done as a background job. Call start_job with a complete brief, then just say you are on it.)\n\n';
+// "ARES, stop everything": the kill switch, handled before the brain, from any device
+const KILL_PHRASE = /\b(stop everything|halt everything|kill switch|pause (all|everything)|stop all (the )?(work|jobs|projects|autonomous))\b/i;
+function killSwitch(said, source) {
+  if (!autonomy || !KILL_PHRASE.test(said)) return null;
+  const paused = autonomy.stopAll(source);
+  const reply = paused.length ? `Everything's paused, sir: ${paused.join(', ')}. Say "resume everything" when you want it back.` : 'Nothing was running, sir, but everything autonomous is on hold until you say "resume everything".';
+  remember('user', said, source); remember('ares', reply, source, true);
+  return reply;
+}
 async function askBrain(said, prompt, onDelta, source = 'mac', images = [], verified = source !== 'mac') {
   const t0 = Date.now();
   let first = null;
+  const killed = killSwitch(said, source);
+  if (killed) { onDelta?.(killed); return { ok: true, text: killed, model: 'none', why: 'kill switch' }; }
+  autonomy?.observe(said);
+  const hint = autonomy?.suggestion() || '';
+  if (hint) prompt = hint + prompt;
   if (JOB_PHRASE.test(said)) prompt = JOB_NOTE + prompt;
   if (callNotes.length) prompt = `(ARES note: since the last message, you told the user about phone calls: ${callNotes.splice(0).join(' | ')})\n\n${prompt}`;
   const result = await claude.ask(prompt, (delta) => {
@@ -1437,7 +1460,7 @@ const firstSentences = (t, n = 2) => (t.match(/.+?[.!?]+(?=\s|$)/g) || [t]).slic
 /** A job finished, or needs a yes: say it out loud if they're here, otherwise push it to the phone. */
 function notifyJob(job, kind) {
   const here = atMac();
-  const phoneToo = !here || readSettings().workAlwaysPhone || job.source === 'phone';
+  const phoneToo = !here || readSettings().workAlwaysPhone || job.source === 'phone' || job.source === 'routine' || job.source === 'goal' || Boolean(job.project);
   log('job notify', { id: job.id, kind, here, phoneToo });
   if (kind === 'done' || kind === 'failed') {
     const what = job.kind === 'code' ? `${job.title} Claude session` : `${job.title} job`;
@@ -1665,6 +1688,12 @@ ipcMain.handle('job-continue', (_e, id, text) => {
   try { jobs.continue(id, String(text).slice(0, 4000), 'mac'); return { ok: true }; } catch (err) { return { error: err.message }; }
 });
 ipcMain.handle('job-cancel', (_e, id) => jobs.cancel(id));
+// Autonomy (projects, goals, routines, the kill switch) and the audit log, for the Work panel. A click at the Mac is the owner.
+ipcMain.handle('autonomy-state', () => autonomy?.view() || null);
+ipcMain.handle('autonomy-act', (_e, name, args) => autonomy ? autonomy.handle(name, args || {}, { source: 'mac', verified: true, turn: 0, confirm: () => ({ allow: true, said: 'clicked' }) }) : { message: 'not ready' });
+ipcMain.handle('audit-recent', (_e, n) => control?.audit.recent(Math.min(200, Number(n) || 60)) || []);
+ipcMain.handle('job-pause', (_e, id) => jobs.pause(id, 'paused by the user'));
+ipcMain.handle('job-resume', (_e, id) => jobs.resume(id));
 ipcMain.handle('job-answer', (_e, id, yes) => jobs.answer(id, Boolean(yes))); // a click in the panel: the owner is here
 ipcMain.handle('job-seen', (_e, id) => jobs.markSeen(id));
 ipcMain.handle('job-send-phone', (_e, id) => sendJobToPhone(id));
@@ -1965,6 +1994,7 @@ app.whenReady().then(async () => {
     log,
     memory,
     control,
+    autonomy: () => autonomy,
     teachPhrase: ({ phrase, meaning }) => learnPhrase(phrase, meaning, 'corrected in conversation'),
     findContact: (name) => {
       const hits = contacts.find(name);
@@ -2008,6 +2038,14 @@ app.whenReady().then(async () => {
   claude.init(path.join(app.getPath('userData'), 'workspace'), { mcpConfigPath, memory: () => memory.facts() }); // isolated dir: no project files or CLAUDE.md
   await startWork();
   control.workDir = jobs?.dir; // a job's files may be sent to the phone too
+  autonomy = new Autonomy({ jobs, audit: control.audit, supportDir: app.getPath('userData'), readSettings, writeSettings, log, oneShot: claude.oneShot,
+    push: (n) => pushToPhones(n), notice: (line) => notice(line), phoneUrl: () => phoneUrl, cli: claude.CLI });
+  autonomy.on('change', () => { const v = autonomy.view(); win?.webContents.send('autonomy-change', v); phone?.broadcast({ type: 'autonomy', state: v }); refreshTray(); });
+  autonomy.on('paused', ({ why, paused }) => { theme?.toast({ kind: 'needs', label: 'PAUSED', tag: 'AUTONOMY', value: 'Everything on hold', detail: paused.join(', ') || why, urgent: true }); pushToPhones({ title: 'ARES: everything paused', body: paused.length ? paused.join(', ') : `Kill switch (${why}).`, tag: 'autonomy-paused', buttons: [{ title: 'Resume all', api: '/api/autonomy/resume', body: {} }] }).catch(() => {}); });
+  claudeUsage.on('warn', (w) => autonomy.usage(w.pct));
+  claudeUsage.on('change', () => { if (claudeUsage.reserve(readSettings().claudeReserve || {}).ok) autonomy.usageOk(); });
+  powerMonitor.on('unlock-screen', () => autonomy.event('unlock'));
+  powerMonitor.on('resume', () => setTimeout(() => autonomy.event('wake'), 20_000));
 
   // First run of the installed app: start at login by default (can be switched off in the menu bar).
   if (app.isPackaged && readSettings().launchAtLogin === undefined) setLaunchAtLogin(true);
@@ -2085,6 +2123,7 @@ app.on('will-quit', () => {
   remote?.stop();
   phone?.stop();
   intents?.dispose();
+  autonomy?.shutdown();
   jobs?.shutdown();
   claudeCtl?.shutdown(); // hook files removed, Remote Control sessions ARES started are stopped
   calls?.stop();

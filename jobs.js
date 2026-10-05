@@ -36,6 +36,15 @@ Some actions wait for the user's yes from their phone: pushing, deploying, publi
 You can't ask the user questions mid-way: make sensible choices and mention them at the end.
 Finish with a short plain-text summary (two to four sentences, no markdown or lists) of what you did, the test or build result, and anything they need to do. ARES reads it to them.`;
 
+// Projects (docs/autonomy-prompt.md, section 1): a code session in its own workspace under ~/ARES Projects, built
+// to a brief, with a plan → build → test → verify → report loop and a status file ARES shows live.
+const PROJECT_PROMPT = `You're building a project for the user, started by ARES, their personal assistant, usually while they're away from the Mac. Work in the current folder: a git repository made for this project. The brief is in BRIEF.md (the goal, constraints and the definition of done): read it first, and treat it as the contract.
+Working loop: PLAN (write PLAN.md: the steps, and how each will be verified), BUILD, TEST (write and run real tests, or the build), VERIFY every point of the definition of done against what exists, REPORT. Commit a checkpoint after each milestone with a clear message (git add -A && git commit); never push.
+Keep .ares/status.json current as you go; ARES shows it to the user live. Its fields: {"phase":"plan|build|test|verify|report","note":"one line on what you're doing right now","tests":"the latest test or build result, e.g. 12 passed, 0 failed","run":"the command that runs or serves the result, if there is one, e.g. npm start","url":"http://localhost:PORT when it serves a page, else omit"}. Write it at every phase change and after every test run.
+Stay inside this folder: read and write only here. Installing packages is fine. Never touch other projects, ~/.ssh, keychains or ARES's own code (~/My AI). Pushing, deploying, publishing, sending anything, spending or using the user's credentials waits for their yes from their phone; if refused, carry on without it and say so in the report.
+You can't ask the user questions mid-way: pick sensible defaults and list them in README.md under "Assumptions".
+Finish with the REPORT: a short plain-text summary (three to six sentences, no markdown or lists): what was built, how to run it, the test result, and what's left or assumed. ARES reads it to the user.`;
+
 const WORKER_PROMPT = (tools) => `You are an ARES worker: a background agent doing one job for the user of ARES, their personal assistant. The user isn't watching you work; they'll get your result when you're done, in the ARES results panel.
 
 Your working folder is the current directory. Keep every file you read or write inside it, never anywhere else.
@@ -175,6 +184,9 @@ class Jobs extends EventEmitter {
   profile(id) { return path.join(this.configDir, `${id}.sb`); }
   get active() { return this.jobs.filter((j) => j.status === 'running' || j.status === 'approval' || j.status === 'queued'); }
   get running() { return this.jobs.filter((j) => j.status === 'running' || j.status === 'approval'); }
+  get paused() { return this.jobs.filter((j) => j.status === 'paused'); }
+  /** Caps (docs/autonomy-prompt.md, section 4): set by autonomy.js from settings; these are the defaults. */
+  limits() { return { maxProjects: 1, maxJobs: CONCURRENCY, maxRunMin: Number(process.env.ARES_CODE_TIMEOUT_MIN) || 90 }; }
 
   /** What the renderer and the brain see (no internals). */
   view(j) {
@@ -208,7 +220,7 @@ class Jobs extends EventEmitter {
    * Code sessions: kind 'code' with `folder` (the project). `sessionId` + `adopt` continues an existing Claude Code
    * session (the user's own, idle one); `fork` starts a copy of one instead. `extraWrite`: more writable paths.
    */
-  start({ title, task, size = 'medium', source = 'mac', inputs = [], kind, folder, sessionId, adopt = false, fork = null, extraWrite }) {
+  start({ title, task, size = 'medium', source = 'mac', inputs = [], kind, folder, sessionId, adopt = false, fork = null, extraWrite, project = null, goalId = null, routineId = null }) {
     const id = `${new Date().toISOString().slice(0, 10)}-${crypto.randomBytes(3).toString('hex')}`;
     fs.mkdirSync(this.folder(id), { recursive: true });
     const given = inputs.length ? this.attach(id, inputs) : [];
@@ -219,6 +231,8 @@ class Jobs extends EventEmitter {
       sessionId: sessionId || crypto.randomUUID(), turns: [{ at: Date.now(), text: String(task) }],
       steps: 0, summary: '', error: null, seen: false, approval: null,
       ...(kind === 'code' ? { kind, folder, adopt: Boolean(adopt), fork: fork || null, extraWrite: extraWrite || [] } : {}),
+      ...(project ? { project: { phase: 'plan', note: 'starting', tests: null, commit: null, run: null, url: null, iteration: 0, verified: null, ...project } } : {}),
+      ...(goalId ? { goalId } : {}), ...(routineId ? { routineId } : {}),
     };
     fs.mkdirSync(this.folder(id), { recursive: true });
     this.jobs.push(job);
@@ -259,6 +273,34 @@ class Jobs extends EventEmitter {
     this.save();
     proc?.kill();
     this.event(job, { type: 'cancelled', text: 'Cancelled' });
+    this.pump();
+    return true;
+  }
+
+  /** Pause a running job (the kill switch, a usage limit, or "pause the X project"): the process stops, the session is kept. */
+  pause(id, why = 'paused') {
+    const job = this.get(id);
+    if (!job || !(job.status === 'running' || job.status === 'approval' || job.status === 'queued')) return false;
+    this.answer(id, false, 'Paused.');
+    job.status = 'paused';
+    job.pausedWhy = why;
+    job.pausedAt = Date.now();
+    this.save();
+    this.procs.get(id)?.kill();
+    this.event(job, { type: 'paused', text: `Paused: ${why}` });
+    this.emit('change', this.view(job));
+    this.pump();
+    return true;
+  }
+  /** Pick a paused job back up: the same session continues from where it stopped. */
+  resume(id) {
+    const job = this.get(id);
+    if (!job || job.status !== 'paused') return false;
+    job.status = 'queued';
+    job.pausedWhy = undefined;
+    job.resumeNote ??= 'You were paused for a while. Carry on from where you left off.';
+    this.save();
+    this.event(job, { type: 'queued', text: 'Resumed' });
     this.pump();
     return true;
   }
@@ -410,8 +452,11 @@ class Jobs extends EventEmitter {
     if (!room.ok && this.jobs.some((j) => j.status === 'queued')) {
       if (this.heldWhy !== room.why) { this.heldWhy = room.why; this.log('jobs held', { why: room.why }); this.emit('held', room.why); }
     } else this.heldWhy = null;
-    while (room.ok && this.running.length < CONCURRENCY) {
-      const next = this.jobs.find((j) => j.status === 'queued');
+    const lim = this.limits();
+    while (room.ok) {
+      const projectsRunning = this.running.filter((j) => j.project).length;
+      const jobsRunning = this.running.length - projectsRunning;
+      const next = this.jobs.find((j) => j.status === 'queued' && (j.project ? projectsRunning < lim.maxProjects : jobsRunning < lim.maxJobs));
       if (!next) break;
       this.run(next);
     }
@@ -484,7 +529,7 @@ class Jobs extends EventEmitter {
     }
     const started = fs.existsSync(path.join(jobDir, '.session'));
     let prompt;
-    if (job.pendingFollowUp) prompt = `Message from the user (sent through ARES): ${job.pendingFollowUp}`;
+    if (job.pendingFollowUp) prompt = job.project ? job.pendingFollowUp : `Message from the user (sent through ARES): ${job.pendingFollowUp}`;
     else if (job.resumeNote) prompt = job.resumeNote;
     else prompt = job.task;
     const fork = !started && job.fork;            // a copy of a session that's open elsewhere
@@ -509,7 +554,7 @@ class Jobs extends EventEmitter {
       '--model', CODE_MODEL,
       '--effort', EFFORT,
       ...(fork ? ['--resume', job.fork, '--fork-session'] : resume ? ['--resume', job.sessionId] : ['--session-id', job.sessionId]),
-      '--append-system-prompt', CODE_PROMPT,
+      '--append-system-prompt', job.project ? PROJECT_PROMPT : CODE_PROMPT,
       '--tools', CODE_TOOLS.join(','),
       '--setting-sources', '', // the user's hooks and permission rules stay out: ARES's gate decides, and no hook loops
       '--mcp-config', configFile,
@@ -519,7 +564,31 @@ class Jobs extends EventEmitter {
     ];
     const env = { ...process.env, MCP_TOOL_TIMEOUT: String(APPROVAL_WAIT_MS + 60_000) };
     delete env.ANTHROPIC_API_KEY; // subscription only, never API billing
-    this.watch(job, args, { cwd, env, prompt, resume: resume || Boolean(fork), model: CODE_MODEL, timeoutMs: CODE_TIMEOUT_MS });
+    this.watch(job, args, { cwd, env, prompt, resume: resume || Boolean(fork), model: CODE_MODEL, timeoutMs: job.project ? (this.limits().maxRunMin || 90) * 60_000 : CODE_TIMEOUT_MS });
+  }
+
+  /** A project's .ares/status.json, as the session keeps it: phase, note, tests, run command, url. */
+  readProjectStatus(job) {
+    try { return JSON.parse(fs.readFileSync(path.join(job.folder, '.ares', 'status.json'), 'utf8')); } catch { return null; }
+  }
+  lastCommit(job) {
+    try { return require('child_process').execFileSync('git', ['log', '-1', '--format=%h %s', '--no-color'], { cwd: job.folder, timeout: 5000 }).toString().trim().slice(0, 120) || null; } catch { return null; }
+  }
+  /** Fold the status file and the latest commit into the job (the panel and the phone show them). */
+  syncProject(job) {
+    if (!job.project) return;
+    const st = this.readProjectStatus(job) || {};
+    const next = { ...job.project };
+    for (const k of ['phase', 'note', 'tests', 'run', 'url']) if (st[k] != null && String(st[k]).trim()) next[k] = String(st[k]).slice(0, 300);
+    next.commit = this.lastCommit(job) || next.commit;
+    const changed = JSON.stringify(next) !== JSON.stringify(job.project);
+    if (!changed) return;
+    if (next.phase !== job.project.phase) this.event(job, { type: 'step', kind: 'phase', text: `${String(next.phase).toUpperCase()}${next.note ? `: ${next.note}` : ''}` });
+    else if (next.tests !== job.project.tests && next.tests) this.event(job, { type: 'step', kind: 'tests', text: `Tests: ${next.tests}` });
+    else if (next.commit !== job.project.commit && next.commit) this.event(job, { type: 'step', kind: 'commit', text: `Commit: ${next.commit}` });
+    job.project = next;
+    this.save();
+    this.emit('change', this.view(job));
   }
 
   /** Run the Claude Code process for a job and follow it to the end (both kinds). */
@@ -536,6 +605,11 @@ class Jobs extends EventEmitter {
     let finalText = '';
     let resultMsg = null;
     const timer = setTimeout(() => { this.log('job timeout', { id: job.id }); child.kill(); }, timeoutMs);
+    let statusWatch = null;
+    if (job.project) { // the session's own status file, polled while it runs
+      statusWatch = setInterval(() => this.syncProject(job), 2500);
+      this.syncProject(job);
+    }
 
     child.stdout.on('data', (chunk) => {
       buf += chunk;
@@ -582,9 +656,10 @@ class Jobs extends EventEmitter {
     child.on('error', (err) => { stderr += err.message; });
     child.on('exit', (code) => {
       clearTimeout(timer);
+      if (statusWatch) { clearInterval(statusWatch); this.syncProject(job); }
       this.procs.delete(job.id);
       this.answer(job.id, false, 'The job stopped.');
-      if (job.status === 'cancelled') return this.pump();
+      if (job.status === 'cancelled' || job.status === 'paused') return this.pump();
       job.finished = Date.now();
       if (resultMsg && !resultMsg.is_error) {
         job.status = 'done';
@@ -671,7 +746,7 @@ class Jobs extends EventEmitter {
       const command = String(input.command || '');
       const wrapped = { ...input, command: sandbox.wrap(command, { profile: this.profile(job.id), jobDir: this.folder(job.id) }) };
       const tier = sandbox.classifyCode(command);
-      if (tier === 'install') this.event(job, { type: 'step', kind: 'tool', text: `Installing packages: ${command.slice(0, 90)}` });
+      if (tier === 'install') { this.event(job, { type: 'step', kind: 'tool', text: `Installing packages: ${command.slice(0, 90)}` }); this.audit?.record({ what: `${job.title}: install ${command.slice(0, 120)}`, tier: 2, kind: 'job', source: job.source, approval: 'tier 2: install inside the workspace' }); }
       if (tier !== 'ask') return { allow: true, updatedInput: wrapped };
       return this.ask(job, tool, input);
     }
@@ -693,6 +768,7 @@ class Jobs extends EventEmitter {
       job.approval = request;
       this.save();
       this.log('job approval ask', { id: job.id, tool });
+      this.audit?.record({ what: `${job.title}: ${request.what}`, tier: 3, kind: 'job', source: job.source, ok: false, approval: 'asked, waiting for a yes' });
       this.event(job, { type: 'approval', text: `Needs your OK: ${request.what}` });
       this.emit('approval', this.view(job));
     });
@@ -716,6 +792,7 @@ class Jobs extends EventEmitter {
       if (job.status === 'approval') job.status = 'running';
       this.save();
       this.log('job approval answer', { id, yes: Boolean(yes) });
+      this.audit?.record({ what: `${job.title}: ${pending.request.what}`, tier: 3, kind: 'job', source: job.source, ok: Boolean(yes), approval: yes ? 'the user said yes' : `declined${why ? `: ${why}` : ''}` });
       this.event(job, { type: 'step', kind: yes ? 'ok' : 'refused', text: yes ? `Approved: ${pending.request.what}` : `Declined: ${pending.request.what}` });
     }
     pending.resolve(yes ? { allow: true, updatedInput: pending.updatedInput } : { allow: false, message: why || "The user said no. Don't retry; note in result.md what you would have done." });

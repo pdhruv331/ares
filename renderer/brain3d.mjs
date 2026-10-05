@@ -305,8 +305,8 @@ function start() {
   // in the scene, not the brain's group, so orbs pass in front of and behind it as they go round. No
   // strands to the brain: when a job finishes, the brain gives one faint pulse, and that's all.
   // Work (renderer/work.js) drives this through window.JobOrbs; clicks come back as an 'orb-open' event.
-  const ORB_COLOR = { queued: 0xa78bfa, running: 0xa78bfa, approval: 0xffb547, done: 0x4ade80, failed: 0xf87171 };
-  const ORB_SIZE = { small: 0.07, medium: 0.095, large: 0.125 };
+  const ORB_COLOR = { queued: 0xa78bfa, running: 0xa78bfa, approval: 0xffb547, done: 0x4ade80, failed: 0xf87171, paused: 0x7f8c99 };
+  const ORB_SIZE = { small: 0.07, medium: 0.095, large: 0.125, project: 0.165 }; // projects: slightly larger, labelled by work.js
   const ORB_SPEED = { queued: 0.6, running: 1, approval: 0.7, done: 0.28, failed: 0.22 };
   const ORB_TRAIL = 16;
   const R = geo.boundingSphere.radius;
@@ -489,7 +489,7 @@ function start() {
     /** Which jobs have orbs: anything in progress, plus finished ones not yet put away (the newest few). */
     sync(jobs) {
       const now = Date.now();
-      const active = jobs.filter((j) => ['queued', 'running', 'approval'].includes(j.status));
+      const active = jobs.filter((j) => ['queued', 'running', 'approval', 'paused'].includes(j.status));
       const finished = jobs.filter((j) => FINISHED.includes(j.status) && !j.dismissed && !(j.seen && now - (j.finished || j.created) > SHOW_DAYS * 864e5))
         .sort((x, y) => (y.finished || 0) - (x.finished || 0)).slice(0, Math.max(2, 10 - active.length));
       const want = new Map([...active, ...finished].map((j) => [j.id, j]));
@@ -561,7 +561,7 @@ function start() {
   tip.className = 'orb-tip';
   tip.hidden = true;
   stage.appendChild(tip);
-  const ORB_STATUS = { queued: 'queued', running: 'working', approval: 'needs your OK', done: 'done', failed: 'failed' };
+  const ORB_STATUS = { queued: 'queued', running: 'working', approval: 'needs your OK', done: 'done', failed: 'failed', paused: 'paused' };
   stage.addEventListener('mousemove', (e) => {
     const j = window.JobOrbs.pick(e.clientX, e.clientY);
     stage.style.cursor = j ? 'pointer' : '';

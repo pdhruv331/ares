@@ -13,6 +13,9 @@
                 android:text="WORK" android:textColor="@color/cyan" android:textStyle="bold" android:textSize="14sp" android:letterSpacing="0.3"/>
             <TextView android:id="@+id/gallery" android:layout_width="wrap_content" android:layout_height="36dp" android:background="@drawable/bg_chip"
                 android:gravity="center" android:paddingStart="12dp" android:paddingEnd="12dp" android:text="GALLERY" android:textColor="@color/cyan" android:textSize="11sp" android:letterSpacing="0.12"/>
+            <TextView android:id="@+id/more" android:layout_width="wrap_content" android:layout_height="36dp" android:layout_marginStart="6dp" android:background="@drawable/bg_chip"
+                android:gravity="center" android:paddingStart="10dp" android:paddingEnd="10dp" android:text="ROUTINES" android:textColor="@color/cyan" android:textSize="10sp" android:letterSpacing="0.15"
+                android:contentDescription="Projects, goals and routines"/>
         </LinearLayout>
 
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"

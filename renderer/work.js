@@ -16,7 +16,13 @@ const Work = (() => {
   let version = null;   // an earlier version of the open job's result being viewed, or null for the latest
   let focused = null;   // what "show me the chart" last pointed at, for "make it bigger"
 
-  const STATUS = { queued: 'QUEUED', running: 'WORKING', approval: 'NEEDS YOUR OK', done: 'DONE', failed: 'FAILED', cancelled: 'CANCELLED' };
+  const STATUS = { queued: 'QUEUED', running: 'WORKING', approval: 'NEEDS YOUR OK', done: 'DONE', failed: 'FAILED', cancelled: 'CANCELLED', paused: 'PAUSED' };
+  // Autonomy (docs/autonomy-prompt.md §5): the panel's tabs, and the state behind the Projects / Goals / Routines / Log ones
+  let mode = 'jobs';     // 'jobs' | 'projects' | 'goals' | 'routines' | 'log'
+  let auto = null;       // autonomy.view(): { paused, projects, goals, routines, limits, runsLeft }
+  let autoOpen = null;   // the goal / routine id open in the detail pane
+  const PHASES = ['plan', 'build', 'test', 'verify', 'report'];
+  const whenShort = (t) => (t ? new Date(t).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : '');
   const when = (t) => new Date(t).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
   const took = (j) => {
     if (!j.started) return '';
@@ -41,19 +47,89 @@ const Work = (() => {
   }
 
   function renderList() {
-    const shown = jobs.filter((j) => !filter || filter.has(j.id));
-    list.innerHTML = shown.length ? '' : jobs.length ? '<li class="empty">Nothing matches that.</li>'
-      : '<li class="empty">No jobs yet. Ask ARES to research, write or analyse something, say "do this as a job", or drop files here.</li>';
+    $('killRow').hidden = !auto?.paused;
+    for (const b of $('workTabs').querySelectorAll('button')) b.classList.toggle('active', b.dataset.tab === mode);
     $('galleryBtn').classList.toggle('active', view === 'gallery');
+    if (mode === 'goals' || mode === 'routines' || mode === 'log') { renderAutoList(); badge(); orbs()?.sync(jobs); return; }
+    const pool = mode === 'projects' ? jobs.filter((j) => j.project) : jobs;
+    const shown = pool.filter((j) => !filter || filter.has(j.id));
+    list.innerHTML = shown.length ? '' : mode === 'projects' ? '<li class="empty">No projects yet. Say "start a project to build…" and agree the brief.</li>' : jobs.length ? '<li class="empty">Nothing matches that.</li>'
+      : '<li class="empty">No jobs yet. Ask ARES to research, write or analyse something, say "do this as a job", or drop files here.</li>';
     for (const j of [...shown].reverse()) {
       const li = document.createElement('li');
-      li.className = `job ${j.status}${j.id === openId && view === 'job' ? ' open' : ''}${!j.seen && !isActive(j) ? ' unseen' : ''}`;
-      li.innerHTML = `<span class="job-dot"></span><span class="job-title">${esc(j.title)}</span><span class="job-meta">${STATUS[j.status]} · ${when(j.created)}</span>`;
+      li.className = `job ${j.status}${j.project ? ' project' : ''}${j.id === openId && view === 'job' ? ' open' : ''}${!j.seen && !isActive(j) ? ' unseen' : ''}`;
+      const sub = j.project && ['running', 'paused', 'queued', 'approval'].includes(j.status) ? ` · ${(j.project.phase || '').toUpperCase()}` : '';
+      li.innerHTML = `<span class="job-dot"></span><span class="job-title">${esc(j.title)}</span><span class="job-meta">${STATUS[j.status]}${sub} · ${when(j.created)}</span>`;
       li.onclick = () => show(j.id);
       list.appendChild(li);
     }
     badge();
     orbs()?.sync(jobs);
+  }
+
+  /** The Goals, Routines and Log tabs: items in the list, details on the right. */
+  function renderAutoList() {
+    if (!auto) { list.innerHTML = '<li class="empty">Starting up…</li>'; return; }
+    if (mode === 'log') { list.innerHTML = '<li class="empty">Every action ARES took on her own: tier 1 reads, tier 2 acts (logged), tier 3 with your yes.</li>'; return; }
+    const items = mode === 'goals' ? auto.goals : auto.routines;
+    list.innerHTML = items.length ? '' : `<li class="empty">${mode === 'goals' ? 'No goals. Say "ARES, my goal is…" and she plans the steps.' : 'No routines. Say "every weekday at 8, …" and she schedules it.'}</li>`;
+    for (const it of [...items].reverse()) {
+      const li = document.createElement('li');
+      const st = mode === 'goals' ? it.status : it.enabled ? 'routine' : 'off';
+      li.className = `job ${st}${it.id === autoOpen ? ' open' : ''}`;
+      const meta = mode === 'goals' ? `${String(it.status).toUpperCase()} · step ${Math.min(it.current + 1, it.steps.length)}/${it.steps.length}` : `${it.enabled ? 'ON' : 'OFF'} · ${esc(describeSchedule(it.schedule))}${it.nextRun ? ` · next ${whenShort(it.nextRun)}` : ''}`;
+      li.innerHTML = `<span class="job-dot"></span><span class="job-title">${esc(it.title)}</span><span class="job-meta">${meta}</span>`;
+      li.onclick = () => { autoOpen = it.id; renderList(); renderDetail(); };
+      list.appendChild(li);
+    }
+  }
+  const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  function describeSchedule(s) {
+    if (!s) return '';
+    if (s.kind === 'event') return s.event === 'unlock' ? 'on unlock' : 'on wake';
+    if (s.kind === 'interval') return s.minutes % 60 === 0 ? `every ${s.minutes / 60}h` : `every ${s.minutes} min`;
+    const t = `${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}`;
+    return `${s.days ? s.days.map((d) => DAYS[d]).join('/') : 'daily'} ${t}`;
+  }
+
+  async function renderAutoDetail() {
+    if (mode === 'log') {
+      const rows = await window.ares.autonomy.audit(80);
+      detail.innerHTML = `<header class="job-head"><div><h2>Action log</h2><div class="job-sub">${rows.length} recent · tier 1 read · tier 2 act and log · tier 3 needs your yes</div></div></header>
+        <ul class="log-list">${[...rows].reverse().map((e) => `<li class="${e.ok === false ? 'no' : ''}"><time>${esc(new Date(e.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}</time><span class="tier t${e.tier}">T${e.tier}</span><span>${esc(e.what)}${e.approval ? `<small>${esc(e.approval)}</small>` : ''}</span></li>`).join('') || '<li>Nothing logged yet.</li>'}</ul>`;
+      return;
+    }
+    const items = mode === 'goals' ? auto?.goals || [] : auto?.routines || [];
+    const it = items.find((x) => x.id === autoOpen) || items[items.length - 1];
+    if (!it) { detail.innerHTML = `<div class="work-empty">${mode === 'goals' ? 'No goal picked.' : 'No routine picked.'}${auto ? ` ${auto.runsLeft} autonomous runs left today.` : ''}</div>`; return; }
+    autoOpen = it.id;
+    if (mode === 'goals') {
+      detail.innerHTML = `<header class="job-head"><div><h2>${esc(it.title)}</h2><div class="job-sub"><span class="chip ${it.status === 'running' ? 'running' : it.status === 'done' ? 'done' : it.status === 'stuck' ? 'failed' : 'paused'}">${esc(String(it.status).toUpperCase())}</span> ${when(it.created)}${it.note ? ` · ${esc(it.note)}` : ''}</div></div></header>
+        <div class="auto-item"><div class="meta">THE GOAL</div><div>${esc(it.text)}</div>
+          <ol>${it.steps.map((st, i) => `<li class="${st.status}"><b>${esc(st.title)}</b>${st.kind === 'project' ? ' <small>(project)</small>' : ''} — ${esc(st.status)}${st.summary ? `: ${esc(st.summary)}` : ''}${st.jobId ? ` <a data-job="${esc(st.jobId)}">open</a>` : ''}</li>`).join('')}</ol>
+          <div class="row">${['running', 'paused', 'stuck', 'waiting'].includes(it.status) ? `<button class="icon-btn danger" data-auto="goal/cancel" data-args='${esc(JSON.stringify({ goal: it.id }))}'>CANCEL GOAL</button>` : ''}${it.status === 'paused' ? `<button class="icon-btn" data-auto="resume" data-args='${esc(JSON.stringify({ what: it.id }))}'>RESUME</button>` : ''}</div></div>`;
+    } else {
+      detail.innerHTML = `<header class="job-head"><div><h2>${esc(it.title)}</h2><div class="job-sub">${esc(describeSchedule(it.schedule))}${it.lastRun ? ` · last ran ${whenShort(it.lastRun)}` : ''}${it.nextRun ? ` · next ${whenShort(it.nextRun)}` : ''}</div></div></header>
+        <div class="auto-item"><div class="row" style="margin:0 0 8px"><label class="switch ${it.enabled ? 'on' : ''}" data-auto="routine/control" data-args='${esc(JSON.stringify({ routine: it.id, action: it.enabled ? 'off' : 'on' }))}'><i></i>${it.enabled ? 'ON' : 'OFF'}</label>
+          <button class="icon-btn" data-auto="routine/control" data-args='${esc(JSON.stringify({ routine: it.id, action: 'run' }))}'>RUN NOW</button>
+          <button class="icon-btn danger" data-auto="routine/control" data-args='${esc(JSON.stringify({ routine: it.id, action: 'delete' }))}'>DELETE</button></div>
+          <div class="meta">WHAT IT DOES</div><div>${esc(it.task)}</div>
+          ${it.runs?.length ? `<div class="meta" style="margin-top:8px">RUNS</div><ol>${[...it.runs].reverse().slice(0, 8).map((r) => `<li>${whenShort(r.at)} <a data-job="${esc(r.jobId)}">open</a></li>`).join('')}</ol>` : ''}</div>`;
+    }
+  }
+
+  /** A project's live state inside its job: phase, note, tests, last commit, and what to do with it. */
+  function projectBox(job) {
+    const p = job.project;
+    const idx = PHASES.indexOf(p.phase);
+    return `<div class="project-box">
+      <b>PHASE</b><span class="phase ${esc(p.phase || '')}">${esc((p.phase || '?').toUpperCase())}${p.note ? ` <span style="color:var(--text);letter-spacing:0">· ${esc(p.note)}</span>` : ''}</span>
+      <b>TESTS</b><span>${esc(p.tests || 'none yet')}</span>
+      <b>COMMIT</b><span>${esc(p.commit || 'none yet')}</span>
+      <b>FOLDER</b><span>~/ARES Projects/${esc(p.slug)}${p.url ? ` · serves ${esc(p.url)}` : ''}</span>
+      ${p.verified != null ? `<b>VERIFY</b><span class="${p.verified ? 'verified' : 'unverified'}">${p.verified ? 'passes the definition of done' : `not yet: ${esc(p.verifyNotes || '')}`}</span>` : ''}
+      <div class="project-steps">${PHASES.map((ph, i) => `<span class="${i < idx || job.status === 'done' ? 'past' : i === idx ? 'on' : ''}">${ph.toUpperCase()}</span>`).join('')}</div>
+    </div>`;
   }
 
   const stepLine = (e) => {
@@ -83,6 +159,7 @@ const Work = (() => {
   async function renderDetail() {
     unzoom();
     focused = null;
+    if (mode === 'goals' || mode === 'routines' || mode === 'log') return renderAutoDetail();
     if (view === 'gallery') return renderGallery();
     if (!openId) { detail.innerHTML = '<div class="work-empty">Pick a job.</div>'; return; }
     const d = await window.ares.work.detail(openId);
@@ -108,8 +185,12 @@ const Work = (() => {
         <div><h2>${esc(job.title)}</h2>
           <div class="job-sub"><span class="chip ${job.status}">${STATUS[job.status]}</span> ${when(job.created)}${job.started ? ` · ${took(job)}` : ''} · ${job.steps} steps${job.turns?.length > 1 ? ` · ${job.turns.length - 1} follow-up${job.turns.length > 2 ? 's' : ''}` : ''}</div></div>
       </header>
+      ${job.project ? projectBox(job) : ''}
       <div class="work-actions">
         ${isActive(job) ? '<button class="icon-btn" data-act="cancel">CANCEL</button>' : ''}
+        ${isActive(job) && job.status !== 'queued' ? '<button class="icon-btn" data-act="pause">PAUSE</button>' : ''}
+        ${job.status === 'paused' ? '<button class="icon-btn" data-act="resume">RESUME</button>' : ''}
+        ${job.project ? `<button class="icon-btn" data-act="claude" title="Hand it over: Terminal with claude --resume in its folder">OPEN IN CLAUDE CODE</button><button class="icon-btn" data-act="pfolder">OPEN FOLDER</button>${job.project.run ? '<button class="icon-btn" data-act="run">RUN IT</button><button class="icon-btn" data-act="stoprun">STOP RUN</button>' : ''}` : ''}
         ${result && done ? '<button class="icon-btn" data-act="pdf">SAVE AS PDF</button>' : ''}
         ${done ? '<button class="icon-btn" data-act="slides">MAKE SLIDES</button>' : ''}
         ${done ? '<button class="icon-btn" data-act="continue">CONTINUE</button>' : ''}
@@ -179,6 +260,7 @@ const Work = (() => {
   /** Show one job in the open panel (or open the panel on it). */
   function show(id) {
     view = 'job';
+    if (mode !== 'jobs' && mode !== 'projects') mode = 'jobs';
     if (id !== openId) version = null;
     if (!panel.hidden && !closing && id === openId) { renderList(); return renderDetail(); }
     return open(id);
@@ -264,7 +346,21 @@ const Work = (() => {
       full.textContent = box.classList.contains('full') ? 'EXIT FULLSCREEN' : 'FULLSCREEN';
       return;
     }
+    const autoBtn = e.target.closest('[data-auto]');
+    if (autoBtn) {
+      let args = {};
+      try { args = JSON.parse(autoBtn.dataset.args || '{}'); } catch {}
+      const r = await window.ares.autonomy.act(autoBtn.dataset.auto, args);
+      status(r?.message || '');
+      return;
+    }
     const act = e.target.closest('[data-act]')?.dataset.act;
+    if (act === 'pause') window.ares.work.pause(openId);
+    if (act === 'resume') window.ares.work.resume(openId);
+    if (act === 'claude' || act === 'pfolder' || act === 'run' || act === 'stoprun') {
+      const r = await window.ares.autonomy.act('project/control', { project: openId, action: { claude: 'open_in_claude_code', pfolder: 'open_folder', run: 'run', stoprun: 'stop_run' }[act] });
+      status(r?.message || '');
+    }
     if (act === 'cancel') window.ares.work.cancel(openId);
     if (act === 'folder') window.ares.work.open(openId);
     if (act === 'dismiss') close({ dismiss: true });
@@ -639,6 +735,41 @@ const Work = (() => {
   });
 
   $('workBtn').addEventListener('click', toggle);
+  // Tabs, the kill-switch row, and live autonomy state
+  $('workTabs').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-tab]');
+    if (!b) return;
+    mode = b.dataset.tab;
+    if (mode === 'jobs' || mode === 'projects') { view = 'job'; if (mode === 'projects' && !jobs.find((j) => j.id === openId && j.project)) openId = [...jobs].reverse().find((j) => j.project)?.id ?? openId; }
+    renderList();
+    renderDetail();
+  });
+  $('resumeAllBtn').addEventListener('click', async () => { const r = await window.ares.autonomy.act('resume', { what: 'everything' }); status(r?.message || ''); });
+  window.ares.autonomy.state().then((v) => { auto = v; if (!panel.hidden) { renderList(); if (mode !== 'jobs' && mode !== 'projects') renderDetail(); } });
+  window.ares.autonomy.onChange((v) => { auto = v; if (panel.hidden) return; renderList(); if (mode === 'goals' || mode === 'routines') renderDetail(); });
+  // Project orbs carry their name (docs/autonomy-prompt.md §5): a label follows each one
+  const labels = new Map();
+  (function labelLoop() {
+    requestAnimationFrame(labelLoop);
+    const o = orbs();
+    const stage = document.getElementById('brain')?.parentElement;
+    if (!o || !stage) return;
+    const hide = document.body.classList.contains('work-open');
+    for (const j of jobs) {
+      if (!j.project || !o.has(j.id) || hide || !['queued', 'running', 'approval', 'paused'].includes(j.status)) { labels.get(j.id)?.remove(); labels.delete(j.id); continue; }
+      let el = labels.get(j.id);
+      if (!el) { el = document.createElement('div'); el.className = 'orb-label'; stage.appendChild(el); labels.set(j.id, el); }
+      const pos = o.screenPos(j.id);
+      if (!pos) { el.hidden = true; continue; }
+      const r = stage.getBoundingClientRect();
+      el.hidden = false;
+      el.textContent = j.title;
+      el.className = `orb-label ${j.status}`;
+      el.style.left = `${pos.x - r.left}px`;
+      el.style.top = `${pos.y - r.top + pos.r + 6}px`;
+    }
+    for (const [id, el] of labels) if (!jobs.find((j) => j.id === id)) { el.remove(); labels.delete(id); }
+  })();
   window.ares.work.onShow((id) => (id ? show(id) : showGallery()));
   window.addEventListener('orb-open', (e) => open(e.detail));
   window.addEventListener('orbs-ready', () => { applyMotion({ reduceMotion }); orbs().sync(jobs); });

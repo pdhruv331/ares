@@ -151,5 +151,14 @@ contextBridge.exposeInMainWorld('ares', {
     onChange: (fn) => ipcRenderer.on('job-change', (_e, job) => fn(job)),
     onEvent: (fn) => ipcRenderer.on('job-event', (_e, id, evt) => fn(id, evt)),
     onAnnounce: (fn) => ipcRenderer.on('job-announce', (_e, a) => fn(a)),
+    pause: (id) => ipcRenderer.invoke('job-pause', id),
+    resume: (id) => ipcRenderer.invoke('job-resume', id),
+  },
+  // Autonomy (autonomy.js): projects, goals, routines, the kill switch; and the audit log
+  autonomy: {
+    state: () => ipcRenderer.invoke('autonomy-state'),
+    act: (name, args) => ipcRenderer.invoke('autonomy-act', name, args),
+    onChange: (fn) => ipcRenderer.on('autonomy-change', (_e, v) => fn(v)),
+    audit: (n) => ipcRenderer.invoke('audit-recent', n),
   },
 });
