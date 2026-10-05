@@ -6,6 +6,16 @@ HARD RULES:
 - Keep the design quiet: FRIDAY content, EDITH brackets, the existing palette (cyan = day, violet = work/focus, amber = needs me). No new loud styles.
 - Don't touch the phone line or voice paths (CLAUDE.md).
 
+SCOPE: the Mac only (app window, live desktop, lifted). NOT the phone app; don't change android/ or the phone API in this build.
+
+0. EVERYTHING IS DYNAMIC (applies to every panel, built-in, pinned or custom)
+- Any panel can change size at any time: the calendar switching views or a busy day picked in Month, a details view opening/closing, a tasks list growing or shrinking, a custom panel's content changing, a panel appearing or disappearing, density changing.
+- When a panel grows, its neighbours (in its column, and beside it if it widens) MOVE smoothly to make room; when it shrinks or closes, they move back. Animated (~0.45 s ease-out), no jumps, no flicker.
+- If space runs out: the least important panels (contextual before pinned, oldest first) step down a density (full → compact → mini) or move to the nearest free magnetic slot; they step back up when space returns.
+- Never overlap, never go off-screen, never cover desktop icons (the icon walls still apply); the brain shifts aside if needed, as panels already make it.
+- A panel I'm holding/dragging or have just placed keeps its place; the others flow around it.
+- Build this as ONE layout pass in dash.js (measure → solve slots → animate), driven by a ResizeObserver on every panel, so new panel types get it for free.
+
 1. PINNED PANELS
 - Any panel kind can be pinned ("pin my calendar", or a pin in the panel's details view). Pinned panels always show and keep their slot; contextual panels (NEXT, TIMER, WORK, CALL, …) keep coming and going around them.
 - Up to 3 pinned panels (a setting). In MINI density pinned panels shrink to their compact form; they never disappear.
@@ -18,7 +28,7 @@ HARD RULES:
   - WEEK (~372 px): Mon–Sun columns, 8:00–20:00 (extend the range automatically if an event falls outside), today's column highlighted, the NOW line, event blocks coloured by kind. Scroll for next/previous week; it snaps back to this week after a minute.
   - MONTH (~300 px): a compact grid (small day squares with the date and up to 3 tiny coloured dots), today highlighted, click a day → that day's agenda appears below the grid.
   - The panel sizes itself to its content in every view (nothing cut off, including a busy day picked in Month). The change of size animates smoothly (~0.45 s ease-out) with the content cross-fading.
-- LAYOUT REFLOW: when the calendar grows (Week/Month, or a busy day picked in Month), the panels below it in the same column MOVE DOWN smoothly to make room, and move back up when it shrinks. If the column runs out of space, the lowest panels step down a density (compact → mini) or move to the nearest free magnetic slot; never overlap, never cover icons on the desktop (the icon walls still apply), never push anything off-screen. The brain shifts aside if needed, as panels already make it.
+- Layout reflow applies here as everywhere (see section 0): growing into Week/Month pushes its neighbours away, and they come back when it collapses.
 - Collapse back to DAY after ~60 s without interaction (a setting), or when I say "collapse it" / throw it into the brain.
 - Click an event → the existing details view: time, place, notes, the meeting link, actions JOIN (opens the link), PREP ME (a short brief from my notes/email), MOVE (asks me when).
 - Voice: "show me my week", "show the month", "what's on the 20th?" (opens Month with the 20th selected), "what about next week?", "move the dentist to Friday at 4", "block 2 hours of deep work tomorrow afternoon".
@@ -49,10 +59,12 @@ HARD RULES:
 - CREATING: by voice or text ("add a panel showing my open GitHub PRs", "a countdown to my flight on the 30th", "show the BTC price every 10 minutes"). ARES writes the spec, shows a PREVIEW panel (dashed brackets) with real data, and saves it when I say yes. "Edit the X panel …", "remove the X panel". A details view lists the custom panels with on/off and pin.
 - Safety: specs are data; a source can't run anything I haven't approved; failures show a quiet "—" with the reason in the details view, never a crash.
 
-6. PHONE
-- The phone app's home shows my PINNED panels (read-only first: the calendar Day view, tasks with checkboxes that work, custom panels), via the existing authenticated phone API. Tapping the calendar opens Week/Month there too.
+6. LOOKS (agreed with me from mockups in the planning session)
+- Tasks, full: "TASKS · <list>" header with the open count; rows with a small square checkbox, the title, the due label on the right (LATE in amber, TODAY, a weekday or date); late tasks first in amber, then today, then dated, then the rest; ticking strikes the row through and shows "✓ <task> · UNDO" for 5 s; a dashed last line hinting the voice command. Compact: the open count, "N LATE" in amber, the most urgent task.
+- Custom panels use the same EDITH brackets, coloured by kind (cyan day, violet work, amber time-critical). Templates as in the mockups: countdown (big numbers + a thin progress bar), list (rows with a status word/colour), chart (value + change + sparkline), gauge (a ring + value + one line).
+- Creating: a PREVIEW panel with DASHED brackets and real data, with KEEP / KEEP + PIN / EDIT / DISCARD (and the same by voice). Nothing is saved until I choose.
 
 7. TESTING
 - Harness only (CLAUDE.md), with a fake EventKit source and a fake Tasks API for automated tests; the real ones only on my Mac with my go.
-- Test: tabs fit in the Day header; each view sizes to content; panels below move down/up smoothly and never overlap or go off-screen (also with the desktop's icon walls); MINI density; collapse after a minute; an event added in Calendar.app appears in the panel within seconds; an event added by voice appears instantly; tasks tick/undo/add; a custom panel from each source type; the preview → yes → saved flow; the usage limits on "ask Claude" panels; pinned panels on the phone.
+- Test: tabs fit in the Day header; each view sizes to content; reflow with every kind of size change (calendar views, details open/close, tasks added/ticked, a custom panel's content growing, panels appearing/closing): neighbours move smoothly and never overlap or go off-screen (also with the desktop's icon walls), and come back when space returns; MINI density; collapse after a minute; an event added in Calendar.app appears in the panel within seconds; an event added by voice appears instantly; tasks tick/undo/add; a custom panel from each source type; the preview → yes → saved flow; the usage limits on "ask Claude" panels; nothing changed in android/ or the phone API.
 - Build with npm run build, ask me before restarting ARES, and tell me what to try.
