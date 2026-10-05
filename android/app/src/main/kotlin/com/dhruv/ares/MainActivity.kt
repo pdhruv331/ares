@@ -12,6 +12,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.view.MotionEvent
 import android.view.View
+import android.view.WindowManager
 import android.view.WindowInsets
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
@@ -93,7 +94,17 @@ class MainActivity : Activity(), Session.Ui {
     }
 
     private fun handle(intent: Intent?) {
-        if (intent?.getBooleanExtra("listen", false) == true && Ares.paired(this) && needMic()) session.startListening()
+        // "Hey Google, open ARES" / "Hi Bixby, open ARES": the assistant opened her, so listen straight away
+        val fromAssistant = referrer?.host in setOf("com.google.android.googlequicksearchbox", "com.samsung.android.bixby.agent")
+        if ((intent?.getBooleanExtra("listen", false) == true || fromAssistant) && Ares.paired(this) && needMic()) session.startListening()
+        if (intent?.getBooleanExtra("handsfree", false) == true && Ares.paired(this) && needMic()) session.setHandsFree(true, "asked")
+    }
+
+    /** Hands-free conversation on or off: keep the screen awake while it's on, and say so. */
+    override fun handsFree(on: Boolean, why: String) {
+        if (on) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        state(session.state)
+        if (why == "asked" || why == "quiet") add("ARES", if (on) "Hands-free on. I'll keep listening after each answer; say \"that's all\" when you're done." else if (why == "quiet") "It's gone quiet, so I've stopped listening. Tap when you need me." else "Hands-free off.", user = false)
     }
 
     override fun onResume() {
@@ -111,6 +122,7 @@ class MainActivity : Activity(), Session.Ui {
     }
 
     override fun onPause() {
+        session.setHandsFree(false, "left") // listening from behind another screen is unreliable; tap or ask again when back
         reactor.onPause() // no drawing while you're elsewhere
         JobStore.unlisten(jobsChanged)
         super.onPause()
@@ -144,8 +156,9 @@ class MainActivity : Activity(), Session.Ui {
     override fun state(s: State) {
         reactor.state = s
         stateText.text = when (s) { State.LISTENING -> "LISTENING"; State.THINKING -> "THINKING"; State.SPEAKING -> "SPEAKING"; State.OFFLINE -> "OFFLINE"; else -> "" }
-        talk.text = if (s == State.LISTENING) "LISTENING… TAP TO SEND" else "TAP TO TALK"
-        talk.isActivated = s == State.LISTENING
+        val hf = if (session.handsFree) "HANDS-FREE · " else ""
+        talk.text = if (s == State.LISTENING) "${hf}LISTENING… TAP TO SEND" else if (session.handsFree) "HANDS-FREE · TAP TO TALK NOW" else "TAP TO TALK"
+        talk.isActivated = s == State.LISTENING || session.handsFree
         if (s == State.THINKING) replyView = null
     }
 
@@ -262,6 +275,7 @@ class MainActivity : Activity(), Session.Ui {
 
     private fun showMenu(anchor: View) {
         val menu = PopupMenu(this, anchor)
+        menu.menu.add(0, 7, 0, "Hands-free conversation").apply { isCheckable = true; isChecked = session.handsFree }
         menu.menu.add(0, 1, 0, "Floating bubble").apply { isCheckable = true; isChecked = Ares.bubbleOn(this@MainActivity) }
         menu.menu.add(0, 4, 1, "Share my screen when summoned").apply { isCheckable = true; isChecked = Ares.prefs(this@MainActivity).getBoolean("screen", true) }
         menu.menu.add(0, 5, 2, "Make ARES your assistant…")
@@ -270,6 +284,7 @@ class MainActivity : Activity(), Session.Ui {
         menu.menu.add(0, 3, 5, "Unpair this phone")
         menu.setOnMenuItemClickListener {
             when (it.itemId) {
+                7 -> if (needMic()) session.setHandsFree(!session.handsFree, "asked")
                 1 -> {
                     val on = !Ares.bubbleOn(this)
                     Ares.prefs(this).edit().putBoolean("bubble", on).apply()

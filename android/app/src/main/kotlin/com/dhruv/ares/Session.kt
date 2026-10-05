@@ -29,6 +29,7 @@ class Session(private val ctx: Context, private val ui: Ui) {
         fun notPaired() {}
         fun offline(message: String)
         fun attached() {} // the pending attachment went with the question
+        fun handsFree(on: Boolean, why: String) {} // hands-free conversation switched on or off
     }
 
     /** Extra context for the next question: something shared from another app, or your screen. */
@@ -51,8 +52,33 @@ class Session(private val ctx: Context, private val ui: Ui) {
     var busy = false
         private set
     private val speaker = Speaker(ctx,
-        onSpeaking = { on -> main.post { if (on) set(State.SPEAKING) else if (!busy && state == State.SPEAKING) set(State.IDLE) } },
+        onSpeaking = { on -> main.post { if (on) set(State.SPEAKING) else if (!busy && state == State.SPEAKING) { set(State.IDLE); relisten() } } },
         onLevel = { level = it })
+
+    // ---- Hands-free conversation: she listens again by herself after each answer ----------------------------------
+    // On until you say "that's all" (or similar), switch it off, leave the screen, or say nothing for a few minutes.
+    var handsFree = false
+        private set
+    private var lastSpokeAt = 0L
+    private val HANDS_FREE_IDLE_MS = 3 * 60_000L
+    private val handsFreeOn = Regex("^(hands[- ]?free( mode)?( on)?|keep listening|stay listening|conversation mode( on)?|let'?s talk)[.!]?$", RegexOption.IGNORE_CASE)
+    private val handsFreeOff = Regex("^(that'?s (all|it)( for now)?|go to sleep|stop listening|hands[- ]?free( mode)? off|we'?re done|i'?m done|(good)?bye( for now)?|good ?night|dismissed)[.!]?$", RegexOption.IGNORE_CASE)
+
+    fun setHandsFree(on: Boolean, why: String = "") {
+        if (handsFree == on) return
+        handsFree = on
+        lastSpokeAt = System.currentTimeMillis()
+        ui.handsFree(on, why)
+        if (on) relisten() else if (listening && !busy) cancelListening()
+    }
+
+    /** After she's answered (or heard nothing): listen again, once her voice has stopped. */
+    private fun relisten() {
+        if (!handsFree) return
+        main.postDelayed({
+            if (handsFree && !listening && !busy && !speaker.speaking && state != State.THINKING) startListening()
+        }, 450)
+    }
     private var recognizer: SpeechRecognizer? = null
     private var recorder: MediaRecorder? = null
     private var recording: File? = null
@@ -98,6 +124,7 @@ class Session(private val ctx: Context, private val ui: Ui) {
                 main.post {
                     busy = false
                     if (state == State.THINKING) set(if (Ares.status(ctx) == "offline") State.OFFLINE else State.IDLE)
+                    if (state != State.SPEAKING) relisten() // nothing to say aloud (or offline): her turn is over
                 }
             }
         }
@@ -166,7 +193,21 @@ class Session(private val ctx: Context, private val ui: Ui) {
         level = 0f
         val text = listOf(transcript, heard.trim()).filter { it.isNotBlank() }.joinToString(" ")
         transcript = ""; heard = ""
-        if (text.isNotBlank()) { ui.heard(text, true); ask(text, voice = true) } else set(State.IDLE)
+        if (text.isBlank()) {
+            set(State.IDLE)
+            // Hands-free and quiet: keep listening, until it's been quiet for a few minutes
+            if (handsFree && System.currentTimeMillis() - lastSpokeAt > HANDS_FREE_IDLE_MS) setHandsFree(false, "quiet") else relisten()
+            return
+        }
+        lastSpokeAt = System.currentTimeMillis()
+        ui.heard(text, true)
+        if (handsFreeOn.matches(text.trim())) { // handled here: no Mac needed to start a conversation
+            set(State.IDLE)
+            if (handsFree) relisten() else setHandsFree(true, "asked")
+            return
+        }
+        if (handsFree && handsFreeOff.matches(text.trim())) setHandsFree(false, "asked") // she still answers the goodbye
+        ask(text, voice = true)
     }
 
     private fun next() {
