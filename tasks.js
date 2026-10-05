@@ -98,7 +98,7 @@ class Tasks extends EventEmitter {
       this.at = Date.now();
       this.error = '';
       if (changed || why === 'start') { this.log('tasks', { source: src, open: sorted.length, why }); this.emit('update', this.message()); }
-    }, (err) => { this.error = err.message; this.log('tasks failed', { source: src, error: err.message }); this.emit('update', this.message()); })
+    }, (err) => { this.error = err.message; this.at = Date.now(); this.log('tasks failed', { source: src, error: err.message }); this.emit('update', this.message()); }) // (at: no retry storm from visibility changes; the poll tries again)
       .finally(() => { this.refreshing = null; });
     return this.refreshing;
   }

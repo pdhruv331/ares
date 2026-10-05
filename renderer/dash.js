@@ -1705,13 +1705,13 @@ const Dash = (() => {
     }
     // TASKS: while there are open tasks (or it's pinned / asked for); late ones make it amber
     const tk = data.tasks;
-    if (tk && (tk.source ? tk.tasks.length > 0 : false) || prefs.panels.tasks?.pinned || opened.has('tasks')) {
+    if (tk && (tk.source ? tk.tasks.length > 0 || Boolean(tk.error) : false) || prefs.panels.tasks?.pinned || opened.has('tasks')) { // a failing source shows "—" with the reason in its details
       const list = tk?.tasks || [];
       const late = list.filter((t) => t.due != null && new Date(t.due).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0)).length;
       const top = list[0];
       want.set('tasks', {
         kind: late ? 'needs' : 'day', side: 'left', anim: 'materialize', label: 'TASKS', title: 'Tasks', tag: list.length ? pad2(list.length) : '', short: 'TASKS',
-        value: top ? top.title : tk?.source ? 'Nothing on the list' : 'No task source yet', detail: late ? `${late} LATE` : list.length > 1 ? `${list.length} open` : '',
+        value: top ? top.title : tk?.error ? '—' : tk?.source ? 'Nothing on the list' : 'No task source yet', detail: late ? `${late} LATE` : list.length > 1 ? `${list.length} open` : tk?.error ? 'click for the reason' : '',
         miniValue: late ? `${late} LATE` : list.length ? `${list.length} OPEN` : 'CLEAR', view: 'tasks', model: tk || { tasks: [], source: null }, minTier: 'compact',
         info: { type: 'tasks' }, dismissKey: `tasks:${tk?.at || 0}`,
       });
