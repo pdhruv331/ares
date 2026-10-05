@@ -347,6 +347,12 @@ function localCommand(raw) {
   if (/^(please\s+)?(tidy up|tidy( up)? (the |your )?(panels|screen|dashboard)|clean up (the |your )?(panels|screen|dashboard)|reset (the )?panels)$/i.test(text)) {
     return { reply: '', after: () => { Dash.tidy(); window.ares.resumeListening(); } };
   }
+  let pin = text.match(/^(?:please\s+)?(pin|unpin) (?:my |the )?(.+?)(?: panel)?$/i);
+  if (pin) {
+    const on = pin[1].toLowerCase() === 'pin';
+    const ok = Dash.pin(pin[2], on);
+    return { reply: ok ? `${on ? 'Pinned' : 'Unpinned'}, sir.` : on ? `I don't have a ${pin[2]} panel up to pin, sir.` : `The ${pin[2]} panel isn't pinned, sir.`, after: () => window.ares.resumeListening() };
+  }
   let place = text.match(/^(?:please\s+)?(?:set|change) (?:my |the )?weather (?:city|location) to (.+)$/i);
   if (place) {
     const city = place[1].trim();

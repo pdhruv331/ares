@@ -604,6 +604,42 @@ const Dash = (() => {
     layout();
   }
 
+  // ---- Pinned panels (docs/panels-prompt.md, section 1): always shown, keep their place, at least compact -------------
+  const title = (p) => (p.spec.title || p.spec.label || p.id).replace(/\s*·.*$/, '').replace(/\b\w+/g, (w) => w[0] + w.slice(1).toLowerCase());
+  const pinnedCount = () => Object.values(prefs.panels).filter((v) => v.pinned).length;
+  function setPinned(p, on) {
+    const k = kindKey(p.id);
+    if (on && !p.pinned && pinnedCount() >= MAX_PINS()) { say(`${MAX_PINS()} pinned already: unpin one first`, 'needs'); return false; }
+    p.pinned = Boolean(on);
+    if (!p.pinned) { const v = prefs.panels[k]; if (v) { delete v.pinned; if (!Number.isFinite(v.fx) && !Number.isFinite(v.rank)) delete prefs.panels[k]; } }
+    if (p.pinned && !prefs.panels[k]) prefs.panels[k] = { pinned: true };
+    else if (p.pinned) prefs.panels[k].pinned = true;
+    for (const q of panels.values()) if (kindKey(q.id) === k) { q.pinned = p.pinned; fill(q); }
+    remember(p);
+    layout();
+    return true;
+  }
+  /** "Pin my calendar" / "unpin the timer": by kind, panel id, or the words of its title. */
+  function pinByName(name, on = true) {
+    const n = String(name || '').toLowerCase().trim();
+    const alias = { 'next event': 'next', event: 'next', 'now playing': 'music', 'leave by': 'leave', 'leave-by': 'leave', job: 'work', jobs: 'work', mail: 'inbox', email: 'inbox', task: 'tasks', 'to-do': 'tasks', todo: 'tasks' };
+    const key = alias[n] || n;
+    const p = panels.get(key) || [...panels.values()].find((q) => kindKey(q.id) === key || q.id === key)
+      || [...panels.values()].find((q) => title(q).toLowerCase() === key || up(q.spec.label).toLowerCase().includes(key));
+    if (!p) { if (!on && prefs.panels[key]?.pinned) { delete prefs.panels[key].pinned; window.ares.dash.savePanels(prefs.panels); return true; } return false; }
+    return setPinned(p, on);
+  }
+  // What a pinned panel shows when its source has nothing right now (contextual panels otherwise come and go)
+  const IDLE = {
+    next: { kind: 'day', side: 'left', label: 'NEXT', tag: '00', short: 'NEXT', value: 'Nothing scheduled', detail: 'calendar clear', miniValue: 'CLEAR' },
+    leave: { kind: 'day', side: 'left', label: 'LEAVE BY', tag: '—', short: 'LEAVE', value: 'No journey soon', detail: '', miniValue: '—' },
+    timer: { kind: 'day', side: 'left', label: 'TIMER', tag: '—', short: 'TIMER', value: 'No timer running', detail: '"set a timer for 10 minutes"', miniValue: '—' },
+    work: { kind: 'work', side: 'right', label: 'WORK', tag: 'IDLE', short: 'WORK', value: 'No jobs running', detail: '', miniValue: 'IDLE' },
+    call: { kind: 'call', side: 'right', label: 'CALL', tag: 'QUIET', short: 'CALL', value: 'Line quiet', detail: '', miniValue: 'QUIET' },
+    music: { kind: 'day', side: 'right', label: 'NOW PLAYING', tag: '—', short: 'MUSIC', value: 'Nothing playing', detail: '', miniValue: '—' },
+    inbox: { kind: 'needs', side: 'right', label: 'INBOX', tag: '00', short: 'INBOX', value: 'Nothing needs you', detail: '', miniValue: 'CLEAR' },
+  };
+
   // ---- Appear / disappear ------------------------------------------------------------------------------------
   const rgbOf = (p) => KIND[p.spec.kind] || KIND.day;
   function decodeAll(p, ms = 500) {
@@ -794,6 +830,7 @@ const Dash = (() => {
     const b = brain();
     p.mode = 'absorbing';
     p.abs = { t: 0, a0: Math.atan2(p.oy - b.y, p.ox - b.x), r0: Math.hypot(p.ox - b.x, p.oy - b.y) };
+    if (p.pinned) { setPinned(p, false); window.ares.comms.note('ares', `${title(p)} unpinned.`, { notice: true }); }
     dismissed.add(p.spec.dismissKey || p.id);
     p.spec.onDismiss?.();
     closeHint.hidden = true;
@@ -859,11 +896,19 @@ const Dash = (() => {
   let card = null; // { p, el, parts, timer, sig, closing }
   const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+  /** A panel's details plus what every panel can do: pin or unpin. */
+  function detailsOf(p) {
+    const d = details(p) || (p.spec.idle || p.pinned ? { label: p.spec.label, tag: p.spec.tag, value: p.spec.value, rows: [], text: p.spec.detail ? [p.spec.detail] : [], actions: [] } : null);
+    if (!d) return null;
+    const pin = { label: p.pinned ? 'UNPIN' : 'PIN', title: p.pinned ? 'Pinned panels always show and keep their place' : `Keep this panel on screen (up to ${MAX_PINS()})`,
+      run: () => setPinned(p, !p.pinned), close: false };
+    return { ...d, actions: [...(d.actions || []), pin] };
+  }
   function openCard(p) {
     if (card?.p === p) { closeCard(); return; }
     if (card) closeCard();
     if (p.mode !== 'rest') return;
-    const d = details(p);
+    const d = detailsOf(p);
     if (!d) return p.spec.onClick?.();
     p.mode = 'detail';
     p.el.style.visibility = 'hidden';
@@ -894,8 +939,8 @@ const Dash = (() => {
     }
     const { left: cx, top: cy } = card.box;
     Object.assign(el.style, { left: `${cx}px`, top: `${cy}px`, width: `${CARD_W}px`, maxHeight: `${H - 16}px` });
-    card.timer = setInterval(() => { if (card?.p === p) renderCard(details(p)); }, 1000);
-    if (d.load) d.load().then(() => card?.p === p && renderCard(details(p)));
+    card.timer = setInterval(() => { if (card?.p === p) renderCard(detailsOf(p)); }, 1000);
+    if (d.load) d.load().then(() => card?.p === p && renderCard(detailsOf(p)));
     blip(p.spec.kind);
     if (reduce()) { el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180 }); card.opened = true; return; }
     // The launch unfold, with the brackets widening: panel → a wide line → the full card, slight overshoot
@@ -997,7 +1042,7 @@ const Dash = (() => {
     Promise.resolve(a.run()).then((r) => {
       if (a.say) say(a.say, card?.p.spec.kind || 'day');
       if (a.close !== false && r !== false) closeCard();
-      else if (card) renderCard(details(card.p));
+      else if (card) renderCard(detailsOf(card.p));
     });
   }
   layer.addEventListener('click', (e) => {
@@ -1542,6 +1587,11 @@ const Dash = (() => {
       });
     }
 
+    // Pinned kinds with nothing to show right now stay, in their idle form (the id is the kind itself)
+    const kindsWanted = new Set([...want.keys()].map(kindKey));
+    for (const [k, v] of Object.entries(prefs.panels)) {
+      if (v.pinned && IDLE[k] && !kindsWanted.has(k)) want.set(k, { ...IDLE[k], anim: 'materialize', idle: true, dismissKey: `idle:${k}` });
+    }
     for (const [id, spec] of want) show(id, { ...spec, managed: true });
     for (const p of panels.values()) {
       if (p.spec.managed && !want.has(p.id)) hide(p.id);
@@ -1674,6 +1724,9 @@ const Dash = (() => {
     show, hide, // for testing and tuning from the console
     /** Register a view (calendar, tasks, custom templates): panels whose spec.view names it are drawn by it at FULL density. */
     view(name, def) { views[name] = def; for (const p of panels.values()) if (p.spec.view === name) fill(p); },
+    /** Pin or unpin a panel by kind, id or title ("pin my calendar"). True when something changed. */
+    pin: (name, on = true) => pinByName(name, on),
+    get pinned() { return Object.entries(prefs.panels).filter(([, v]) => v.pinned).map(([k]) => k); },
     layout,
     get desk() { return { walls, spot, brain: brain(), edges, surface: surfaceName }; },
     get reduceMotion() { return reduce(); },
