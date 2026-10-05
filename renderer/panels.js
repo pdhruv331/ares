@@ -188,7 +188,69 @@ const PanelViews = (() => {
     settings,
   };
 
+  // ---- TASKS --------------------------------------------------------------------------------------------------------------------
+  // "TASKS · <list>" with the open count; rows: a square checkbox, the title, the due label (LATE amber, TODAY, a weekday or a
+  // date); late first. Ticking strikes the row through and shows "✓ <task> · UNDO" for 5 s. A dashed last line hints the voice.
+  const Tk = { ticked: new Map() }; // task id -> { t, timer }
+  const dueLabel = (ms, now) => {
+    const today = startOfDay(now), d = startOfDay(ms);
+    if (d < today) return 'LATE';
+    if (d === today) return 'TODAY';
+    if (d === today + DAY) return 'TMRW';
+    if (d < today + 7 * DAY) return WD[(new Date(d).getDay() + 6) % 7];
+    return `${new Date(d).getDate()} ${MONTHS[new Date(d).getMonth()]}`;
+  };
+  const tasks = {
+    size: { w: 250, h: 120 },
+    sig: (p, ctx) => `${JSON.stringify(ctx.model)}|${[...Tk.ticked.keys()].join()}|${Math.floor(ctx.now / 60_000)}`,
+    render(p, host, ctx) {
+      const m = ctx.model || {};
+      const list = m.tasks || [];
+      host.className = 'dp-view tasks';
+      const listName = m.lists?.filter((l) => l.on).length === 1 ? m.lists.find((l) => l.on).title : m.source === 'reminders' ? 'REMINDERS' : m.source === 'google' ? 'GOOGLE' : '';
+      let html = `<div class="cal-head"><span class="cal-title">TASKS${listName ? ` · ${esc(listName)}` : ''}</span><span class="tk-count">${list.length ? pad2(list.length) : ''}</span></div>`;
+      if (!m.source) {
+        html += '<div class="tk-setup"><div class="cal-empty">no task source yet</div><div class="tk-choices"><span class="tk-choice" data-act="setup:reminders">USE REMINDERS</span><span class="tk-choice" data-act="setup:google">CONNECT GOOGLE TASKS</span></div></div>';
+      } else {
+        html += '<div class="tk-list">';
+        const rows = list.slice(0, 8);
+        for (const t of rows) {
+          const done = Tk.ticked.has(t.id);
+          const late = t.due != null && startOfDay(t.due) < startOfDay(ctx.now);
+          html += `<div class="tk-row${done ? ' done' : ''}${late ? ' late' : ''}" data-id="${esc(t.id)}">
+            <i class="tk-box" data-act="tick:${esc(t.id)}"></i><span class="tk-title" data-act="tick:${esc(t.id)}">${esc(t.title)}</span>
+            ${done ? `<span class="tk-undo" data-act="undo:${esc(t.id)}">✓ · UNDO</span>` : t.due != null ? `<span class="tk-due${late ? ' late' : ''}">${dueLabel(t.due, ctx.now)}</span>` : ''}</div>`;
+        }
+        if (!list.length) html += `<div class="cal-empty">${m.error ? '— ' + esc(m.error) : 'nothing on the list'}</div>`;
+        if (list.length > rows.length) html += `<div class="tk-more">+ ${list.length - rows.length} MORE</div>`;
+        html += '</div>';
+        html += '<div class="tk-hint">"add buy milk to my tasks"</div>';
+      }
+      host.innerHTML = html;
+    },
+    act(p, action, el, ctx) {
+      const [what, id] = action.split(/:(.*)/);
+      if (what === 'setup') { ctx.act('tasks-setup', { source: id }); return; }
+      const t = (ctx.model.tasks || []).find((x) => x.id === id);
+      if (!t) return;
+      if (what === 'tick' && !Tk.ticked.has(id)) {
+        const row = el.closest('.tk-row');
+        row?.classList.add('done');
+        if (!ctx.reduce) row?.querySelector('.tk-title')?.animate([{ backgroundSize: '0% 1px' }, { backgroundSize: '100% 1px' }], { duration: 320, easing: 'ease-out' });
+        // Done after 5 s unless undone: the strike-through shows at once, the API call waits for the undo window
+        const timer = setTimeout(() => { Tk.ticked.delete(id); ctx.act('tasks-complete', { id }); ctx.refresh(); }, 5000);
+        Tk.ticked.set(id, { t, timer });
+        ctx.refresh();
+      } else if (what === 'undo' && Tk.ticked.has(id)) {
+        clearTimeout(Tk.ticked.get(id).timer);
+        Tk.ticked.delete(id);
+        ctx.refresh();
+      }
+    },
+  };
+
   // Registered once Dash exists (this script loads after dash.js)
   Dash.view('calendar', calendar);
-  return { calendar, kindOf, dayKey, startOfDay, startOfWeek, onDay, DAY };
+  Dash.view('tasks', tasks);
+  return { calendar, tasks, kindOf, dayKey, startOfDay, startOfWeek, onDay, DAY };
 })();

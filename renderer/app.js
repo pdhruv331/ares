@@ -375,6 +375,9 @@ function localCommand(raw) {
     const reply = !evs.length ? `Nothing on ${when}, sir.` : evs.length === 1 ? `On ${when}: ${fmt(evs[0])}.` : `${evs.length} things on ${when}: ${evs.map(fmt).join(', ')}.`;
     return { reply, after: () => { Dash.open('calendar', { view: 'month', date }); window.ares.resumeListening(); } };
   }
+  if (/^(?:please\s+)?(?:show|open|pull up)(?: me)?(?: my| the)? (?:tasks?|to-?do(?: list)?|task list|reminders)(?: panel)?$/i.test(text)) {
+    return { reply: '', after: () => { Dash.open('tasks'); window.ares.resumeListening(); } };
+  }
   if (/^(?:please\s+)?(?:collapse|shrink|fold)(?: it| that| the calendar| the panel)?$/i.test(text)) {
     return { reply: '', after: () => { Dash.collapseView('calendar'); window.ares.resumeListening(); } };
   }

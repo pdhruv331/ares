@@ -42,6 +42,22 @@ function register({ tool, bridge }) {
   { view: z.enum(['day', 'week', 'month']), date: z.string().optional().describe('A day to select in MONTH'), week_offset: z.number().int().optional() },
   async (a) => (await ctl('calendar/show', a)).message);
 
+  // ---- Tasks (Google Tasks or Apple Reminders, tasks.js) --------------------------------------------------------------------
+  tool('tasks_status', 'Where the tasks panel\'s tasks come from (Google Tasks or Apple Reminders), how many are open, and the one-time setup steps if nothing is connected.', {},
+    async () => (await ctl('tasks/status', {})).message);
+  tool('tasks_setup', 'Choose the task source: "reminders" (Apple Reminders through macOS, no setup; may bring up a Reminders permission prompt) or "google" '
+    + '(Google Tasks: the steps come back for the user to do at the Mac). "Use Reminders for my tasks" → reminders.',
+  { source: z.enum(['google', 'reminders']) }, async (a) => (await ctl('tasks/setup', a)).message);
+  tool('tasks_list', 'The user\'s open tasks ("what\'s on my list?"), late first, then due today, then dated, then the rest.', {},
+    async () => (await ctl('tasks/list', {})).message);
+  tool('tasks_add', 'Add a task ("add buy milk to my tasks"). Tier 2: just do it and tell the user.',
+    { title: z.string(), due: z.string().optional().describe('"tomorrow", "friday", "2026-10-09"'), notes: z.string().optional(), list: z.string().optional() },
+    async (a) => (await ctl('tasks/add', a)).message);
+  tool('tasks_complete', 'Tick a task off by words of its title ("tick off book flights"). Tier 2.', { title: z.string() },
+    async (a) => (await ctl('tasks/complete', a)).message);
+  tool('tasks_move', 'Change a task\'s due date ("move X to tomorrow"); an empty due removes the date. Tier 2.', { title: z.string(), due: z.string().optional() },
+    async (a) => (await ctl('tasks/move', a)).message);
+
   tool('calendar_refresh', 'Ask macOS to sync its calendar accounts now ("refresh my calendar"), so changes made on the web or the phone arrive.', {},
     async () => (await ctl('calendar/refresh', {})).message);
 }

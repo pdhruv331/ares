@@ -37,7 +37,8 @@ const { Jobs } = require('./jobs');
 const { Calls } = require('./calls');
 const { Relay } = require('./relay');
 const { Dashboard } = require('./dashboard');
-const { CalendarKit } = require('./calendar');
+const { CalendarKit, keychain: keychainVia } = require('./calendar');
+const { Tasks } = require('./tasks');
 const { Voice } = require('./voice');
 const { Voicemail } = require('./voicemail');
 const { Wallpaper } = require('./wallpaper');
@@ -77,6 +78,7 @@ let calls;   // the ARES phone line (calls.js): ElevenLabs agent on a Twilio num
 let relay;   // the Cloudflare relay (relay.js): FCM pushes to the Android app, even with the Mac off
 let dashboard; // the dashboard's live data (dashboard.js): weather, calendar, leave-by, now playing
 let calendar;  // EventKit, live and local (calendar.js); the connector in dashboard.js is the fallback
+let tasks;     // the TASKS panel's data (tasks.js): Google Tasks or Apple Reminders
 let voicemail; // voicemails from the Twilio fallback when the phone agent can't answer (voicemail.js)
 let wallpaper; // the starry backdrop below the desktop icons, the lock-screen still (wallpaper.js)
 let claudeCtl;   // the user's Claude Code sessions: list, summaries, hooks, replies (claude-control.js)
@@ -145,7 +147,7 @@ function createWindow({ show }) {
     }
   });
 
-  const onScreen = () => dashboard?.setVisible(win.isVisible() && !win.isMinimized());
+  const onScreen = () => { dashboard?.setVisible(win.isVisible() && !win.isMinimized()); tasks?.setVisible(win.isVisible() && !win.isMinimized()); };
   for (const e of ['show', 'hide', 'minimize', 'restore']) win.on(e, () => setTimeout(onScreen, 50));
   win.on('enter-full-screen', () => win.webContents.send('fullscreen-changed', true));
   win.on('leave-full-screen', () => win.webContents.send('fullscreen-changed', false));
@@ -265,6 +267,10 @@ function menuSections() {
         { label: calendar?.ready ? `Calendar: live from macOS Calendar${calendar.google ? '' : ' (no Google account in it)'}` : calendar?.authorized ? 'Calendar: macOS Calendar has no calendars' : calendar?.permission.events === 'denied' ? 'Calendar: access denied (System Settings ▸ Privacy ▸ Calendars)' : 'Calendar: Google connector (fallback)', enabled: false },
       { label: 'Connect Calendar (macOS Calendar)…', visible: Boolean(calendar) && !calendar.authorized && calendar.permission.events !== 'denied', click: () => { notice('macOS is asking you to let ARES Calendar see your calendars, sir.'); calendar.authorize(); } },
       { label: 'Refresh Calendar Now', visible: Boolean(calendar?.ready), click: () => calendar.sync('menu') },
+      { label: tasks?.source === 'google' ? 'Tasks: Google Tasks' : tasks?.source === 'reminders' ? 'Tasks: Apple Reminders' : 'Tasks: not connected', enabled: false },
+      { label: tasks?.hasRefresh ? 'Reconnect Google Tasks…' : 'Connect Google Tasks…', click: () => connectGoogleTasks() },
+      { label: 'Use Apple Reminders for Tasks', type: 'checkbox', checked: readSettings().tasks?.source === 'reminders', click: (item) => { if (item.checked) tasks.useReminders(); else { writeSettings({ tasks: { ...(readSettings().tasks || {}), source: undefined } }); tasks.refresh('menu'); } refreshTray(); } },
+      { label: 'Disconnect Google Tasks', visible: Boolean(tasks?.hasRefresh), click: () => tasks.disconnect().then(refreshTray) },
     { label: 'Reduce Motion', type: 'checkbox', checked: Boolean(readSettings().reduceMotion), click: (item) => { writeSettings({ reduceMotion: item.checked }); win?.webContents.send('ui-prefs', uiPrefs()); wallpaper?.prefs(); refreshTray(); } },
       { label: 'Magnetic Panel Slots', type: 'checkbox', checked: readSettings().ui?.magnetic !== false, click: (item) => { writeUi({ magnetic: item.checked }); win?.webContents.send('ui-prefs', uiPrefs()); refreshTray(); } },
     ],
@@ -1722,7 +1728,7 @@ ipcMain.handle('job-delete', async (_e, id) => {
 ipcMain.handle('ui-prefs', () => uiPrefs());
 // Where the user left each dashboard panel (renderer/dash.js), and the dashboard's current data
 ipcMain.on('ui-panels', (_e, panels) => { if (panels && typeof panels === 'object') writeUi({ [panelsKey()]: panels }); });
-ipcMain.handle('dash-state', () => ({ ...(dashboard?.snapshot() || {}), timers: bridge?.timers() || [], call: liveCall(), claude: claudeUsage?.statusLines() || [], calendar: calendar?.snapshot() || null }));
+ipcMain.handle('dash-state', () => ({ ...(dashboard?.snapshot() || {}), timers: bridge?.timers() || [], call: liveCall(), claude: claudeUsage?.statusLines() || [], calendar: calendar?.snapshot() || null, tasks: tasks?.snapshot() || null }));
 ipcMain.handle('dash-city', (_e, city) => {
   city = String(city || '').trim().slice(0, 80);
   writeSettings({ weatherCity: city || undefined });
@@ -1739,6 +1745,28 @@ ipcMain.handle('dash-home', (_e, address) => {
 // (timers, music, memory, files on this Mac) or open a page; anything that sends or changes something elsewhere
 // (texting, calling back, drafting a reply) goes through a normal turn, so the brain's "yes" gate applies.
 ipcMain.handle('dash-act', (_e, action, arg = {}) => dashAct(action, arg));
+/** Google Tasks, one-time: the OAuth client JSON (picked in a dialog; read once, kept in the Keychain), then sign-in in the browser. */
+async function connectGoogleTasks() {
+  if (!tasks) return false;
+  const { dialog } = require('electron');
+  try {
+    if (!(await tasks.readClient())) {
+      notice('Pick the OAuth client JSON you downloaded from Google Cloud (type "Desktop app"), sir. I keep only its id and secret, in the Keychain.');
+      const r = await dialog.showOpenDialog(win, { title: 'Google OAuth client JSON (Desktop app)', properties: ['openFile'], filters: [{ name: 'JSON', extensions: ['json'] }], defaultPath: app.getPath('downloads') });
+      if (r.canceled || !r.filePaths[0]) return false;
+      await tasks.setClientFile(r.filePaths[0]);
+    }
+    notice('Your browser is opening for the Google sign-in. ARES asks only for Tasks.');
+    await tasks.signIn();
+    notice('Google Tasks is connected, sir.');
+    refreshTray();
+    return true;
+  } catch (err) {
+    log('google tasks setup failed', err.message);
+    notice(`Google Tasks setup didn't finish: ${err.message}`);
+    return false;
+  }
+}
 /** The dashboard's (and the ARES bar's status drop-down's) actions: timers, music, links, the status pill's fixes… */
 async function dashAct(action, arg = {}) {
   switch (action) {
@@ -1778,6 +1806,15 @@ async function dashAct(action, arg = {}) {
     case 'emails': return dashboard?.refreshInbox('asked').then(() => dashboard.inbox);
     case 'calendar-refresh': return calendar?.ready ? calendar.sync('asked') : (dashboard?.refreshCalendar('changed'), true);
     case 'calendar-connect': calendar?.authorize({ reminders: Boolean(arg.reminders) }); return true;
+    // The TASKS panel's checkboxes (a click at the Mac: the owner; logged like a tier 2 action)
+    case 'tasks-complete': {
+      if (!tasks) return false;
+      try { const t = await tasks.complete(String(arg.id), Boolean(arg.undo)); control.audit.record({ what: `${arg.undo ? 'un-ticked' : 'ticked off'} "${t.title}"`, kind: 'tasks', tier: 2, source: 'mac', approval: 'clicked at the Mac' }); return true; }
+      catch (err) { log('tasks complete failed', err.message); return false; }
+    }
+    case 'tasks-refresh': return tasks ? (tasks.refresh('asked'), true) : false;
+    case 'tasks-setup': return tasks ? (arg.source === 'reminders' ? (tasks.useReminders(), true) : connectGoogleTasks()) : false;
+    case 'tasks-lists': { if (!tasks) return false; writeSettings({ tasks: { ...(readSettings().tasks || {}), lists: Array.isArray(arg.lists) ? arg.lists.map(String) : [] } }); tasks.refresh('lists'); return true; }
     case 'fix': {
       // Status pill: one click toward fixing what's broken
       if (arg.key === 'claude') {
@@ -1895,6 +1932,7 @@ function toolActivity(name) {
     find_contact: 'looking up a contact…', notify_phone: 'pinging your phone…', phone_action: 'sending that to your phone…',
     calendar_events: 'checking your calendar…', calendar_add: 'adding to your calendar…', calendar_move: 'moving that in your calendar…', calendar_delete: 'removing that from your calendar…',
     calendar_show: 'bringing up your calendar…', calendar_setup: 'connecting your calendar…', calendar_status: 'checking the calendar…',
+    tasks_list: 'checking your tasks…', tasks_add: 'adding to your tasks…', tasks_complete: 'ticking that off…', tasks_move: 'moving that task…', tasks_setup: 'setting up tasks…', tasks_status: 'checking your tasks…',
   };
   return own[tool] || (server === 'ares' ? `${tool.replace(/_/g, ' ')}…` : 'working on it…');
 }
@@ -2060,6 +2098,10 @@ app.whenReady().then(async () => {
     }
   });
   dashboard.external = () => calendar.ready; // EventKit live: no timed Claude calendar reads
+  tasks = new Tasks({ keychain: keychainVia(calendar.helper), calendar, readSettings, writeSettings, log, tier: (level, what, ctx) => control.tier(level, what, ctx),
+    openExternal: (u) => shell.openExternal(u), notice: (line) => notice(line) });
+  Object.assign(control.routes, tasks.routes());
+  tasks.on('update', toDash);
   const mcpConfigPath = path.join(app.getPath('userData'), 'mcp.json');
   fs.writeFileSync(mcpConfigPath, JSON.stringify({
     mcpServers: {
@@ -2137,6 +2179,8 @@ app.whenReady().then(async () => {
     dashboard.start();
     dashboard.setVisible(win.isVisible());
     calendar.start();
+    tasks.start().catch((err) => log('tasks start failed', err.message));
+    tasks.setVisible(win.isVisible());
     pushVoiceStatus();
   });
   globalShortcut.register(HOTKEY, toggleWindow);
@@ -2166,6 +2210,7 @@ app.on('will-quit', () => {
   voicemail?.stop();
   dashboard?.stop();
   calendar?.stop();
+  tasks?.stop();
   wallpaper?.stop();
   theme?.quit();
   desk?.stop();

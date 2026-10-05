@@ -733,3 +733,26 @@ html[data-hands="engaged"] .ear::after { content: " · HANDS"; color: var(--cyan
 .cal-day b { display: flex; gap: 2px; height: 3px; }
 .cal-day b i { width: 3px; height: 3px; border-radius: 50%; background: rgb(var(--k)); box-shadow: 0 0 3px rgba(var(--k), 0.8); }
 .cal-agenda { margin-top: 2px; display: flex; flex-direction: column; }
+
+/* ---- Tasks panel: checkboxes, due labels (LATE amber), the 5 s undo, a dashed voice hint ---- */
+.tasks { width: 250px; padding: 8px 11px 8px; font-family: var(--mono); color: #d6f2fb; }
+.tk-count { color: rgba(var(--c), 0.95); }
+.tk-list { display: flex; flex-direction: column; margin-top: 6px; }
+.tk-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 8px; align-items: center; padding: 3px 0; font-size: 10.5px; line-height: 14px; border-radius: 2px; }
+.tk-row:hover { background: rgba(var(--c), 0.06); }
+.tk-box { display: block; width: 9px; height: 9px; box-sizing: border-box; border: 1px solid rgba(var(--c), 0.7); border-radius: 1px; cursor: pointer; transition: background 0.15s; }
+.tk-row.late .tk-box { border-color: rgba(255, 181, 71, 0.8); }
+.tk-row:hover .tk-box { background: rgba(var(--c), 0.18); }
+.tk-row.done .tk-box { background: rgb(var(--c)); box-shadow: 0 0 5px rgba(var(--c), 0.7); }
+.tk-title { color: #effcff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; background: linear-gradient(currentColor, currentColor) no-repeat 0 55% / 0% 1px; }
+.tk-row.late .tk-title { color: #ffd79a; }
+.tk-row.done .tk-title { color: rgba(207, 239, 255, 0.4); background-size: 100% 1px; }
+.tk-due { font-size: 8px; letter-spacing: 0.18em; color: rgba(207, 239, 255, 0.5); white-space: nowrap; }
+.tk-due.late { color: #ffb447; text-shadow: 0 0 6px rgba(255, 181, 71, 0.5); }
+.tk-undo { font-size: 8px; letter-spacing: 0.18em; color: rgb(var(--c)); white-space: nowrap; cursor: pointer; }
+.tk-more { font-size: 7.5px; letter-spacing: 0.2em; color: rgba(207, 239, 255, 0.4); padding: 3px 0 0 18px; }
+.tk-hint { margin-top: 7px; padding-top: 5px; border-top: 1px dashed rgba(var(--c), 0.25); font-size: 8px; letter-spacing: 0.1em; color: rgba(207, 239, 255, 0.35); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tk-setup { margin-top: 4px; }
+.tk-choices { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+.tk-choice { font-size: 8px; letter-spacing: 0.16em; color: rgb(var(--c)); padding: 4px 8px; box-shadow: inset 0 0 0 1px rgba(var(--c), 0.3); border-radius: 2px; }
+.tk-choice:hover { background: rgba(var(--c), 0.14); }

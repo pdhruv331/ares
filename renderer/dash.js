@@ -1136,6 +1136,22 @@ const Dash = (() => {
             { label: 'ADD AN EVENT', title: 'ARES asks what and when, then asks you to confirm', run: () => ask('I want to add an event to my calendar. Ask me what and when, then add it.') },
           ] };
       }
+      case 'tasks': {
+        const tk = data.tasks || { tasks: [], lists: [] };
+        const srcName = tk.source === 'google' ? 'Google Tasks' : tk.source === 'reminders' ? 'Apple Reminders' : 'not connected';
+        const lists = tk.lists || [];
+        return { ...base, label: 'TASKS', tag: up(srcName.split(' ')[0]), value: tk.source ? `${tk.tasks.length} open` : 'No task source yet',
+          rows: [['Source', srcName], ['Updated', tk.at ? hhmm(tk.at) : ''], ['Lists', lists.length ? lists.map((l) => `${l.on ? '●' : '○'} ${l.title}`).join('  ') : '']],
+          text: tk.source ? (tk.error ? [`— ${tk.error}`] : []) : (tk.setup?.steps || []).map((t, i) => `${i + 1}. ${t}`),
+          actions: [
+            ...lists.filter((l) => lists.length > 1).map((l) => ({ label: `${l.on ? 'HIDE' : 'SHOW'} ${up(l.title).slice(0, 14)}`, close: false,
+              run: () => act('tasks-lists', { lists: (l.on ? lists.filter((x) => x.on && x.id !== l.id) : [...lists.filter((x) => x.on), l]).map((x) => x.id) }) })),
+            tk.source && { label: 'REFRESH', run: () => act('tasks-refresh', {}), close: false },
+            tk.source !== 'reminders' && { label: 'USE REMINDERS', title: 'Apple Reminders through macOS, no setup', run: () => act('tasks-setup', { source: 'reminders' }), close: false },
+            tk.source !== 'google' && { label: tk.setup?.google ? 'USE GOOGLE TASKS' : 'CONNECT GOOGLE TASKS', title: 'One-time setup: an OAuth client JSON, then sign-in in the browser', run: () => act('tasks-setup', { source: 'google' }) },
+            tk.source && { label: 'ADD A TASK', run: () => ask('I want to add a task. Ask me what, then add it.') },
+          ].filter(Boolean) };
+      }
       case 'timer': {
         const tm = data.timers.find((t) => t.label === d.label);
         if (!tm) return null;
@@ -1530,7 +1546,7 @@ const Dash = (() => {
   });
 
   // ---- Data → panels --------------------------------------------------------------------------------------------
-  const data = { events: [], leave: null, music: null, timers: [], call: null, jobs: [], steps: new Map(), emails: [], calendar: null };
+  const data = { events: [], leave: null, music: null, timers: [], call: null, jobs: [], steps: new Map(), emails: [], calendar: null, tasks: null };
   /** Every event known for the calendar views: the wide EventKit range when it's there, else the NEXT panel's near ones. */
   const calEvents = () => (data.calendar?.events?.length ? data.calendar.events : data.events);
   const EST = { small: 4, medium: 10, large: 25 }; // minutes: a rough job length when the worker keeps no checklist
@@ -1651,6 +1667,19 @@ const Dash = (() => {
       });
       want.get('calendar').info = panels.get('calendar')?.spec.info?.type === 'event' ? panels.get('calendar').spec.info : { type: 'calendar' };
     }
+    // TASKS: while there are open tasks (or it's pinned / asked for); late ones make it amber
+    const tk = data.tasks;
+    if (tk && (tk.source ? tk.tasks.length > 0 : false) || prefs.panels.tasks?.pinned || opened.has('tasks')) {
+      const list = tk?.tasks || [];
+      const late = list.filter((t) => t.due != null && new Date(t.due).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0)).length;
+      const top = list[0];
+      want.set('tasks', {
+        kind: late ? 'needs' : 'day', side: 'left', anim: 'materialize', label: 'TASKS', title: 'Tasks', tag: list.length ? pad2(list.length) : '', short: 'TASKS',
+        value: top ? top.title : tk?.source ? 'Nothing on the list' : 'No task source yet', detail: late ? `${late} LATE` : list.length > 1 ? `${list.length} open` : '',
+        miniValue: late ? `${late} LATE` : list.length ? `${list.length} OPEN` : 'CLEAR', view: 'tasks', model: tk || { tasks: [], source: null }, minTier: 'compact',
+        info: { type: 'tasks' }, dismissKey: `tasks:${tk?.at || 0}`,
+      });
+    }
     // Pinned kinds with nothing to show right now stay, in their idle form (the id is the kind itself)
     const kindsWanted = new Set([...want.keys()].map(kindKey));
     for (const [k, v] of Object.entries(prefs.panels)) {
@@ -1674,6 +1703,7 @@ const Dash = (() => {
       case 'events': data.events = msg.events || []; break;
       case 'calendar': data.calendar = msg.calendar; break;
       case 'open-view': setTimeout(() => openView(msg.name, msg.opts || {}), 0); break;
+      case 'tasks': data.tasks = msg.tasks; break;
       case 'leave': data.leave = msg.leave; break;
       case 'music': data.music = msg.music; break;
       case 'timers': data.timers = msg.timers || []; break;
@@ -1742,7 +1772,7 @@ const Dash = (() => {
     applyPrefs(p);
     window.ares.dash.state().then((s) => {
       setWeather(s.weather);
-      Object.assign(data, { events: s.events || [], leave: s.leave, music: s.music, timers: s.timers || [], call: s.call, emails: s.inbox || [], calendar: s.calendar || null });
+      Object.assign(data, { events: s.events || [], leave: s.leave, music: s.music, timers: s.timers || [], call: s.call, emails: s.inbox || [], calendar: s.calendar || null, tasks: s.tasks || null });
       claudeInfo = s.claude || [];
       reportStatus();
       reconcile();
