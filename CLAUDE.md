@@ -156,3 +156,26 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
 - UI: Work panel tabs JOBS/PROJECTS/GOALS/ROUTINES/LOG (renderer/work.js), project box + buttons, amber approval boxes, project orbs
   larger (`ORB_SIZE.project`) with labels (work.js labelLoop); phone Work view tabs + STOP ALL (phone/work.js), Android "ROUTINES" chip.
 - Tests: `node scripts/test-autonomy.js` (fake runner, no Claude usage); `--real` runs one tiny haiku project end to end.
+
+## Panels v2 (docs/panels-prompt.md)
+
+- Layout: `renderer/flow.js` is the ONE layout pass (pure; also run by `node scripts/test-panels.js`): docked panels flow down each
+  side in rank order, each at its own density; the brain, the desktop icon walls and free (hand-placed) panels are obstacles; the
+  least important panels (contextual before pinned, oldest first) step down when a side runs out of room. `dash.js` measures every
+  panel's `.dp-view` with one ResizeObserver, calls `layout()`, and glides (~0.45 s). A column wider than a standard panel (the
+  calendar in WEEK, an open card) makes the brain shift aside (`placeBrain(strips)`). Never add a second layout path.
+- Views (`renderer/panels.js`, registered with `Dash.view(name, …)`): the content sizes the panel at FULL; compact/mini use the
+  standard rows from the spec. Clicks inside a view go through `[data-act]`. Pins live in `prefs.panels[kind]` (`{pinned, side, rank}`
+  or `{pinned, fx, fy}`; `pinned:false` is explicit so the calendar's default pin stays off once unpinned). `Dash.feed(msg)` injects
+  a dashboard message for tests.
+- Calendar: `native/AresCalendar.swift` → "ARES Calendar.app" (launched with `open -a … --args --serve <sock>`, like Vision, so the
+  Calendars/Reminders prompt names it); `calendar.js` (EventKit client, `EKEventStoreChanged` → refresh, tiered add/move/delete as
+  `control.routes['calendar/…']`), `dashboard.js`'s connector read is the fallback (`dashboard.external`). The helper's `keychain`
+  subcommand is the only Keychain path (secret on stdin/stdout, never argv).
+- Tasks: `tasks.js` — Google Tasks (OAuth "Desktop app" client JSON picked in a dialog, loopback + PKCE, refresh token in the
+  Keychain under "ARES google-tasks-refresh") or Apple Reminders through the same helper. Custom panels: `custom-panels.js`, specs
+  in `<support>/panels/<id>.json`; shell commands need a one-time yes (tier 3) and live in settings `panels.allowedCommands`;
+  "ask Claude" sources are haiku one-shots ≥ 30 min apart that pause on the usage reserve. Brain tools: `tools/panel-tools.js`.
+- Testing: `node scripts/test-panels.js` (solver invariants + fakes for EventKit, the Tasks API and every custom source; no helper,
+  no Claude, no network). Visual: `node scripts/harness.mjs start|reload|eval|shot` drives a dev instance over CDP (start it
+  yourself with `--disable-backgrounding-occluded-windows` etc. when it's covered, and `Surface.hold({paused:false})`).
