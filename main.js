@@ -39,6 +39,7 @@ const { Relay } = require('./relay');
 const { Dashboard } = require('./dashboard');
 const { CalendarKit, keychain: keychainVia } = require('./calendar');
 const { Tasks } = require('./tasks');
+const { CustomPanels } = require('./custom-panels');
 const { Voice } = require('./voice');
 const { Voicemail } = require('./voicemail');
 const { Wallpaper } = require('./wallpaper');
@@ -79,6 +80,7 @@ let relay;   // the Cloudflare relay (relay.js): FCM pushes to the Android app, 
 let dashboard; // the dashboard's live data (dashboard.js): weather, calendar, leave-by, now playing
 let calendar;  // EventKit, live and local (calendar.js); the connector in dashboard.js is the fallback
 let tasks;     // the TASKS panel's data (tasks.js): Google Tasks or Apple Reminders
+let customPanels; // "add a panel showing …" (custom-panels.js): specs in <support>/panels
 let voicemail; // voicemails from the Twilio fallback when the phone agent can't answer (voicemail.js)
 let wallpaper; // the starry backdrop below the desktop icons, the lock-screen still (wallpaper.js)
 let claudeCtl;   // the user's Claude Code sessions: list, summaries, hooks, replies (claude-control.js)
@@ -1728,7 +1730,7 @@ ipcMain.handle('job-delete', async (_e, id) => {
 ipcMain.handle('ui-prefs', () => uiPrefs());
 // Where the user left each dashboard panel (renderer/dash.js), and the dashboard's current data
 ipcMain.on('ui-panels', (_e, panels) => { if (panels && typeof panels === 'object') writeUi({ [panelsKey()]: panels }); });
-ipcMain.handle('dash-state', () => ({ ...(dashboard?.snapshot() || {}), timers: bridge?.timers() || [], call: liveCall(), claude: claudeUsage?.statusLines() || [], calendar: calendar?.snapshot() || null, tasks: tasks?.snapshot() || null }));
+ipcMain.handle('dash-state', () => ({ ...(dashboard?.snapshot() || {}), timers: bridge?.timers() || [], call: liveCall(), claude: claudeUsage?.statusLines() || [], calendar: calendar?.snapshot() || null, tasks: tasks?.snapshot() || null, custom: customPanels?.view() || [] }));
 ipcMain.handle('dash-city', (_e, city) => {
   city = String(city || '').trim().slice(0, 80);
   writeSettings({ weatherCity: city || undefined });
@@ -1814,6 +1816,13 @@ async function dashAct(action, arg = {}) {
     }
     case 'tasks-refresh': return tasks ? (tasks.refresh('asked'), true) : false;
     case 'tasks-setup': return tasks ? (arg.source === 'reminders' ? (tasks.useReminders(), true) : connectGoogleTasks()) : false;
+    // Custom panels: the preview's KEEP / KEEP + PIN / DISCARD, and the on/off, pin, refresh, remove in the details (clicks at the Mac)
+    case 'panels-keep': { const spec = customPanels?.keep(String(arg.id), { pin: Boolean(arg.pin) }); if (spec) control.audit.record({ what: `kept the panel "${spec.title}"${spec.pinned ? ' (pinned)' : ''}`, kind: 'panels', tier: 2, source: 'mac', approval: 'clicked at the Mac' }); return Boolean(spec); }
+    case 'panels-discard': return Boolean(customPanels?.discard(String(arg.id)));
+    case 'panels-toggle': return customPanels ? customPanels.toggle(String(arg.id), arg.on) : false;
+    case 'panels-pin': return Boolean(customPanels?.setPinned(String(arg.id), Boolean(arg.on)));
+    case 'panels-refresh': return Boolean(customPanels?.refreshNow(String(arg.id)));
+    case 'panels-remove': { const spec = customPanels?.specs.get(String(arg.id)); if (!spec) return false; customPanels.remove(spec.id); control.audit.record({ what: `removed the panel "${spec.title}"`, kind: 'panels', tier: 2, source: 'mac', approval: 'clicked at the Mac' }); return true; }
     case 'tasks-lists': { if (!tasks) return false; writeSettings({ tasks: { ...(readSettings().tasks || {}), lists: Array.isArray(arg.lists) ? arg.lists.map(String) : [] } }); tasks.refresh('lists'); return true; }
     case 'fix': {
       // Status pill: one click toward fixing what's broken
@@ -1933,6 +1942,7 @@ function toolActivity(name) {
     calendar_events: 'checking your calendar…', calendar_add: 'adding to your calendar…', calendar_move: 'moving that in your calendar…', calendar_delete: 'removing that from your calendar…',
     calendar_show: 'bringing up your calendar…', calendar_setup: 'connecting your calendar…', calendar_status: 'checking the calendar…',
     tasks_list: 'checking your tasks…', tasks_add: 'adding to your tasks…', tasks_complete: 'ticking that off…', tasks_move: 'moving that task…', tasks_setup: 'setting up tasks…', tasks_status: 'checking your tasks…',
+    panel_preview: 'building a panel…', panel_keep: 'keeping the panel…', panel_edit: 'changing the panel…', panel_remove: 'removing the panel…', panel_list: 'checking the panels…', panel_discard: 'dropping the preview…', panel_toggle: 'switching the panel…',
   };
   return own[tool] || (server === 'ares' ? `${tool.replace(/_/g, ' ')}…` : 'working on it…');
 }
@@ -2102,6 +2112,21 @@ app.whenReady().then(async () => {
     openExternal: (u) => shell.openExternal(u), notice: (line) => notice(line) });
   Object.assign(control.routes, tasks.routes());
   tasks.on('update', toDash);
+  customPanels = new CustomPanels({
+    dir: path.join(app.getPath('userData'), 'panels'), readSettings, writeSettings, log, tier: (level, what, ctx) => control.tier(level, what, ctx),
+    oneShot: claude.oneShot, usage: claudeUsage, isPublicUrl: require('./egress').isPublicUrl, classify: (p) => control.classify(p),
+    providers: { // built-in sources: ARES's own live data, shaped for the templates
+      calendar: () => ({ items: (calendar.ready ? calendar.near() : dashboard.events).slice(0, 8).map((e) => ({ text: e.title, status: e.allDay ? 'ALL DAY' : new Date(e.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }), kind: 'day' })) }),
+      tasks: () => ({ items: (tasks.tasks || []).slice(0, 8).map((t) => ({ text: t.title, status: t.due ? require('./tasks').dueLabel(t.due) : '', kind: t.due && t.due < Date.now() - 86_400_000 ? 'needs' : 'day', done: false })), value: (tasks.tasks || []).length }),
+      weather: () => ({ value: dashboard.weather?.text?.split(' · ')[0] || '—', label: `${dashboard.weather?.text?.split(' · ')[1] || ''}${dashboard.weather?.place ? ` · ${dashboard.weather.place}` : ''}`.trim() }),
+      jobs: () => ({ items: jobs.list().filter((j) => ['running', 'queued', 'approval', 'paused'].includes(j.status)).slice(0, 8).map((j) => ({ text: j.title, status: j.status, kind: j.status === 'approval' ? 'needs' : 'work' })), value: jobs.active.length }),
+      projects: () => ({ items: (autonomy?.view().projects || []).slice(0, 8).map((p) => ({ text: p.title, status: p.project?.phase || p.status, kind: p.status === 'approval' ? 'needs' : 'work' })) }),
+      'claude-usage': () => { const w = claudeUsage.snapshot().windows.five_hour; return { value: w ? `${w.pct}%` : '—', gauge: w ? w.pct / 100 : 0, label: claudeUsage.statusLines()[0] || '' }; },
+      'now-playing': () => (dashboard.music ? { value: dashboard.music.title, label: `${dashboard.music.artist}${dashboard.music.playing ? '' : ' · paused'}` } : { value: '—', label: 'nothing playing' }),
+    },
+  });
+  Object.assign(control.routes, customPanels.routes());
+  customPanels.on('update', toDash);
   const mcpConfigPath = path.join(app.getPath('userData'), 'mcp.json');
   fs.writeFileSync(mcpConfigPath, JSON.stringify({
     mcpServers: {
@@ -2180,6 +2205,7 @@ app.whenReady().then(async () => {
     dashboard.setVisible(win.isVisible());
     calendar.start();
     tasks.start().catch((err) => log('tasks start failed', err.message));
+    customPanels.start();
     tasks.setVisible(win.isVisible());
     pushVoiceStatus();
   });
@@ -2211,6 +2237,7 @@ app.on('will-quit', () => {
   dashboard?.stop();
   calendar?.stop();
   tasks?.stop();
+  customPanels?.stop();
   wallpaper?.stop();
   theme?.quit();
   desk?.stop();

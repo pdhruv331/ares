@@ -249,8 +249,56 @@ const PanelViews = (() => {
     },
   };
 
+  // ---- CUSTOM PANELS: templates drawn in the house style (custom-panels.js holds the specs and runs the sources) --------------
+  // model = { id, title, kind, template, data, error, at, preview, pinned, enabled, source }
+  const mmss = (ms) => { const t = Math.max(0, Math.floor(ms / 1000)); const d = Math.floor(t / 86400), h = Math.floor((t % 86400) / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60;
+    return d > 0 ? `${d}<small>D</small> ${pad2(h)}<small>H</small>` : h > 0 ? `${pad2(h)}:${pad2(m)}:${pad2(sec)}` : `${pad2(m)}:${pad2(sec)}`; };
+  const spark = (series, w = 120, h = 26) => {
+    if (!series || series.length < 2) return '';
+    const min = Math.min(...series), max = Math.max(...series), span = max - min || 1;
+    const pts = series.map((v, i) => `${((i / (series.length - 1)) * w).toFixed(1)},${(h - 2 - ((v - min) / span) * (h - 4)).toFixed(1)}`);
+    return `<svg class="cp-spark" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}"><polyline points="${pts.join(' ')}"/><circle cx="${pts[pts.length - 1].split(',')[0]}" cy="${pts[pts.length - 1].split(',')[1]}" r="1.8"/></svg>`;
+  };
+  const ring = (v) => { const r = 15, c = 2 * Math.PI * r; return `<svg class="cp-ring" viewBox="0 0 38 38"><circle class="track" cx="19" cy="19" r="${r}"/><circle class="arc" cx="19" cy="19" r="${r}" stroke-dasharray="${(v * c).toFixed(1)} ${c.toFixed(1)}"/></svg>`; };
+  const custom = {
+    size: { w: 214, h: 62 },
+    sig: (p, ctx) => `${JSON.stringify(ctx.model)}|${ctx.model.template === 'countdown' ? Math.floor(ctx.now / 1000) : Math.floor(ctx.now / 60_000)}`,
+    render(p, host, ctx) {
+      const m = ctx.model || {}, d = m.data || {};
+      host.className = `dp-view cp cp-${m.template || 'value'}`;
+      const head = `<div class="cal-head"><span class="cal-title">${esc(m.title || 'PANEL')}</span><span class="cp-tag">${m.preview ? 'PREVIEW' : m.error ? '—' : ''}</span></div>`;
+      let body = '';
+      if (m.error && !d) body = `<div class="cal-empty">—</div>`;
+      else switch (m.template) {
+        case 'value': body = `<div class="cp-big">${esc(d.value ?? '—')}${d.unit ? `<small>${esc(d.unit)}</small>` : ''}${d.change ? `<em class="${/^-/.test(d.change) ? 'down' : 'up'}">${esc(d.change)}</em>` : ''}</div>${d.label ? `<div class="cp-line">${esc(d.label)}</div>` : ''}${d.gauge != null ? `<div class="cp-bar"><i style="width:${Math.round(d.gauge * 100)}%"></i></div>` : ''}`; break;
+        case 'gauge': body = `<div class="cp-gauge">${ring(d.gauge ?? 0)}<div><div class="cp-big">${esc(d.value ?? '—')}${d.unit ? `<small>${esc(d.unit)}</small>` : ''}</div>${d.label ? `<div class="cp-line">${esc(d.label)}</div>` : ''}</div></div>`; break;
+        case 'list': body = `<div class="cp-list">${(d.items || []).map((it) => `<div class="cp-row k-${it.kind || 'day'}"><i class="cal-bar"></i><span class="cp-text"${it.url ? ` data-url="${esc(it.url)}"` : ''}>${esc(it.text)}</span>${it.status ? `<span class="cp-status">${esc(it.status)}</span>` : ''}</div>`).join('') || '<div class="cal-empty">nothing</div>'}</div>`; break;
+        case 'checklist': body = `<div class="cp-list">${(d.items || []).map((it) => `<div class="cp-row${it.done ? ' done' : ''}"><i class="tk-box"></i><span class="cp-text">${esc(it.text)}</span></div>`).join('') || '<div class="cal-empty">nothing</div>'}</div>`; break;
+        case 'text': body = `<div class="cp-para">${esc(d.text || '—').split(/\n{2,}/).map((x) => `<p>${esc(x).replace(/\n/g, '<br>')}</p>`).join('')}</div>`; break;
+        case 'image': body = d.url ? `<img class="cp-img" src="${esc(d.url)}" alt="">${d.caption ? `<div class="cp-line">${esc(d.caption)}</div>` : ''}` : '<div class="cal-empty">—</div>'; break;
+        case 'chart': body = `<div class="cp-chart"><div><div class="cp-big">${esc(d.value ?? '—')}${d.unit ? `<small>${esc(d.unit)}</small>` : ''}</div>${d.change ? `<em class="cp-change ${/^-/.test(d.change) ? 'down' : 'up'}">${esc(d.change)}</em>` : ''}${d.label ? `<div class="cp-line">${esc(d.label)}</div>` : ''}</div>${spark(d.series)}</div>`; break;
+        case 'countdown': {
+          const left = (d.target || 0) - ctx.now, total = (d.target || 0) - (d.from || d.target - 1), done = left <= 0;
+          body = `<div class="cp-count${done ? ' done' : ''}">${done ? 'NOW' : mmss(left)}</div>${d.label ? `<div class="cp-line">${esc(d.label)}${!done ? ` · ${new Date(d.target).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}</div>` : ''}<div class="cp-bar"><i style="width:${Math.round(Math.max(0, Math.min(1, 1 - left / Math.max(1, total))) * 100)}%"></i></div>`; break;
+        }
+        default: body = `<div class="cal-empty">${esc(m.template)}</div>`;
+      }
+      if (m.error) body += `<div class="cp-err">— ${esc(m.error).slice(0, 80)}</div>`;
+      const foot = m.preview ? `<div class="cp-keep"><span data-act="keep">KEEP</span><span data-act="keep-pin">KEEP + PIN</span><span data-act="edit">EDIT</span><span data-act="discard">DISCARD</span></div>` : '';
+      host.innerHTML = head + body + foot;
+    },
+    act(p, action, el, ctx) {
+      const id = ctx.model.id;
+      if (action === 'keep') ctx.act('panels-keep', { id });
+      else if (action === 'keep-pin') ctx.act('panels-keep', { id, pin: true }).then(() => Dash.pin(`custom:${id}`, true));
+      else if (action === 'discard') ctx.act('panels-discard', { id });
+      else if (action === 'edit') ctx.ask(`I want to change the "${ctx.model.title}" panel preview. Ask me what to change, then edit it.`);
+    },
+  };
+
   // Registered once Dash exists (this script loads after dash.js)
   Dash.view('calendar', calendar);
   Dash.view('tasks', tasks);
-  return { calendar, tasks, kindOf, dayKey, startOfDay, startOfWeek, onDay, DAY };
+  Dash.view('custom', custom);
+  return { calendar, tasks, custom, kindOf, dayKey, startOfDay, startOfWeek, onDay, DAY };
 })();

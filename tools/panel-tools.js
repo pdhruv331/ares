@@ -58,6 +58,42 @@ function register({ tool, bridge }) {
   tool('tasks_move', 'Change a task\'s due date ("move X to tomorrow"); an empty due removes the date. Tier 2.', { title: z.string(), due: z.string().optional() },
     async (a) => (await ctl('tasks/move', a)).message);
 
+  // ---- Custom panels ("add a panel showing …", custom-panels.js) ----------------------------------------------------------------
+  const sourceSchema = z.object({
+    type: z.enum(['builtin', 'shortcut', 'shell', 'url', 'file', 'claude', 'static']),
+    provider: z.enum(['calendar', 'tasks', 'weather', 'jobs', 'projects', 'claude-usage', 'now-playing']).optional().describe('builtin: ARES\'s own live data'),
+    name: z.string().optional().describe('shortcut: the Shortcut\'s name'), input: z.string().optional(),
+    command: z.string().optional().describe('shell: one command line; the user approves it the first time (tier 3)'),
+    url: z.string().optional().describe('url: a JSON or RSS URL, GET only, no credentials, public hosts'), rss: z.boolean().optional(),
+    path: z.string().optional().describe('file: a text/JSON file inside the user\'s folders'),
+    prompt: z.string().optional().describe('claude: what to answer (a tool-less one-shot, at most every 30 min, pauses near the usage limits)'),
+    value: z.any().optional().describe('static: the data itself; for a countdown { target: "YYYY-MM-DDTHH:MM", label }'),
+    pick: z.string().optional().describe('A path into the JSON, e.g. "bitcoin.usd" or "items[0].title"'),
+    unit: z.string().optional(), max: z.number().optional().describe('gauge: the full-scale value'),
+  });
+  const panelFields = {
+    title: z.string().describe('Short, as the header: "BTC", "OPEN PRS", "FLIGHT"'),
+    template: z.enum(['value', 'gauge', 'list', 'checklist', 'text', 'image', 'chart', 'countdown']),
+    source: sourceSchema,
+    kind: z.enum(['day', 'work', 'needs']).optional().describe('Colour: day (cyan, default), work (violet), needs (amber: time-critical)'),
+    refresh: z.number().int().optional().describe('Seconds between refreshes (minimums apply per source; claude ≥ 1800)'),
+    pinned: z.boolean().optional(),
+  };
+  tool('panel_preview', 'Create a custom panel from a spec and show it as a dashed PREVIEW with real data; nothing is saved until panel_keep. '
+    + '"Show the BTC price every 10 minutes" → template chart or value, source { type: "url", url: "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", pick: "bitcoin.usd", unit: "USD" }, refresh 600. '
+    + '"A countdown to my flight on the 30th" → template countdown, source { type: "static", value: { target: "2026-10-30T07:00", label: "Flight" } }, kind "needs". '
+    + '"My open GitHub PRs" → list from a shell command (gh pr list --json title,state) or a JSON URL. Then ask: keep, keep + pin, edit, or discard.',
+  panelFields, async (a) => (await ctl('panels/preview', a)).message);
+  tool('panel_keep', 'Save a previewed panel (the user said keep it / yes), optionally pinned.', { id: z.string(), pin: z.boolean().optional() },
+    async (a) => (await ctl('panels/keep', a)).message);
+  tool('panel_discard', 'Drop a preview the user doesn\'t want.', { id: z.string() }, async (a) => (await ctl('panels/discard', a)).message);
+  tool('panel_edit', '"Edit the X panel …": change a saved panel or a preview (title, template, source, refresh, kind, pinned).',
+    { id: z.string().optional(), name: z.string().optional().describe('The panel\'s title when the id is unknown'), ...Object.fromEntries(Object.entries(panelFields).map(([k, v]) => [k, v.optional()])) },
+    async (a) => (await ctl('panels/edit', a)).message);
+  tool('panel_remove', '"Remove the X panel": deletes a saved custom panel.', { id: z.string().optional(), name: z.string().optional() }, async (a) => (await ctl('panels/remove', a)).message);
+  tool('panel_toggle', 'Switch a custom panel on or off without removing it.', { id: z.string().optional(), name: z.string().optional(), on: z.boolean() }, async (a) => (await ctl('panels/toggle', a)).message);
+  tool('panel_list', 'The custom panels: ids, templates, sources, on/off, pinned, previews, and the reason when one shows "—".', {}, async () => (await ctl('panels/list', {})).message);
+
   tool('calendar_refresh', 'Ask macOS to sync its calendar accounts now ("refresh my calendar"), so changes made on the web or the phone arrive.', {},
     async () => (await ctl('calendar/refresh', {})).message);
 }

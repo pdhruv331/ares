@@ -1136,6 +1136,25 @@ const Dash = (() => {
             { label: 'ADD AN EVENT', title: 'ARES asks what and when, then asks you to confirm', run: () => ask('I want to add an event to my calendar. Ask me what and when, then add it.') },
           ] };
       }
+      case 'custom': {
+        const c = (data.custom || []).find((x) => x.id === d.id);
+        if (!c) return null;
+        const others = (data.custom || []).filter((x) => !x.preview);
+        return { ...base, label: c.preview ? 'PREVIEW' : 'PANEL', tag: up(c.template), value: c.title,
+          rows: [['Source', c.source], ['Every', c.refresh >= 3600 ? `${Math.round(c.refresh / 3600)} h` : c.refresh >= 60 ? `${Math.round(c.refresh / 60)} min` : `${c.refresh} s`], ['Updated', c.at ? hhmm(c.at) : ''], ['Status', c.error ? `— ${c.error}` : c.enabled ? 'on' : 'off']],
+          text: others.length > 1 || (others.length && c.preview) ? [{ html: `<div class="dc-panels">${others.map((x) => `<div class="dc-prow"><b>${esc(x.title)}</b><span>${x.error ? '—' : esc(x.template)}</span>` +
+            `<button class="dc-btn" data-panel="toggle" data-id="${esc(x.id)}">${x.enabled ? 'OFF' : 'ON'}</button><button class="dc-btn" data-panel="pin" data-id="${esc(x.id)}">${prefs.panels[`custom:${x.id}`]?.pinned ? 'UNPIN' : 'PIN'}</button></div>`).join('')}</div>` }] : [],
+          actions: c.preview ? [
+            { label: 'KEEP', run: () => act('panels-keep', { id: c.id }) },
+            { label: 'KEEP + PIN', run: () => act('panels-keep', { id: c.id, pin: true }).then(() => setTimeout(() => pinByName(`custom:${c.id}`, true), 300)) },
+            { label: 'EDIT', run: () => ask(`I want to change the "${c.title}" panel preview. Ask me what to change, then edit it.`) },
+            { label: 'DISCARD', danger: true, run: () => act('panels-discard', { id: c.id }) },
+          ] : [
+            { label: 'REFRESH', run: () => act('panels-refresh', { id: c.id }), close: false },
+            { label: 'EDIT', run: () => ask(`I want to change the "${c.title}" panel. Ask me what to change, then edit it.`) },
+            { label: 'REMOVE', danger: true, confirm: 'SURE?', run: () => act('panels-remove', { id: c.id }) },
+          ] };
+      }
       case 'tasks': {
         const tk = data.tasks || { tasks: [], lists: [] };
         const srcName = tk.source === 'google' ? 'Google Tasks' : tk.source === 'reminders' ? 'Apple Reminders' : 'not connected';
@@ -1246,6 +1265,14 @@ const Dash = (() => {
     }
     return null;
   }
+  // The custom panels list inside a custom panel's card: on/off and pin per panel
+  layer.addEventListener('click', (e) => {
+    const b = e.target.closest?.('[data-panel]');
+    if (!b) return;
+    e.stopPropagation();
+    if (b.dataset.panel === 'toggle') act('panels-toggle', { id: b.dataset.id }).then(() => card && renderCard(detailsOf(card.p)));
+    else { pinByName(`custom:${b.dataset.id}`, !prefs.panels[`custom:${b.dataset.id}`]?.pinned); act('panels-pin', { id: b.dataset.id, on: Boolean(prefs.panels[`custom:${b.dataset.id}`]?.pinned) }); if (card) renderCard(detailsOf(card.p)); }
+  });
   // INBOX buttons live inside each email's block
   layer.addEventListener('click', (e) => {
     const b = e.target.closest?.('[data-mail]');
@@ -1546,7 +1573,7 @@ const Dash = (() => {
   });
 
   // ---- Data → panels --------------------------------------------------------------------------------------------
-  const data = { events: [], leave: null, music: null, timers: [], call: null, jobs: [], steps: new Map(), emails: [], calendar: null, tasks: null };
+  const data = { events: [], leave: null, music: null, timers: [], call: null, jobs: [], steps: new Map(), emails: [], calendar: null, tasks: null, custom: [] };
   /** Every event known for the calendar views: the wide EventKit range when it's there, else the NEXT panel's near ones. */
   const calEvents = () => (data.calendar?.events?.length ? data.calendar.events : data.events);
   const EST = { small: 4, medium: 10, large: 25 }; // minutes: a rough job length when the worker keeps no checklist
@@ -1680,6 +1707,20 @@ const Dash = (() => {
         info: { type: 'tasks' }, dismissKey: `tasks:${tk?.at || 0}`,
       });
     }
+    // CUSTOM PANELS (custom-panels.js): every enabled spec, and previews (dashed) until kept or discarded
+    for (const c of data.custom || []) {
+      if (!c.enabled && !c.preview) continue;
+      const id = `custom:${c.id}`;
+      if (c.pinned && !c.preview && !('pinned' in (prefs.panels[id] || {}))) prefs.panels[id] = { ...(prefs.panels[id] || {}), pinned: true }; // the spec's pin, once
+      const d = c.data || {};
+      const first = d.value ?? d.items?.[0]?.text ?? d.text?.split('\n')[0] ?? (d.target ? new Date(d.target).toLocaleDateString() : '') ?? '';
+      want.set(id, {
+        kind: c.kind || 'day', side: c.kind === 'work' ? 'right' : 'left', anim: c.preview ? 'launch' : 'materialize', label: c.title, title: c.title, tag: c.preview ? 'PREVIEW' : c.error ? '—' : '',
+        short: c.title.slice(0, 8), value: c.error && !c.data ? '—' : String(first || '—').slice(0, 40), detail: c.error ? c.error.slice(0, 60) : d.label || d.change || '',
+        miniValue: String(d.value ?? d.items?.length ?? '').slice(0, 12) || '—', view: 'custom', model: c, preview: c.preview, minTier: c.preview ? 'full' : undefined,
+        info: { type: 'custom', id: c.id }, dismissKey: `custom:${c.id}:${c.preview ? 'preview' : 'on'}`, onDismiss: () => (c.preview ? act('panels-discard', { id: c.id }) : act('panels-toggle', { id: c.id, on: false })),
+      });
+    }
     // Pinned kinds with nothing to show right now stay, in their idle form (the id is the kind itself)
     const kindsWanted = new Set([...want.keys()].map(kindKey));
     for (const [k, v] of Object.entries(prefs.panels)) {
@@ -1704,6 +1745,7 @@ const Dash = (() => {
       case 'calendar': data.calendar = msg.calendar; break;
       case 'open-view': setTimeout(() => openView(msg.name, msg.opts || {}), 0); break;
       case 'tasks': data.tasks = msg.tasks; break;
+      case 'custom': data.custom = msg.panels || []; break;
       case 'leave': data.leave = msg.leave; break;
       case 'music': data.music = msg.music; break;
       case 'timers': data.timers = msg.timers || []; break;
@@ -1772,7 +1814,7 @@ const Dash = (() => {
     applyPrefs(p);
     window.ares.dash.state().then((s) => {
       setWeather(s.weather);
-      Object.assign(data, { events: s.events || [], leave: s.leave, music: s.music, timers: s.timers || [], call: s.call, emails: s.inbox || [], calendar: s.calendar || null, tasks: s.tasks || null });
+      Object.assign(data, { events: s.events || [], leave: s.leave, music: s.music, timers: s.timers || [], call: s.call, emails: s.inbox || [], calendar: s.calendar || null, tasks: s.tasks || null, custom: s.custom || [] });
       claudeInfo = s.claude || [];
       reportStatus();
       reconcile();
@@ -1837,6 +1879,7 @@ const Dash = (() => {
     pin: (name, on = true) => pinByName(name, on),
     get pinned() { return Object.entries(prefs.panels).filter(([, v]) => v.pinned).map(([k]) => k); },
     get events() { return calEvents(); },
+    get custom() { return data.custom || []; },
     layout,
     get desk() { return { walls, spot, brain: brain(), edges, surface: surfaceName }; },
     get reduceMotion() { return reduce(); },

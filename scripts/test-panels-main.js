@@ -147,6 +147,90 @@ async function run(check) {
   check('Reminders as the source', /Apple Reminders/.test(rs.message) && tk.source === 'reminders' && tk.tasks[0]?.title === 'Renew passport', `${rs.message} ${tk.source} ${tk.tasks.length}`);
   const ra = await tr['tasks/add']({ title: 'Buy bread', due: 'tomorrow' }, yes);
   check('add a reminder', /Added: Buy bread/.test(ra.message), ra.message);
+
+  // ---- Custom panels: specs as data, every source type with fakes, preview → keep, the usage pause -----------------------------
+  const fs = require('fs'), os = require('os');
+  const { CustomPanels } = require(path.join(root, 'custom-panels.js'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ares-panels-'));
+  const scratch = fs.mkdtempSync(path.join(os.homedir(), 'Downloads', '.ares-panels-test-'));
+  let pset = {};
+  let usageOk = true;
+  const claudeCalls = [];
+  const cp = new CustomPanels({ dir, readSettings: () => pset, writeSettings: (p2) => Object.assign(pset, p2), log: () => {}, tier: (level, what, ctx) => { audit.push({ level, ...what }); return level === 3 && !ctx.confirm?.().allow ? { message: 'Not confirmed yet.' } : null; },
+    oneShot: async (prompt) => { claudeCalls.push(prompt); return '{"text": "Markets are calm today."}'; }, usage: { reserve: () => (usageOk ? { ok: true } : { ok: false, why: 'the 5-hour Claude limit is at 92%' }) },
+    isPublicUrl: async (u) => !/localhost|127\.0\.0\.1/.test(u), classify: (p2) => (p2.startsWith(scratch) ? 'inside' : p2.includes('.ssh') ? 'blocked' : 'outside'),
+    providers: { weather: () => ({ value: '14°', label: 'RAIN · London' }), tasks: () => ({ items: [{ text: 'Buy milk', status: 'TODAY' }] }) } });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (/coingecko/.test(url)) return { ok: true, status: 200, text: async () => JSON.stringify({ bitcoin: { usd: 64321.5 } }) };
+    if (/rss/.test(url)) return { ok: true, status: 200, text: async () => '<rss><channel><item><title>First story</title><link>https://x.test/1</link></item><item><title>Second &amp; third</title></item></channel></rss>' };
+    return { ok: false, status: 500, text: async () => '' };
+  };
+  try {
+    cp.load();
+    const bad = (() => { try { cp.validate({ title: 'x', template: 'iframe', source: { type: 'static', value: 1 } }); return null; } catch (e) { return e.message; } })();
+    check('spec validation: unknown template refused', /template must be/.test(bad), bad);
+    const badSrc = (() => { try { cp.validate({ title: 'x', template: 'value', source: { type: 'eval', code: 'rm -rf' } }); return null; } catch (e) { return e.message; } })();
+    check('spec validation: unknown source refused', /source\.type/.test(badSrc), badSrc);
+    const creds = (() => { try { cp.validate({ title: 'x', template: 'value', source: { type: 'url', url: 'https://user:pw@x.test/a' } }); return null; } catch (e) { return e.message; } })();
+    check('spec validation: credentials in URLs refused', /credentials/.test(creds), creds);
+    const r = cp.routes();
+    // url + pick → value
+    const pv1 = await r['panels/preview']({ title: 'BTC', template: 'value', source: { type: 'url', url: 'https://api.coingecko.com/x', pick: 'bitcoin.usd', unit: 'USD' }, refresh: 600 }, yes);
+    check('preview from a JSON URL', /Preview up/.test(pv1.message) && cp.view().some((v) => v.preview && v.id === 'btc' && v.data.value === '64321.5'), pv1.message.slice(0, 120));
+    check('nothing saved before keep', !fs.existsSync(path.join(dir, 'btc.json')));
+    const kept = r['panels/keep']({ id: 'btc', pin: true }, yes);
+    check('keep saves the spec (pinned)', /Kept "BTC", pinned/.test(kept.message) && JSON.parse(fs.readFileSync(path.join(dir, 'btc.json'), 'utf8')).pinned === true, kept.message);
+    // RSS → list
+    const pv2 = await r['panels/preview']({ title: 'NEWS', template: 'list', source: { type: 'url', url: 'https://feeds.test/rss' } }, yes);
+    const news = cp.view().find((v) => v.id === 'news');
+    check('RSS feed → list items', news?.data.items.length === 2 && news.data.items[1].text === 'Second & third', JSON.stringify(news?.data));
+    check('discard drops the preview', r['panels/discard']({ id: 'news' }, yes).message === 'Discarded.' && !cp.view().some((v) => v.id === 'news'));
+    // private URL refused
+    const pv3 = await r['panels/preview']({ title: 'LOCAL', template: 'value', source: { type: 'url', url: 'http://localhost:8080/x' } }, yes);
+    check('private host refused with a quiet reason', /source failed: only public hosts/.test(pv3.message), pv3.message.slice(0, 120));
+    // file inside the scope; outside refused
+    fs.writeFileSync(path.join(scratch, 'count.json'), JSON.stringify({ open: 7, max: 10 }));
+    const pv4 = await r['panels/preview']({ title: 'OPEN', template: 'gauge', source: { type: 'file', path: path.join(scratch, 'count.json'), pick: 'open', max: 10 } }, yes);
+    const open = cp.view().find((v) => v.id === 'open');
+    check('file source → gauge', open?.data.value === '7' && Math.abs(open.data.gauge - 0.7) < 1e-9, JSON.stringify(open?.data));
+    const pv5 = await r['panels/preview']({ title: 'KEYS', template: 'text', source: { type: 'file', path: '~/.ssh/id_rsa' } }, yes);
+    check('blocked file refused', /off limits/.test(pv5.message), pv5.message.slice(0, 120));
+    // shell: tier 3 the first time, then allowlisted
+    const held = await r['panels/preview']({ title: 'DISK', template: 'value', source: { type: 'shell', command: 'df -h / | tail -1 | awk \'{print $5}\'' } }, no);
+    check('shell command held for a yes the first time', /Not confirmed/.test(held.message) && !(pset.panels?.allowedCommands || []).length, held.message.slice(0, 100));
+    const ok = await r['panels/preview']({ title: 'DISK', template: 'value', source: { type: 'shell', command: 'df -h / | tail -1 | awk \'{print $5}\'' } }, yes);
+    const disk = cp.view().find((v) => v.id === 'disk');
+    check('shell command allowed with a yes and run', /Preview up/.test(ok.message) && /\d+%/.test(disk?.data.value || ''), `${ok.message.slice(0, 80)} ${JSON.stringify(disk?.data)}`);
+    check('allowlist persisted per command', (pset.panels.allowedCommands || []).length === 1);
+    // builtin providers
+    await r['panels/preview']({ title: 'WEATHER', template: 'value', source: { type: 'builtin', provider: 'weather' } }, yes);
+    check('built-in provider', cp.view().find((v) => v.id === 'weather')?.data.value === '14°');
+    // countdown
+    await r['panels/preview']({ title: 'FLIGHT', template: 'countdown', source: { type: 'static', value: { target: '2026-10-30T07:00', label: 'Lisbon' } }, kind: 'needs' }, yes);
+    check('countdown target parsed', cp.view().find((v) => v.id === 'flight')?.data.target === new Date(2026, 9, 30, 7).getTime());
+    // ask Claude: min refresh 30 min, pauses near the limit
+    const ac = await r['panels/preview']({ title: 'MARKETS', template: 'text', source: { type: 'claude', prompt: 'How are the markets?' }, refresh: 60 }, yes);
+    const mk = cp.view().find((v) => v.id === 'markets');
+    check('ask Claude one-shot, refresh clamped to 30 min', claudeCalls.length === 1 && mk?.refresh === 1800 && mk.data.text === 'Markets are calm today.', `${claudeCalls.length} ${mk?.refresh}`);
+    r['panels/keep']({ id: 'markets' }, yes);
+    usageOk = false;
+    await cp.refresh(cp.specs.get('markets'));
+    check('ask Claude pauses near the usage limit (— with the reason)', claudeCalls.length === 1 && /paused: the 5-hour/.test(cp.states.get('markets').error), cp.states.get('markets').error);
+    usageOk = true;
+    // edit + remove + toggle
+    const ed = await r['panels/edit']({ name: 'BTC', refresh: 1200, kind: 'work' }, yes);
+    check('edit a kept panel', /every 1200s/.test(ed.message) && cp.specs.get('btc').kind === 'work', ed.message);
+    check('toggle off', /is off/.test(r['panels/toggle']({ name: 'btc', on: false }, yes).message) && cp.specs.get('btc').enabled === false);
+    check('remove', /Removed "BTC"/.test(r['panels/remove']({ name: 'btc' }, yes).message) && !fs.existsSync(path.join(dir, 'btc.json')));
+    // reload from disk
+    const cp2 = new CustomPanels({ dir, readSettings: () => pset, writeSettings: () => {}, log: () => {}, tier: () => null });
+    check('specs reload from disk', cp2.load() === 1 && cp2.specs.has('markets'));
+  } finally {
+    globalThis.fetch = originalFetch;
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
   return { fakeCalendar };
 }
 

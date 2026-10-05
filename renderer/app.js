@@ -381,6 +381,14 @@ function localCommand(raw) {
   if (/^(?:please\s+)?(?:collapse|shrink|fold)(?: it| that| the calendar| the panel)?$/i.test(text)) {
     return { reply: '', after: () => { Dash.collapseView('calendar'); window.ares.resumeListening(); } };
   }
+  const preview = (Dash.custom || []).find((c) => c.preview);
+  if (preview && /^(?:please\s+)?(?:yes,? )?(?:keep (?:it|that|this|the panel)(?: and pin(?: it)?)?|keep and pin(?: it)?|pin it and keep it)\.?$/i.test(text)) {
+    const pin = /pin/i.test(text);
+    return { reply: pin ? 'Kept and pinned, sir.' : 'Kept, sir.', after: () => { window.ares.dash.act('panels-keep', { id: preview.id, pin }).then(() => { if (pin) Dash.pin(`custom:${preview.id}`, true); }); window.ares.resumeListening(); } };
+  }
+  if (preview && /^(?:please\s+)?(?:no,? )?(?:discard|drop|forget|bin|scrap)(?: it| that| this| the panel| the preview)?\.?$/i.test(text)) {
+    return { reply: 'Discarded, sir.', after: () => { window.ares.dash.act('panels-discard', { id: preview.id }); window.ares.resumeListening(); } };
+  }
   let pin = text.match(/^(?:please\s+)?(pin|unpin) (?:my |the )?(.+?)(?: panel)?$/i);
   if (pin) {
     const on = pin[1].toLowerCase() === 'pin';
