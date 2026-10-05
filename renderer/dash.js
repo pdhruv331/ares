@@ -23,8 +23,8 @@ const Dash = (() => {
   // Colour by kind: cyan = my day, violet = work, green = calls, amber = needs me
   const KIND = { day: '62,230,255', work: '167,139,250', call: '74,222,128', needs: '255,181,71' };
   const TIERS = { full: { w: 214, h: 62 }, compact: { w: 170, h: 44 }, mini: { w: 130, h: 26 } };
-  const LEVELS = [['full', 1], ['compact', 1], ['mini', 1], ['mini', 2], ['mini', 3]];
   const PAD = 14, TOP = 12, GAP = 10;
+  const MAX_PINS = () => Number(prefs.maxPins) || 3;
   const PHYS = { throw: 0.55, maxSpeed: 9, friction: 0.965, bounce: 0.6, unfold: 0.35, dock: 2.4, dockReach: 80, brainCatch: 58, orbR: 11 };
 
   const pad2 = (n) => String(Math.max(0, n)).padStart(2, '0');
@@ -265,9 +265,7 @@ const Dash = (() => {
   // ---- Panels: model ----------------------------------------------------------------------------------------
   const panels = new Map(); // id -> panel
   const dismissed = new Set(); // dismissKeys thrown into the brain: they stay closed until they change
-  let tier = 'full';
-  let cols = 1;
-  let slots = { left: [], right: [] };
+  let edges = { left: PAD, right: stage.clientWidth - PAD }; // the inner edges of the two panel columns (flow.js)
   let W = stage.clientWidth, H = stage.clientHeight;
   // The brain fills the stage: centred 8px above the middle, halo radius 44% of the shorter side (as in neural.js).
   // As the live desktop it moves (and shrinks if it must) to keep clear of the desktop icons: `place` is where it is.
@@ -321,10 +319,15 @@ const Dash = (() => {
     const nx = clamp(cx, q.x, q.x + q.w), ny = clamp(cy, q.y, q.y + q.h);
     return sum + Math.max(0, r - Math.hypot(cx - nx, cy - ny));
   }, 0);
-  /** Move (and if it must, shrink) the brain to the clearest spot near the middle; the halo and job orbs come with it. */
-  function placeBrain() {
+  /** Move (and if it must, shrink) the brain to the clearest spot near the middle; the halo and job orbs come with it.
+   *  `strips` are the panel columns that need more room than usual (a calendar in WEEK view): the brain shifts aside for them. */
+  let brainStrips = [];
+  function placeBrain(strips = brainStrips) {
+    brainStrips = strips;
+    const keep = walls;
+    walls = [...keep, ...strips];
     let best = { dx: 0, dy: 0, s: 1, score: walls.length ? Infinity : 0 };
-    if (!walls.length) placeTopBar();
+    if (!keep.length) placeTopBar();
     if (walls.length) {
       const R0 = Math.min(W, H) * 0.44;
       for (const s of [1, 0.9, 0.8, 0.7, 0.62, 0.55]) {
@@ -338,6 +341,7 @@ const Dash = (() => {
         }
       }
     }
+    walls = keep;
     if (Math.abs(best.dx - spot.dx) < 2 && Math.abs(best.dy - spot.dy) < 2 && best.s === spot.s) return;
     spot = { dx: best.dx, dy: best.dy, s: best.s };
     core.style.setProperty('--bx', `${Math.round(spot.dx)}px`);
@@ -348,18 +352,20 @@ const Dash = (() => {
     clusterIcons();
     placeBrain();
     layout();
-    for (const p of resting()) if (!p.slot && hitsWall(p.tx, p.ty, size().w, size().h, 4)) place(p); // re-home panels now on icons
+    for (const p of resting()) if (!p.slot && hitsWall(p.tx, p.ty, sizeOf(p).w, sizeOf(p).h, 4)) place(p); // re-home panels now on icons
     wake();
   }
   window.ares.surface.onIcons((list) => { iconRects = list || []; setWalls(); });
   addEventListener('desk-icons', (e) => { iconRects = e.detail || []; setWalls(); }); // (the state on load, from surface.js)
   addEventListener('surface', (e) => { surfaceName = e.detail === 'sinking' ? 'desktop' : e.detail; setWalls(); });
-  const kindKey = (id) => id.split(':')[0];
+  /** What a position or pin is remembered under: the panel's kind (every TIMER shares one), each custom panel its own. */
+  const kindKey = (id) => (id.startsWith('custom:') ? id : id.split(':')[0]);
 
   function makeEl(p) {
     const el = document.createElement('div');
     el.className = 'dp';
     el.dataset.id = p.id;
+    el.dataset.tier = p.tier || 'full';
     el.innerHTML = `<div class="dp-in">
       <i class="br tl"></i><i class="br tr"></i><i class="br bl"></i><i class="br bo"></i>
       <div class="dp-content">
@@ -369,16 +375,33 @@ const Dash = (() => {
           <div class="eq"><i></i><i></i><i></i><i></i><i></i></div></div>
         <div class="dp-mini"><b></b><span></span></div>
         <div class="dp-under"><i></i></div>
+        <div class="dp-view"></div>
       </div>
       <i class="dp-scan"></i>
     </div>`;
     const q = (s) => el.querySelector(s);
     p.el = el;
     p.parts = { inner: q('.dp-in'), content: q('.dp-content'), label: q('.dp-label'), tag: q('.dp-tag'), value: q('.dp-value'), detail: q('.dp-detail'),
-      gauge: q('.dp-gauge'), arc: q('.arc'), eq: q('.eq'), mini: q('.dp-mini span'), under: q('.dp-under i'), scan: q('.dp-scan'), brackets: el.querySelectorAll('.br') };
+      gauge: q('.dp-gauge'), arc: q('.arc'), eq: q('.eq'), mini: q('.dp-mini span'), under: q('.dp-under i'), scan: q('.dp-scan'), brackets: el.querySelectorAll('.br'), view: q('.dp-view') };
     el.addEventListener('pointerdown', (e) => press(p, e));
+    // Views (calendar, tasks, custom panels) handle their own clicks on [data-act] elements
+    el.addEventListener('click', (e) => { const a = e.target.closest?.('[data-act]'); if (a && p.flex && p.tier === 'full') { e.stopPropagation(); touched(p); views[p.spec.view]?.act?.(p, a.dataset.act, a, viewCtx(p)); } });
+    // Content-sized panels: measure the view (its natural size, never the animated outer box) and re-run the layout
+    measurer.observe(p.parts.view);
     layer.appendChild(el);
   }
+  // One observer for every panel: a size change anywhere is one layout pass (docs/panels-prompt.md, section 0)
+  const measurer = new ResizeObserver((entries) => {
+    let changed = false;
+    for (const en of entries) {
+      const p = panels.get(en.target.closest('.dp')?.dataset.id);
+      if (!p || !p.flex || p.tier !== 'full') continue;
+      const w = Math.ceil(en.contentRect.width), h = Math.ceil(en.contentRect.height);
+      if (!w || !h) continue;
+      if (p.natural?.w !== w || p.natural?.h !== h) { p.natural = { w, h }; changed = true; }
+    }
+    if (changed) layout();
+  });
 
   function fill(p) {
     const s = p.spec;
@@ -395,9 +418,28 @@ const Dash = (() => {
     const v = clamp(g.v ?? 0, 0, 1);
     p.parts.arc.style.strokeDasharray = `${v * 100} 100`;
     p.parts.under.style.width = `${(g.type === 'arc' ? v : g.type === 'eq' ? 1 : 0) * 100}%`;
+    p.el.classList.toggle('pinned', Boolean(p.pinned));
+    p.el.classList.toggle('preview', Boolean(s.preview));
+    const view = views[s.view];
+    p.flex = Boolean(view);
+    p.el.classList.toggle('flex', p.flex);
+    if (p.flex && p.tier === 'full') renderView(p);
   }
+  // ---- Views: panels drawn by their own renderer (calendar, tasks, custom templates) inside the standard brackets ------
+  // A view: { render(p, host, ctx), act?(p, action, el, ctx), size?: {w,h} (an estimate before the first measurement) }.
+  const views = {};
+  const viewCtx = (p) => ({ data, say, act, ask, hhmm, pad2, esc, up, now: Date.now(), tier: p.tier, model: p.spec.model, spec: p.spec,
+    openCard: () => openCard(p), closeCard, show, hide, update: (patch) => show(p.id, patch), touched: () => touched(p), reduce: reduce() });
+  function renderView(p) {
+    const view = views[p.spec.view];
+    if (!view) return;
+    try { view.render(p, p.parts.view, viewCtx(p)); } catch (err) { console.error('panel view failed', p.id, err); p.parts.view.textContent = '—'; }
+  }
+  /** The user interacted with a panel: it keeps its place for a while, and views reset their idle timers. */
+  function touched(p) { p.touchedAt = Date.now(); views[p.spec.view]?.touched?.(p, viewCtx(p)); }
 
-  /** Show or update a panel. spec: { kind, side, label, tag, value, detail, short, gauge, anim, onClick, ttl, dismissKey, managed } */
+  /** Show or update a panel. spec: { kind, side, label, tag, value, detail, short, gauge, anim, onClick, ttl, dismissKey, managed,
+   *  view, model, size, minTier, preview, info } */
   function show(id, spec) {
     const key = spec.dismissKey || id;
     if (dismissed.has(key)) return null;
@@ -409,14 +451,18 @@ const Dash = (() => {
       fill(p);
       return p;
     }
-    p = { id, spec, mode: 'entering', x: 0, y: 0, tx: 0, ty: 0, slot: null, side: spec.side, expires: spec.ttl ? Date.now() + spec.ttl : 0 };
+    const saved = prefs.panels[kindKey(id)] || {};
+    p = { id, spec, mode: 'entering', x: 0, y: 0, tx: 0, ty: 0, slot: null, side: spec.side, expires: spec.ttl ? Date.now() + spec.ttl : 0,
+      tier: 'full', rank: 0, born: Date.now(), pinned: Boolean(saved.pinned), natural: null, flex: false };
     panels.set(id, p);
     makeEl(p);
     fill(p);
-    layout();
+    if (p.flex) p.natural = { ...(views[spec.view]?.size || TIERS.full), ...(spec.size || {}) };
     place(p);
+    layout();
     p.x = p.tx; p.y = p.ty;
     position(p);
+    applySize(p, true);
     enter(p);
     return p;
   }
@@ -431,121 +477,131 @@ const Dash = (() => {
   }
 
   function drop(p) {
+    measurer.unobserve(p.parts.view);
     p.el.remove();
     panels.delete(p.id);
     layout();
   }
 
   const position = (p) => { p.el.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px)`; };
-  const size = () => TIERS[tier];
-  const center = (p) => ({ x: p.x + size().w / 2, y: p.y + size().h / 2 });
+  /** A panel's box at a density: the standard sizes, a view's measured content at FULL, or the detail card open over it. */
+  function sizeOf(p, t = p.tier) {
+    if (card && card.p === p && !card.closing && card.box) return { w: card.box.width, h: card.box.height };
+    if (p.flex && t === 'full') return p.natural || views[p.spec.view]?.size || TIERS.full;
+    return TIERS[t] || TIERS.full;
+  }
+  const sizesOf = (p) => ({ full: sizeOf(p, 'full'), compact: sizeOf(p, 'compact'), mini: sizeOf(p, 'mini') });
+  /** The outer box follows the density (CSS animates it, ~0.45 s ease-out). */
+  function applySize(p, now = false) {
+    const { w, h } = sizeOf(p);
+    if (now) p.el.style.transition = 'none';
+    p.el.style.width = `${w}px`;
+    p.el.style.height = `${h}px`;
+    if (now) { void p.el.offsetWidth; p.el.style.transition = ''; }
+  }
+  function setTier(p, t) {
+    if (p.tier === t) return;
+    p.tier = t;
+    p.el.dataset.tier = t;
+    if (p.flex && t === 'full') renderView(p);
+  }
+  const center = (p) => { const { w, h } = sizeOf(p); return { x: p.x + w / 2, y: p.y + h / 2 }; };
   const sideOf = (p) => (p.slot ? p.slot.side : center(p).x < W / 2 ? 'left' : 'right');
   const resting = () => [...panels.values()].filter((p) => p.mode === 'rest' || p.mode === 'entering');
+  const live = () => [...panels.values()].filter((p) => p.mode !== 'leaving' && p.mode !== 'absorbing');
 
-  // ---- Invisible magnetic slots and adaptive density ---------------------------------------------------------
+  // ---- The layout pass: measure → solve the flow (renderer/flow.js) → animate ---------------------------------------------
   function rectHitsCircle(x, y, w, h, c) {
     const nx = clamp(c.x, x, x + w), ny = clamp(c.y, y, y + h);
     return Math.hypot(c.x - nx, c.y - ny) < c.r;
   }
-  function buildSlots(t, n) {
-    const { w, h } = TIERS[t];
-    const rows = Math.max(1, Math.floor((H - TOP * 2 + GAP) / (h + GAP)));
-    const b = brain();
-    const out = { left: [], right: [] };
-    for (const side of ['left', 'right']) {
-      for (let c = 0; c < n; c++) {
-        for (let r = 0; r < rows; r++) {
-          const x = side === 'left' ? PAD + c * (w + GAP) : W - PAD - w - c * (w + GAP);
-          const y = TOP + r * (h + GAP);
-          if (x < 0 || x + w > W || rectHitsCircle(x, y, w, h, b) || hitsWall(x, y, w, h, GAP / 2)) continue;
-          out[side].push({ side, i: out[side].length, x, y });
-        }
-      }
-    }
-    return out;
-  }
-  const occupied = (slot, except) => [...panels.values()].some((q) => q !== except && q.mode !== 'leaving' && q.mode !== 'absorbing'
-    && (q.slot === slot || (!q.slot && q.mode === 'rest' && Math.abs(q.x - slot.x) < size().w * 0.6 && Math.abs(q.y - slot.y) < size().h * 0.6)));
-
-  /** Pick the richest tier where every panel fits, then keep docked panels on their slots. */
+  let layoutTimer = null;
+  /**
+   * Docked panels flow down their side's columns in rank order, each at the richest density that fits; free panels (placed
+   * by hand), the brain and the desktop icons are obstacles the flow moves around. Runs after every change of size, panel
+   * set or stage; the result is where each panel glides to.
+   */
   function layout() {
     W = stage.clientWidth; H = stage.clientHeight;
     if (!W || !H) return;
-    const live = [...panels.values()].filter((p) => p.mode !== 'leaving' && p.mode !== 'absorbing');
-    const need = { left: live.filter((p) => (p.slot?.side || p.side) === 'left').length, right: live.filter((p) => (p.slot?.side || p.side) === 'right').length };
-    let pick = LEVELS[LEVELS.length - 1];
-    for (const lv of LEVELS) {
-      const s = buildSlots(lv[0], lv[1]);
-      // Enough room on each side, or (icons filling one side) enough altogether: the other side takes the rest
-      if ((s.left.length >= need.left && s.right.length >= need.right) || s.left.length + s.right.length >= need.left + need.right) { pick = lv; break; }
+    const all = live();
+    const docked = all.filter((p) => p.slot && !['orb', 'flying'].includes(p.mode));
+    const free = all.filter((p) => !p.slot && ['rest', 'entering', 'detail'].includes(p.mode));
+    const items = docked.map((p) => ({ id: p.id, side: p.slot.side, rank: p.rank, sizes: sizesOf(p), pinned: p.pinned, born: p.born,
+      minTier: p.spec.minTier, tier: card?.p === p && !card.closing ? p.tier : undefined }));
+    const fixed = free.map((p) => { const { w, h } = sizeOf(p); return { x: p.tx, y: p.ty, w, h }; });
+    if (card && !card.closing && !card.p.slot) fixed.push({ x: card.box.left, y: card.box.top, w: card.box.width, h: card.box.height });
+    // A column wider than the usual panel (a calendar in WEEK, an open card): the brain shifts aside for it
+    const want = { left: 0, right: 0 };
+    for (const p of docked) want[p.slot.side] = Math.max(want[p.slot.side], TIERS.full.w, sizeOf(p, 'full').w);
+    const strips = [];
+    if (want.left > TIERS.full.w || want.right > TIERS.full.w) { // (both columns, so one side's room isn't taken for the other's)
+      if (want.left) strips.push({ x: 0, y: 0, w: PAD + want.left + GAP, h: H });
+      if (want.right) strips.push({ x: W - PAD - want.right - GAP, y: 0, w: PAD + want.right + GAP, h: H });
     }
-    const changed = pick[0] !== tier || pick[1] !== cols;
-    const old = slots;
-    [tier, cols] = pick;
-    slots = buildSlots(tier, cols);
-    layer.dataset.tier = tier;
-    for (const p of panels.values()) p.el.dataset.tier = tier;
-    // Docked panels: same slot index where it still exists; on a tier change, re-pack each side in order
-    for (const side of ['left', 'right']) {
-      const docked = live.filter((p) => p.slot && p.slot.side === side).sort((a, b) => a.slot.i - b.slot.i);
-      docked.forEach((p, k) => {
-        const s = changed ? slots[side][k] : slots[side][p.slot.i] || slots[side][k];
-        if (s) { p.slot = s; p.tx = s.x; p.ty = s.y; } else { p.slot = null; }
-      });
+    if (JSON.stringify(strips) !== JSON.stringify(brainStrips)) placeBrain(strips);
+    const r = Flow.solve({ W, H, pad: PAD, top: TOP, gap: GAP, brain: brain(), walls, fixed, items });
+    edges = r.edges;
+    for (const p of docked) {
+      const pl = r.places[p.id];
+      if (pl) { setTier(p, pl.tier); p.side = pl.side; p.tx = pl.x; p.ty = pl.y; } // (p.slot.side stays its home side)
+      else { setTier(p, p.pinned ? 'compact' : 'mini'); p.tx = p.slot.side === 'left' ? PAD : W - PAD - sizeOf(p).w; p.ty = TOP; }
     }
-    for (const p of live) if (!p.slot) { p.tx = clamp(p.tx, PAD / 2, W - size().w - PAD / 2); p.ty = clamp(p.ty, 4, H - size().h - 4); }
-    if (changed || old !== slots) wake();
+    for (const p of free) { const { w, h } = sizeOf(p); p.tx = clamp(p.tx, PAD / 2, W - w - PAD / 2); p.ty = clamp(p.ty, 4, H - h - 4); }
+    for (const p of all) applySize(p);
+    window.dispatchEvent(new Event('panels-layout'));
+    wake();
   }
-
-  /** Where a new panel goes: where the user last left one like it, else the next free slot on its side. */
+  /** A layout pass on the next frame (several changes in one tick become one pass). */
+  function layoutSoon() { if (!layoutTimer) layoutTimer = requestAnimationFrame(() => { layoutTimer = null; layout(); }); }
+  /** Where a new panel goes: its remembered spot or pin, else the end of its side's flow. */
   function place(p) {
     const saved = prefs.panels[kindKey(p.id)];
-    if (saved && Number.isFinite(saved.fx) && !hitsWall(saved.fx * W, saved.fy * H, size().w, size().h, 4)) {
-      const x = saved.fx * W, y = saved.fy * H;
-      const near = prefs.magnetic && nearestSlot(x + size().w / 2, y + size().h / 2, p, 24);
-      if (near) return dock(p, near);
+    if (saved && Number.isFinite(saved.fx) && !hitsWall(saved.fx * W, saved.fy * H, sizeOf(p).w, sizeOf(p).h, 4)) {
       p.slot = null;
-      p.tx = clamp(x, PAD / 2, W - size().w - PAD / 2);
-      p.ty = clamp(y, 4, H - size().h - 4);
+      const { w, h } = sizeOf(p);
+      p.tx = clamp(saved.fx * W, PAD / 2, W - w - PAD / 2);
+      p.ty = clamp(saved.fy * H, 4, H - h - 4);
       return;
     }
-    const other = p.side === 'left' ? 'right' : 'left';
-    const s = slots[p.side].find((q) => !occupied(q, p)) || slots[other].find((q) => !occupied(q, p));
-    if (s) return dock(p, s);
-    const col = slots[p.side][slots[p.side].length - 1] || { x: p.side === 'left' ? PAD : W - PAD - size().w, y: TOP };
-    p.slot = null; p.tx = col.x; p.ty = col.y;
+    if (saved && saved.side && Number.isFinite(saved.rank)) return dock(p, saved.side, saved.rank);
+    dock(p, p.side || 'left', nextRank(p.side || 'left'));
   }
-  function dock(p, s) { p.slot = s; p.side = s.side; p.tx = s.x; p.ty = s.y; }
-  function nearestSlot(cx, cy, p, reach) {
-    let best = null, bd = reach;
-    for (const s of [...slots.left, ...slots.right]) {
-      if (occupied(s, p)) continue;
-      const d = Math.hypot(s.x + size().w / 2 - cx, s.y + size().h / 2 - cy);
-      if (d < bd) { best = s; bd = d; }
-    }
-    return best;
+  const nextRank = (side) => Math.max(0, ...live().filter((q) => q.slot?.side === side).map((q) => q.rank)) + 1;
+  function dock(p, side, rank) { p.slot = { side }; p.side = side; p.rank = rank; }
+  const dockedInfo = (except) => live().filter((q) => q !== except && q.slot && q.mode !== 'orb' && q.mode !== 'flying')
+    .map((q) => ({ side: q.slot.side, rank: q.rank, y: q.ty, h: sizeOf(q).h }));
+  /** The magnetic pull near a panel column: where an orb would join the flow, or null when it's nowhere near one. */
+  function magnet(p, cx, cy, reach) {
+    if (!prefs.magnetic) return null;
+    const side = cx < W / 2 ? 'left' : 'right';
+    const colW = Math.max(sizeOf(p, 'full').w, TIERS.full.w);
+    const band = side === 'left' ? [PAD, Math.max(edges.left, PAD + colW)] : [Math.min(edges.right, W - PAD - colW), W - PAD];
+    if (cx < band[0] - reach || cx > band[1] + reach) return null;
+    return { side, rank: Flow.rankAt(side, cy, dockedInfo(p)) };
   }
 
   let saveTimer = null;
   function remember(p) {
     const k = kindKey(p.id);
-    if (p.slot) delete prefs.panels[k];
-    else prefs.panels[k] = { fx: +(p.x / W).toFixed(4), fy: +(p.y / H).toFixed(4) };
+    const was = prefs.panels[k] || {};
+    const next = p.slot ? (p.pinned ? { pinned: true, side: p.slot.side, rank: p.rank } : null)
+      : { ...(p.pinned ? { pinned: true } : {}), fx: +(p.x / W).toFixed(4), fy: +(p.y / H).toFixed(4) };
+    if (next) prefs.panels[k] = next; else delete prefs.panels[k];
+    if (was.pinned && !next?.pinned && p.pinned) prefs.panels[k] = { ...prefs.panels[k], pinned: true };
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => window.ares.dash.savePanels(prefs.panels), 400);
   }
 
-  /** "Tidy up": every panel glides back home. */
+  /** "Tidy up": every panel glides back home (pins stay pinned, in their default order). */
   function tidy() {
-    prefs.panels = {};
-    window.ares.dash.savePanels({});
-    const live = resting();
-    for (const p of live) { p.side = p.spec.side; p.slot = null; }
-    layout();
+    prefs.panels = Object.fromEntries(Object.entries(prefs.panels).filter(([, v]) => v.pinned).map(([k]) => [k, { pinned: true }]));
+    window.ares.dash.savePanels(prefs.panels);
+    const all = resting();
     for (const side of ['left', 'right']) {
-      live.filter((p) => p.side === side).sort((a, b) => a.y - b.y).forEach((p, k) => { if (slots[side][k]) dock(p, slots[side][k]); });
+      all.filter((p) => (p.spec.side || 'left') === side).sort((a, b) => a.y - b.y).forEach((p, k) => dock(p, side, k + 1));
     }
-    wake();
+    layout();
   }
 
   // ---- Appear / disappear ------------------------------------------------------------------------------------
@@ -573,7 +629,7 @@ const Dash = (() => {
     scan.animate([{ top: '0%', opacity: 1 }, { top: '100%', opacity: 1, offset: 0.92 }, { top: '100%', opacity: 0 }], { duration: 480, delay: 120, easing: 'cubic-bezier(.5,0,.3,1)', fill: 'backwards' });
     // Sparks at the scan line's leading edge
     const t0 = performance.now() + 120;
-    const { w, h } = size();
+    const { w, h } = sizeOf(p);
     fxJobs.push((now) => {
       const k = (now - t0) / 440;
       if (k < 0) return true;
@@ -725,8 +781,9 @@ const Dash = (() => {
     const pt = stagePoint(cx, cy);
     p.ox = pt.x; p.oy = pt.y; p.vx = 0; p.vy = 0; p.trail = [];
     p.orbA = 0;
+    p.wasDocked = p.slot ? { ...p.slot, rank: p.rank } : null;
     p.slot = null;
-    layout();
+    layout(); // the others close the gap
     fold(p, 170);
     rings.push({ x: c.x, y: c.y, r: 4, max: 36, t: 0, dur: 0.35, c: rgbOf(p) });
     wake();
@@ -744,11 +801,11 @@ const Dash = (() => {
     wake();
   }
 
-  /** The orb opens back into the panel where it stopped (or at the slot that pulled it in). */
-  function land(p, slot) {
-    const { w, h } = size();
-    if (slot) {
-      dock(p, slot);
+  /** The orb opens back into the panel where it stopped (or in the flow, where the column's pull took it). */
+  function land(p, docked) {
+    const { w, h } = sizeOf(p);
+    if (docked) {
+      layout(); // it joined the flow when the pull took it: this is its place
     } else {
       p.slot = null;
       let x = clamp(p.ox - w / 2, PAD / 2, W - w - PAD / 2);
@@ -772,16 +829,18 @@ const Dash = (() => {
       // Landing next to another panel: line the edges up
       for (const q of resting()) {
         if (q === p) continue;
+        const qs = sizeOf(q);
         if (Math.abs(x - q.x) < 10) x = q.x;
-        else if (Math.abs(x + w - (q.x + w)) < 10) x = q.x;
+        else if (Math.abs(x + w - (q.x + qs.w)) < 10) x = q.x + qs.w - w;
         if (Math.abs(y - q.y) < 10) y = q.y;
-        else if (Math.abs(y - (q.y + h + GAP)) < 10) y = q.y + h + GAP;
+        else if (Math.abs(y - (q.y + qs.h + GAP)) < 10) y = q.y + qs.h + GAP;
         else if (Math.abs(y + h + GAP - q.y) < 10) y = q.y - h - GAP;
       }
       p.tx = x; p.ty = y;
     }
     p.x = p.tx; p.y = p.ty;
     p.side = sideOf(p);
+    p.touchedAt = Date.now();
     position(p);
     p.mode = 'entering';
     p.parts.inner.getAnimations().forEach((a) => a.cancel());
@@ -818,18 +877,27 @@ const Dash = (() => {
     card = { p, el, parts: { inner: q('.dc-in'), label: q('.dc-label'), tag: q('.dc-tag'), value: q('.dc-value'), rows: q('.dc-rows'), text: q('.dc-text'), actions: q('.dc-actions') }, sig: '' };
     layer.appendChild(el);
     renderCard(d, true);
-    // Where it opens: over the panel, growing away from the window edge, kept inside the stage
-    const { w, h } = size();
+    // Where it opens: a docked panel's card takes the panel's place in the flow (its neighbours make room and it follows
+    // the panel from then on); a free panel's card opens over it, growing away from the window edge, inside the stage
+    const { w, h } = sizeOf(p);
     const ch = Math.min(el.offsetHeight, H - 16);
-    const cx = clamp(p.side === 'right' || center(p).x > W / 2 ? p.x + w - CARD_W : p.x, 8, W - CARD_W - 8);
-    const cy = clamp(p.y, 8, H - ch - 8);
-    Object.assign(el.style, { left: `${cx}px`, top: `${cy}px`, width: `${CARD_W}px`, maxHeight: `${H - 16}px` });
     card.home = { left: p.x, top: p.y, width: w, height: h };
-    card.box = { left: cx, top: cy, width: CARD_W, height: ch };
+    card.box = { left: 0, top: 0, width: CARD_W, height: ch };
+    if (p.slot) {
+      card.follow = true;
+      layout();
+      card.box.left = p.tx; card.box.top = p.ty;
+    } else {
+      card.box.left = clamp(p.side === 'right' || center(p).x > W / 2 ? p.x + w - CARD_W : p.x, 8, W - CARD_W - 8);
+      card.box.top = clamp(p.y, 8, H - ch - 8);
+      layout();
+    }
+    const { left: cx, top: cy } = card.box;
+    Object.assign(el.style, { left: `${cx}px`, top: `${cy}px`, width: `${CARD_W}px`, maxHeight: `${H - 16}px` });
     card.timer = setInterval(() => { if (card?.p === p) renderCard(details(p)); }, 1000);
     if (d.load) d.load().then(() => card?.p === p && renderCard(details(p)));
     blip(p.spec.kind);
-    if (reduce()) { el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180 }); return; }
+    if (reduce()) { el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180 }); card.opened = true; return; }
     // The launch unfold, with the brackets widening: panel → a wide line → the full card, slight overshoot
     const px = (b) => ({ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px` });
     const line = { ...card.box, top: p.y + h / 2 - 1, height: 2 };
@@ -840,7 +908,7 @@ const Dash = (() => {
       { ...px(line), filter: 'brightness(2.2)', offset: 0.42 },
       { ...px({ ...card.box, top: card.box.top - 2, height: ch + 4 }), filter: 'brightness(1.3)', offset: 0.8 },
       { ...px(card.box), filter: 'brightness(1)' },
-    ], { duration: 460, easing: 'cubic-bezier(.3,.7,.4,1)' }).finished.then(() => { if (card?.el === el) el.style.height = ''; }, () => {});
+    ], { duration: 460, easing: 'cubic-bezier(.3,.7,.4,1)' }).finished.then(() => { if (card?.el === el) { el.style.height = ''; card.opened = true; } }, () => {});
     card.parts.inner.animate([{ opacity: 0 }, { opacity: 0, offset: 0.55 }, { opacity: 1 }], { duration: 520 });
     for (const k of ['label', 'tag', 'value']) decode(card.parts[k], 480);
   }
@@ -855,15 +923,19 @@ const Dash = (() => {
       c.el.remove();
       if (card === c) card = null;
       if (p.mode === 'detail') p.mode = 'rest';
+      p.x = p.tx; p.y = p.ty; position(p);
       p.el.style.visibility = '';
       if (p.expires) p.expires = Math.max(p.expires, Date.now() + 5000); // a memory flash gets a moment more after reading
       if (!reduce()) flash(p);
+      layout();
       wake();
     };
+    const now = { left: c.el.offsetLeft, top: c.el.offsetTop, width: c.el.offsetWidth, height: c.el.offsetHeight };
+    c.closing = Promise.resolve(); // (so sizeOf() gives the panel's own size again)
+    layout(); // the neighbours come back as the card folds
     if (reduce()) { c.closing = c.el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, fill: 'forwards' }).finished.then(done, done); return c.closing; }
     const px = (b) => ({ left: `${b.left}px`, top: `${b.top}px`, width: `${b.width}px`, height: `${b.height}px` });
-    const now = { left: c.el.offsetLeft, top: c.el.offsetTop, width: c.el.offsetWidth, height: c.el.offsetHeight };
-    const home = { left: p.x, top: p.y, width: size().w, height: size().h };
+    const home = { left: p.tx, top: p.ty, width: sizeOf(p).w, height: sizeOf(p).h };
     c.parts.inner.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 140, fill: 'forwards' });
     c.closing = c.el.animate([
       { ...px(now), filter: 'brightness(1)' },
@@ -1129,11 +1201,10 @@ const Dash = (() => {
   function step(dt, f, t) {
     let busy = false;
     const b = brain();
-    const { w, h } = size();
     let hover = 0;
     for (const p of panels.values()) {
-      if (p.mode === 'rest' || p.mode === 'entering') {
-        // Glide toward home (tier changes, tidy up, window resizes)
+      if (p.mode === 'rest' || p.mode === 'entering' || p.mode === 'detail') {
+        // Glide toward home (reflow, tidy up, window resizes): ~0.45 s ease-out
         const dx = p.tx - p.x, dy = p.ty - p.y;
         if (Math.abs(dx) > 0.3 || Math.abs(dy) > 0.3) {
           const k = 1 - Math.pow(0.84, f);
@@ -1141,8 +1212,11 @@ const Dash = (() => {
           position(p);
           busy = true;
         } else if (dx || dy) { p.x = p.tx; p.y = p.ty; position(p); }
+        // The detail card follows a docked panel through the flow
+        if (p.mode === 'detail' && card?.p === p && card.follow && card.opened && !card.closing) { card.el.style.left = `${Math.round(p.x)}px`; card.el.style.top = `${Math.round(p.y)}px`; }
         continue;
       }
+      const { w, h } = sizeOf(p);
       if (p.mode === 'orb') {
         busy = true;
         hover = Math.max(hover, 1 - clamp((Math.hypot(p.ox - b.x, p.oy - b.y) - 40) / 140, 0, 1));
@@ -1153,11 +1227,11 @@ const Dash = (() => {
       if (p.mode === 'flying' || p.mode === 'docking') {
         busy = true;
         if (p.mode === 'docking') {
-          const sx = p.dock.x + w / 2, sy = p.dock.y + h / 2;
+          // It already holds its place in the flow (the neighbours have parted): the orb is drawn to it
+          const sx = p.tx + w / 2, sy = p.ty + h / 2;
           p.vx = (p.vx + (sx - p.ox) * 0.08 * f) * Math.pow(0.78, f);
           p.vy = (p.vy + (sy - p.oy) * 0.08 * f) * Math.pow(0.78, f);
-          if (occupied(p.dock, p)) p.mode = 'flying';
-          else if (Math.hypot(sx - p.ox, sy - p.oy) < 1.2 && Math.hypot(p.vx, p.vy) < 0.4) { p.ox = sx; p.oy = sy; land(p, p.dock); continue; }
+          if (Math.hypot(sx - p.ox, sy - p.oy) < 1.2 && Math.hypot(p.vx, p.vy) < 0.4) { p.ox = sx; p.oy = sy; land(p, true); continue; }
         } else {
           const fr = Math.pow(PHYS.friction, f);
           p.vx *= fr; p.vy *= fr;
@@ -1170,7 +1244,8 @@ const Dash = (() => {
         if (p.oy > H - R) { p.oy = H - R; p.vy = -Math.abs(p.vy) * PHYS.bounce; }
         // Bounce off resting panels (circle vs rect); they flash
         for (const q of resting()) {
-          const nx = clamp(p.ox, q.x, q.x + w), ny = clamp(p.oy, q.y, q.y + h);
+          const qs = sizeOf(q);
+          const nx = clamp(p.ox, q.x, q.x + qs.w), ny = clamp(p.oy, q.y, q.y + qs.h);
           const dx = p.ox - nx, dy = p.oy - ny, d = Math.hypot(dx, dy);
           if (d >= R || p.mode === 'docking') continue;
           const ux = d ? dx / d : 0, uy = d ? dy / d : -1;
@@ -1198,9 +1273,9 @@ const Dash = (() => {
         p.trail.push([p.ox, p.oy]);
         if (p.trail.length > 14) p.trail.shift();
         const sp = Math.hypot(p.vx, p.vy);
-        if (p.mode === 'flying' && prefs.magnetic && sp < PHYS.dock) {
-          const s = nearestSlot(p.ox, p.oy, p, PHYS.dockReach);
-          if (s) { p.mode = 'docking'; p.dock = s; }
+        if (p.mode === 'flying' && sp < PHYS.dock) {
+          const m = magnet(p, p.ox, p.oy, PHYS.dockReach);
+          if (m) { p.mode = 'docking'; dock(p, m.side, m.rank); layout(); }
         }
         if (p.mode === 'flying' && sp < PHYS.unfold) land(p, null);
         continue;
@@ -1224,37 +1299,41 @@ const Dash = (() => {
         }
       }
     }
-    // Resting panels that overlap push gently apart (docked ones hold their slot)
+    // Free panels that overlap push gently apart (docked ones are placed by the flow, around the free ones)
     const rest = resting().filter((p) => p.mode === 'rest');
+    let moved = false;
     for (let i = 0; i < rest.length; i++) {
       for (let j = i + 1; j < rest.length; j++) {
         const A = rest[i], B = rest[j];
-        const ox = Math.min(A.tx + w, B.tx + w) - Math.max(A.tx, B.tx);
-        const oy = Math.min(A.ty + h, B.ty + h) - Math.max(A.ty, B.ty);
+        if (A.slot && B.slot) continue;
+        const as = sizeOf(A), bs = sizeOf(B);
+        const ox = Math.min(A.tx + as.w, B.tx + bs.w) - Math.max(A.tx, B.tx);
+        const oy = Math.min(A.ty + as.h, B.ty + bs.h) - Math.max(A.ty, B.ty);
         if (ox <= 0 || oy <= 0) continue;
         const [mx, my] = ox < oy ? [Math.sign(A.tx - B.tx || 1) * Math.min(ox, 2), 0] : [0, Math.sign(A.ty - B.ty || 1) * Math.min(oy, 2)];
         const movers = [A, B].filter((p) => !p.slot);
-        if (!movers.length) continue;
         for (const p of movers) {
-          const s = p === A ? 1 : -1;
-          const nx = clamp(p.tx + (mx * s) / movers.length, PAD / 2, W - w - PAD / 2);
-          const ny = clamp(p.ty + (my * s) / movers.length, 4, H - h - 4);
-          if (nx !== p.tx || ny !== p.ty) busy = true; // (pinned against a wall: stop trying)
+          const s = p === A ? 1 : -1, ps = sizeOf(p);
+          const nx = clamp(p.tx + (mx * s) / movers.length, PAD / 2, W - ps.w - PAD / 2);
+          const ny = clamp(p.ty + (my * s) / movers.length, 4, H - ps.h - 4);
+          if (nx !== p.tx || ny !== p.ty) { busy = true; moved = true; } // (pinned against a wall: stop trying)
           p.tx = nx; p.ty = ny;
         }
       }
     }
     // Free panels never settle on the brain (a window resize can bring it to them): nudge them away
     for (const p of rest) {
+      const { w, h } = sizeOf(p);
       if (p.slot || !rectHitsCircle(p.tx, p.ty, w, h, b)) continue;
       const dx = p.tx + w / 2 - b.x, dy = p.ty + h / 2 - b.y, d = Math.hypot(dx, dy) || 1;
       const nx = clamp(p.tx + (dx / d) * 3, PAD / 2, W - w - PAD / 2);
       const ny = clamp(p.ty + (dy / d) * 3, 4, H - h - 4);
-      if (nx !== p.tx || ny !== p.ty) busy = true;
+      if (nx !== p.tx || ny !== p.ty) { busy = true; moved = true; }
       p.tx = nx; p.ty = ny;
     }
     // ...or on desktop icons (they arrived, or moved): re-home them
-    for (const p of rest) if (!p.slot && p.homedFor !== wallsVersion && hitsWall(p.tx, p.ty, w, h, 2)) { p.homedFor = wallsVersion; place(p); busy = true; }
+    for (const p of rest) if (!p.slot && p.homedFor !== wallsVersion && hitsWall(p.tx, p.ty, sizeOf(p).w, sizeOf(p).h, 2)) { p.homedFor = wallsVersion; place(p); moved = true; busy = true; }
+    if (moved) layoutSoon(); // a free panel moved: the flow goes around its new spot
     // Carrying an orb near the brain: it brightens, and says what letting go will do
     HUD.hover(hover);
     const showHint = hand.p && hover > 0.45;
@@ -1564,7 +1643,7 @@ const Dash = (() => {
       else if (s === 'speaking') say('speaking…', 'day', 0);
       else { clearTimeout(tickerTimer); tickerTimer = setTimeout(calm, 4000); }
     },
-    get panels() { return [...panels.values()].map((p) => ({ id: p.id, mode: p.mode, x: p.x, y: p.y, slot: p.slot && `${p.slot.side}${p.slot.i}`, tier })); },
+    get panels() { return [...panels.values()].map((p) => ({ id: p.id, mode: p.mode, x: p.x, y: p.y, tx: p.tx, ty: p.ty, ...sizeOf(p), slot: p.slot && `${p.slot.side}${p.rank}`, tier: p.tier, pinned: p.pinned, flex: p.flex })); },
     /** Esc: fold an open detail card back. True if there was one. */
     closeCard() { if (!card) return false; closeCard(); return true; },
     /** Open a panel's details (a hand gesture's click or spread; the mouse goes through press/letGo). */
@@ -1593,13 +1672,14 @@ const Dash = (() => {
     },
     get card() { return card && { id: card.p.id, text: card.el.innerText }; },
     show, hide, // for testing and tuning from the console
-    get desk() { return { walls, spot, brain: brain(), slots: { left: slots.left.length, right: slots.right.length }, tier, surface: surfaceName }; },
+    /** Register a view (calendar, tasks, custom templates): panels whose spec.view names it are drawn by it at FULL density. */
+    view(name, def) { views[name] = def; for (const p of panels.values()) if (p.spec.view === name) fill(p); },
+    layout,
+    get desk() { return { walls, spot, brain: brain(), edges, surface: surfaceName }; },
     get reduceMotion() { return reduce(); },
     /** The centre column between the left and right panel columns (stage px): COMMS never covers panels. */
     centre() {
-      const { w } = size();
-      const edge = PAD + cols * (w + GAP);
-      return { left: edge, right: W - edge, width: W, height: H };
+      return { left: Math.max(edges.left, PAD) + GAP, right: Math.min(edges.right, W - PAD) - GAP, width: W, height: H };
     },
     /** A spark from the brain to a point in the stage (the first half of the launch animation); resolves on arrival. */
     beam(x, y, kind = 'day') {

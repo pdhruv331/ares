@@ -109,13 +109,20 @@ body.work-open .panels, body.work-open #fx { opacity: 0; pointer-events: none; }
 body.work-open .panels .dp { pointer-events: none; }
 .dp {
   --c: 62, 230, 255;
-  position: absolute; left: 0; top: 0; width: 214px; height: 62px;
+  position: absolute; left: 0; top: 0; width: 214px; height: 62px; /* the size is set by dash.js (flow.js) per density */
   pointer-events: auto; cursor: grab; touch-action: none; will-change: transform;
-  transition: width 0.4s cubic-bezier(.3,.7,.4,1), height 0.4s cubic-bezier(.3,.7,.4,1);
+  transition: width 0.45s cubic-bezier(.22,.61,.36,1), height 0.45s cubic-bezier(.22,.61,.36,1);
 }
-.dp[data-tier="compact"] { width: 170px; height: 44px; }
-.dp[data-tier="mini"] { width: 130px; height: 26px; }
-.dp-in { position: absolute; inset: 0; transform-origin: 50% 50%; }
+.dp-in { position: absolute; inset: 0; transform-origin: 50% 50%; overflow: hidden; }
+/* Pinned: a small filled corner on the top-left bracket. Preview (a custom panel not yet kept): dashed brackets. */
+.dp.pinned .br.tl::after { content: ""; position: absolute; left: 1px; top: 1px; width: 3px; height: 3px; background: rgb(var(--c)); box-shadow: 0 0 4px rgb(var(--c)); }
+.dp.preview .br { border-style: dashed; }
+/* Views (calendar, tasks, custom panels): the content sizes the panel at FULL density; compact and mini use the standard rows */
+.dp-view { display: none; width: max-content; }
+.dp.flex[data-tier="full"] .dp-content { position: relative; inset: auto; display: block; padding: 0; width: max-content; }
+.dp.flex[data-tier="full"] .dp-body, .dp.flex[data-tier="full"] .dp-gauge, .dp.flex[data-tier="full"] .dp-mini, .dp.flex[data-tier="full"] .dp-under { display: none; }
+.dp.flex[data-tier="full"] .dp-view { display: block; }
+.dp-view [data-act] { cursor: pointer; }
 .dp .br { position: absolute; width: 8px; height: 8px; border: 0 solid rgba(var(--c), 0.85); pointer-events: none; }
 .dp .br.tl { left: 0; top: 0; border-left-width: 1.2px; border-top-width: 1.2px; }
 .dp .br.tr { right: 0; top: 0; border-right-width: 1.2px; border-top-width: 1.2px; }
