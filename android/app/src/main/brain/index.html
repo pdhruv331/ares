@@ -15,6 +15,7 @@
 </head>
 <body>
   <div class="core"><canvas id="brain"></canvas><canvas id="hud"></canvas></div>
+  <script src="renderer/perf.js"></script>
   <script src="renderer/neural.js"></script>
   <script type="module" src="renderer/brain3d.mjs"></script>
   <script>
@@ -26,6 +27,8 @@
       land() { window.JobOrbs?.land(null); }, // back from a job: its orb drifts home
       motion(reduce) { window.__reduce = reduce; if (window.JobOrbs) window.JobOrbs.reduceMotion = reduce; },
     };
+    addEventListener('error', (e) => { location.href = '/error/' + encodeURIComponent(String(e.message || e.error || 'script error').slice(0, 200)); });
+    addEventListener('orbs-ready', () => { location.href = '/ready'; });
     addEventListener('orbs-ready', () => {
       if (window.__jobs) JobOrbs.sync(window.__jobs);
       JobOrbs.reduceMotion = Boolean(window.__reduce);

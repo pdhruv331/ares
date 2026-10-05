@@ -26,6 +26,7 @@ import kotlin.math.max
 class MainActivity : Activity(), Session.Ui {
     private lateinit var session: Session
     private lateinit var reactor: BrainView
+    private lateinit var fallback: ReactorView
     private lateinit var log: LinearLayout
     private lateinit var scroll: ScrollView
     private lateinit var input: EditText
@@ -59,6 +60,14 @@ class MainActivity : Activity(), Session.Ui {
         session = Session(this, this)
         reactor = findViewById(R.id.reactor)
         reactor.levelSource = { session.level }
+        // If the 3D brain hasn't drawn within a few seconds (no WebGL, a script problem), the native reactor takes over
+        fallback = findViewById(R.id.reactorFallback)
+        fallback.levelSource = { session.level }
+        fallback.setOnClickListener { session.hush() }
+        val fallBack = Runnable { if (!reactor.ready) { fallback.visibility = View.VISIBLE; reactor.visibility = View.INVISIBLE } }
+        reactor.postDelayed(fallBack, 6000)
+        reactor.onReady = { reactor.removeCallbacks(fallBack); fallback.visibility = View.GONE; reactor.visibility = View.VISIBLE }
+        reactor.onError = { fallBack.run() }
         log = findViewById(R.id.log)
         scroll = findViewById(R.id.scroll)
         input = findViewById(R.id.input)
@@ -175,6 +184,7 @@ class MainActivity : Activity(), Session.Ui {
 
     override fun state(s: State) {
         reactor.state = s
+        fallback.state = s
         stateText.text = when (s) { State.LISTENING -> "LISTENING"; State.THINKING -> "THINKING"; State.SPEAKING -> "SPEAKING"; State.OFFLINE -> "OFFLINE"; else -> "" }
         val hf = if (session.handsFree) "HANDS-FREE · " else ""
         talk.text = if (s == State.LISTENING) "${hf}LISTENING… TAP TO SEND" else if (session.handsFree) "HANDS-FREE · TAP TO TALK NOW" else "TAP TO TALK"
@@ -317,6 +327,7 @@ class MainActivity : Activity(), Session.Ui {
         menu.menu.add(0, 4, 1, "Share my screen when summoned").apply { isCheckable = true; isChecked = Ares.prefs(this@MainActivity).getBoolean("screen", true) }
         menu.menu.add(0, 5, 2, "Make ARES your assistant…")
         menu.menu.add(0, 6, 3, "Check for updates (v${Updater.version(this)})")
+        menu.menu.add(0, 8, 3, "Brain diagnostics")
         menu.menu.add(0, 2, 4, "Mac address…")
         menu.menu.add(0, 3, 5, "Unpair this phone")
         menu.setOnMenuItemClickListener {
@@ -331,6 +342,7 @@ class MainActivity : Activity(), Session.Ui {
                 4 -> Ares.prefs(this).edit().putBoolean("screen", !Ares.prefs(this).getBoolean("screen", true)).apply()
                 5 -> makeAssistant()
                 6 -> checkUpdates()
+                8 -> reactor.diagnose { AlertDialog.Builder(this).setTitle("Brain diagnostics").setMessage(it).setPositiveButton("OK", null).show() }
                 3 -> AlertDialog.Builder(this).setTitle("Unpair this phone?")
                     .setMessage("You'll need a new code from the Mac to pair again. To revoke the key on the Mac too, use Unpair All Phones in its menu.")
                     .setPositiveButton("Unpair") { _, _ -> notPaired() }

@@ -23,6 +23,8 @@
 
     <!-- The app: the brain fills the screen; everything else floats over it -->
     <FrameLayout android:id="@+id/app" android:layout_width="match_parent" android:layout_height="match_parent">
+        <com.dhruv.ares.ReactorView android:id="@+id/reactorFallback" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone"
+            android:contentDescription="ARES"/>
         <com.dhruv.ares.BrainView android:id="@+id/reactor" android:layout_width="match_parent" android:layout_height="match_parent"
             android:contentDescription="ARES. Tap to stop her talking; tap a job's orb to open it."/>
 

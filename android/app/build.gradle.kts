@@ -49,7 +49,7 @@ val brainAssets = layout.buildDirectory.dir("generated/brainAssets")
 val copyBrain by tasks.registering(Copy::class) {
     into(brainAssets.map { it.dir("brain") })
     from("src/main/brain")
-    from(rootProject.file("../renderer")) { include("neural.js", "brain3d.mjs", "brain-mesh.js"); into("renderer") }
+    from(rootProject.file("../renderer")) { include("perf.js", "neural.js", "brain3d.mjs", "brain-mesh.js"); into("renderer") }
     from(rootProject.file("../node_modules/three/build")) { include("three.module.js", "three.core.js"); into("node_modules/three/build") }
 }
 android.sourceSets["main"].assets.srcDir(brainAssets.get().asFile)

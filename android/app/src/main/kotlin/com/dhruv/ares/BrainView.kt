@@ -34,6 +34,13 @@ class BrainView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = n
     var levelSource: () -> Float = { 0f }
     var onTap: () -> Unit = {}
     var onOrb: (String) -> Unit = {}
+    /** The 3D brain is drawing (orbs-ready), or a script in it failed (the message). */
+    var onReady: () -> Unit = {}
+    var onError: (String) -> Unit = {}
+    var ready = false
+        private set
+    /** What the page said: the last console lines, for the Brain diagnostics menu item. */
+    val console = ArrayDeque<String>()
     private var loaded = false
     private var jobs = "[]"
     private var lastLevel = -1f
@@ -67,6 +74,8 @@ class BrainView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = n
                 if (u.host == HOST) when {
                     u.path?.startsWith("/open/") == true -> u.lastPathSegment?.let { id -> post { onOrb(Uri.decode(id)) } }
                     u.path == "/tap" -> post { onTap() }
+                    u.path == "/ready" -> post { ready = true; onReady() }
+                    u.path?.startsWith("/error/") == true -> u.lastPathSegment?.let { m -> post { console.addLast("error: ${Uri.decode(m)}"); onError(Uri.decode(m)) } }
                 }
                 return true // it never navigates away from the brain
             }
@@ -78,7 +87,22 @@ class BrainView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = n
                 send("ares.jobs($jobs)")
             }
         }
+        webChromeClient = object : android.webkit.WebChromeClient() {
+            override fun onConsoleMessage(m: android.webkit.ConsoleMessage): Boolean {
+                console.addLast("${m.messageLevel().name.lowercase()}: ${m.message()} (${m.sourceId().substringAfterLast('/')}:${m.lineNumber()})")
+                while (console.size > 30) console.removeFirst()
+                return true
+            }
+        }
         loadUrl("https://$HOST/index.html")
+    }
+
+    /** One line for the diagnostics dialog: is it drawing, is WebGL there, what did the page say. */
+    fun diagnose(done: (String) -> Unit) {
+        evaluateJavascript("(function(){try{var c=document.createElement('canvas');var gl=c.getContext('webgl2')||c.getContext('webgl');return 'webgl:'+(gl?gl.getParameter(gl.VERSION):'none')+' dpr:'+devicePixelRatio+' size:'+innerWidth+'x'+innerHeight+' hud:'+(typeof HUD)+' orbs:'+(typeof JobOrbs)}catch(e){return 'probe failed: '+e}})()") { r ->
+            done(listOf("brain ready: $ready", "page: ${r?.trim('"') ?: "no answer"}", "webview: ${WebView.getCurrentWebViewPackage()?.let { "${it.packageName} ${it.versionName}" } ?: "unknown"}")
+                .plus(console.toList().takeLast(12)).joinToString("\n"))
+        }
     }
 
     private fun blocked() = WebResourceResponse("text/plain", "utf-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
