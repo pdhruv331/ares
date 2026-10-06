@@ -146,7 +146,7 @@ const Scene = (() => {
   function updateOrbs(dt, t) {
     const g = geometry();
     const busy = engine.energy > 0.2 || runningJobs > 0;
-    orbSpin += dt * (0.09 + (busy ? 0.14 : 0)) * (reduceMotion ? 0 : 1);
+    orbSpin += dt * (0.09 + (busy ? 0.14 : 0)) * (reduceMotion || (power && power.mode === 'standby') ? 0 : 1); // (standby: the orbs sit still)
     const list = [...orbs.values()].filter((o) => o.mode !== 'absorbing');
     list.forEach((o, i) => { o.target = i * TAU / Math.max(1, list.length) + orbSpin + (idSeed(o.id) % 100) / 100 * 0.25; });
     for (const orb of [...orbs.values()]) {
@@ -569,7 +569,7 @@ const Scene = (() => {
       const cr = Math.max(c.r, radiusFor(mr.width, mr.height) * 0.2);
       let hue = engine.hue;
       if (power) { const sh = power.sheet({ cx: c.x, cy: c.y, r: cr }); backdrop.setOpts(sh.opts); hue = sh.hue; }
-      backdrop.draw(mctx, { staticCtx: sctx, cx: c.x, cy: c.y, r: cr, hue, dt: bdt, level: live.level, speaking: live.state === 'speaking', motion: motion && !(power && power.mode === 'offline'), ink: !window.SCENE_TRANSPARENT });
+      backdrop.draw(mctx, { staticCtx: sctx, cx: c.x, cy: c.y, r: cr, hue, dt: bdt, level: live.level, speaking: live.state === 'speaking', motion: motion && !(power && (power.mode === 'offline' || power.mode === 'standby')), ink: !window.SCENE_TRANSPARENT });
     }
     if (!w) return;
     ctx.clearRect(0, 0, w, h);

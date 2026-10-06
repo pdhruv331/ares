@@ -6,6 +6,7 @@
   const q = new URLSearchParams(location.search);
   const MODE = q.get('mode') || document.body.dataset.mode || 'wallpaper'; // (the screen saver's file:// page can't take a query)
   if (MODE === 'still') window.SCENE_STILL = true; // brain3d keeps its frame so it can be copied
+  if (q.get('power') === 'cold' && MODE === 'wallpaper') document.body.style.opacity = '0'; // below the icons, over the still: invisible until the wake
   const bridge = window.wp || null;
   const core = document.querySelector('.core');
   if (q.get('look') && window.Scene) Scene.setLook(q.get('look')); // the still is told its look on the query
@@ -64,6 +65,7 @@
         break;
       case 'power': // ignition / standby / power down: this page's controller follows the window's (renderer/ignite.js)
         if (window.Scene?.power) { Scene.power.set(msg.mode, { force: true, status: msg.status }); drawUntil = performance.now() + 5000; }
+        if (msg.mode === 'wake' || msg.mode === 'online') { document.body.style.transition = 'opacity 1.1s ease'; document.body.style.opacity = '1'; } // (a cold start: fades in on the bloom)
         break;
       case 'power-step':
         window.Scene?.power?.step(msg.step);

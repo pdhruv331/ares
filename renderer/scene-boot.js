@@ -9,5 +9,10 @@
   const geo = (q.get('geo') || '').split(',').map(Number);
   if (geo.length === 3 && geo.every(Number.isFinite) && geo[2] > 0) window.SCENE_GEOMETRY = { cx: geo[0], cy: geo[1], r: geo[2] };
   if (q.get('power')) window.SCENE_POWER = q.get('power');
+  const root = document.documentElement;
+  // A cold start: nothing of the page shows until it knows whether the helper is drawing the charge (renderer/power.js lifts this);
+  // the window begins in the look it will have (?surface=desktop: no glass, no chrome) so the first frame never flashes a window
+  if (q.get('power') === 'cold') root.classList.add('power-wait', 'power-quiet');
+  if (q.get('surface') === 'desktop') root.classList.add('s-desktop');
   if (['wallpaper', 'still', 'saver'].includes(q.get('mode') || document.body?.dataset.mode)) window.SCENE_REPLICA = true; // (the ignition helper's page takes holds itself)
 })();

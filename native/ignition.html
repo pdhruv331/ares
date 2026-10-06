@@ -5,14 +5,14 @@
   <title>ARES Ignition</title>
   <style>
     /* The ignition helper's page (native/AresIgnition.swift): transparent over the offline still. Only the reactor's disc and the title
-       band are painted opaquely (the sheet, clipped), so the desktop icons stay visible everywhere else; the wake opens the clip. */
+       band are painted opaquely (the sheet, clipped), so the desktop icons stay visible everywhere else. At the wake this page fades out while the live desktop fades in. */
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; overflow: hidden; background: transparent; user-select: none; cursor: default; }
     #sheet, #matrix { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; clip-path: var(--clip, none); transition: opacity 0.6s ease; }
     .core { position: absolute; inset: 0; }
     #hud { position: absolute; inset: 0; width: 100%; height: 100%; }
     #stars, #brain { display: none; }
-    body.out { opacity: 0; transition: opacity 0.6s ease; }
+    body.out { opacity: 0; transition: opacity 1.1s ease; }
     .ghost-log { position: absolute; left: 28px; bottom: 26px; display: flex; flex-direction: column; gap: 4px; pointer-events: none; }
     .ghost-row { font: 400 10px/1.4 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: 0.08em; color: rgba(250, 196, 88, 0.5); white-space: pre; transition: opacity 0.7s ease; text-shadow: 0 0 6px rgba(250, 196, 88, 0.2); }
     .ghost-row.pulse { animation: ghost-pulse 1.1s ease-in-out infinite; }

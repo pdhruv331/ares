@@ -141,7 +141,7 @@ function createWindow({ show }) {
   });
 
   // A cold start: the page begins as the offline still and brightens with the real start-up (renderer/ignite.js)
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'), { query: { power: ignition?.ready ? 'online' : 'cold' } });
+  win.loadFile(path.join(__dirname, 'renderer', 'index.html'), { query: { power: ignition?.ready ? 'online' : 'cold', surface: (wallpaper?.opts.enabled ?? readSettings().wallpaper?.enabled !== false) ? 'desktop' : 'window' } });
   // The window only ever shows ARES itself: links open in the browser, never in here
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
@@ -2164,7 +2164,11 @@ app.whenReady().then(async () => {
   ignition.start();
   ignition.on('step', (s) => { win?.webContents.send('power', { type: 'step', step: s }); wallpaper?.scene({ type: 'power-step', step: s }); });
   ignition.on('ready', ({ line }) => { win?.webContents.send('power', { type: 'ready', line }); wallpaper?.scene({ type: 'power-ready' }); });
-  ignition.on('handover', () => { win?.webContents.send('power', { type: 'handover' }); wallpaper?.reveal(true); });
+  ignition.on('handover', () => { // the bloom: the window and the backdrop fade in (the helper fades out on the same curve)
+    win?.webContents.send('power', { type: 'handover' });
+    if (ignition.helper || ignition.helperAlive) wallpaper?.scene({ type: 'power', mode: 'wake' }); // the backdrop plays the bloom + shockwave
+    wallpaper?.reveal(true);
+  });
   wakeLines = new WakeLines(path.join(app.getPath('userData'), 'ignition', 'wake-lines.json'));
   ignition.step('memory', 'start');
   claudeUsage = new ClaudeUsage({ file: path.join(app.getPath('userData'), 'claude-usage.json'), log });

@@ -18,6 +18,7 @@
   clipTo(g);
   P.set('offline', { force: true });
   P.S = 1;
+  P.clipR = 1.12; // only the disc is painted: the drain and the glow stay inside it
   let wasHold = false, wasHover = 0, hum = false;
   setInterval(() => {
     const holding = Boolean(P.hold);
@@ -33,8 +34,8 @@
   window.addEventListener('power', (e) => {
     const ev = e.detail;
     if (ev === 'commit:wake') { sound('clunk'); post({ type: 'ignite' }); }
-    else if (ev === 'wake') { sound('bloom'); document.documentElement.style.setProperty('--clip', 'none'); document.body.classList.add('awake'); }
-    else if (ev === 'online') { ghost.line('all systems nominal'); post({ type: 'wake-done' }); }
+    else if (ev === 'wake') { sound('bloom'); post({ type: 'wake' }); document.body.classList.add('awake', 'out'); } // the live desktop fades in under this as it fades out
+    else if (ev === 'online') { /* (gone by now) */ }
     else if (ev.startsWith('cancel:')) sound('hold-rise', true);
   });
   window.Ignition = {

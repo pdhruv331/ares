@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en" class="look-reactor">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mockup: the opening (off → awake)</title>
+  <style>
+    /* A mockup of the proposed cold start (docs/ignition-prompt.md §2–3), with the real drawing code (renderer/reactor.js + ignite.js):
+       the still, the helper on its disc only, the real steps filling the ring, then one crossfade on the bloom into the live desktop.
+       Nothing of ARES shows before that; no full-screen opaque step; the reactor never moves. Click anywhere to replay. */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; background: #000; font-family: -apple-system, system-ui, sans-serif; }
+    #stage { position: relative; width: 100vw; height: 100vh; background: #03070d; }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+    #still { z-index: 1; }                       /* the desktop picture */
+    #liveSheet { z-index: 2; opacity: 0; }       /* ARES's backdrop window: below the icons */
+    #icons { position: absolute; right: 24px; top: 36px; z-index: 3; display: grid; grid-template-columns: repeat(2, 92px); gap: 18px 10px; }
+    .icon { width: 92px; text-align: center; color: #fff; font-size: 10px; text-shadow: 0 1px 2px #000; }
+    .icon i { display: block; width: 44px; height: 44px; margin: 0 auto 5px; border: 1.5px solid #3ee6ff; border-radius: 6px; background: rgba(62,230,255,.08); }
+    #helper { z-index: 4; clip-path: var(--clip); }   /* the ignition helper's window: the disc and the title band only */
+    #live { z-index: 5; opacity: 0; }            /* the ARES window as the desktop: the reactor, orbs, callouts */
+    .ghost { position: absolute; left: 28px; bottom: 26px; z-index: 6; display: flex; flex-direction: column; gap: 4px; pointer-events: none; }
+    .ghost-row { font: 400 10px/1.4 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .08em; color: rgba(250,196,88,.55); white-space: pre; transition: opacity .7s; }
+    .ghost-row.pulse { animation: p 1.1s ease-in-out infinite; } .ghost-row.fail { color: rgba(255,181,71,.8); } .ghost-row.fade { opacity: 0; }
+    @keyframes p { 0%,100% { opacity: .55 } 50% { opacity: 1 } }
+    #bar { position: absolute; left: 0; right: 0; top: 0; height: 24px; z-index: 7; background: rgba(10,12,16,.9); color: #ddd; font-size: 12px; line-height: 24px; padding: 0 12px; display: flex; gap: 18px; }
+    #bar b { color: #fff; }
+    #cap { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 8; color: rgba(207,239,255,.5); font: 11px "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .1em; }
+    #cur { position: absolute; z-index: 9; width: 14px; height: 20px; pointer-events: none; transition: left .6s ease, top .6s ease; }
+    #cur svg { width: 100%; height: 100%; filter: drop-shadow(0 1px 1px #000); }
+  </style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="still"></canvas>
+  <canvas id="liveSheet"></canvas>
+  <div id="icons"></div>
+  <canvas id="helper"></canvas>
+  <canvas id="live"></canvas>
+  <div id="ghost" class="ghost"></div>
+  <div id="bar"><b></b><span>Finder</span><span>File</span><span>Edit</span><span>View</span><span>Go</span><span>Window</span><span>Help</span></div>
+  <div id="cap">MOCKUP · click to replay</div>
+  <div id="cur"><svg viewBox="0 0 14 20"><path d="M1 1 L1 15 L5 11.5 L7.5 17.5 L10 16.5 L7.5 10.5 L12.5 10.5 Z" fill="#fff" stroke="#000" stroke-width="1"/></svg></div>
+</div>
+<script src="../../renderer/reactor.js"></script>
+<script src="../../renderer/ignite.js"></script>
+<script>
+(() => {
+  const { Engine, Backdrop, COLORS } = Reactor;
+  const stage = document.getElementById('stage');
+  const C = (id) => document.getElementById(id);
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  let W, H, cx, cy, r;
+  const canvases = ['still', 'liveSheet', 'helper', 'live'].map(C);
+  const ctxs = Object.fromEntries(canvases.map((c) => [c.id, c.getContext('2d')]));
+  const icons = C('icons');
+  for (const n of ['Resume.pdf', 'machine_learning', 'Linkedin', 'Devops', 'Cloud With Raj', 'Work Screenshot', 'cloud-projects', 'My workflow.json', 'ARES-Architecture.png', 'Area Rug Trend.pdf', 'Tanya business', 'project4 agent.json']) {
+    const d = document.createElement('div'); d.className = 'icon'; d.innerHTML = `<i></i>${n}`; icons.appendChild(d);
+  }
+  // Three scenes: the still (drawn once, gold), the helper (gold, charging), the live ARES (cyan)
+  const stillEngine = new Engine(), stillBack = new Backdrop();
+  const helperEngine = new Engine(), helperBack = new Backdrop(), helper = new Ignite.Controller(helperEngine);
+  const liveEngine = new Engine(), liveBack = new Backdrop(), live = new Ignite.Controller(liveEngine);
+  helper.clipR = 1.12;
+  window.M = { helper, live, get phase() { return phase; } }; // (for driving the mockup from outside)
+  function resize() {
+    W = stage.clientWidth; H = stage.clientHeight;
+    for (const c of canvases) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); c.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0); }
+    cx = W / 2; cy = H / 2 + H * 0.03; r = Math.min(H * 0.26, W * 0.22);
+    for (const b of [stillBack, helperBack, liveBack]) b.resize(W, H, dpr, 1);
+    const lay = Ignite.layout(cx, cy, r, 1), b = lay.band.offline, R = r * 1.12;
+    document.documentElement.style.setProperty('--clip', `path('M ${cx - R} ${cy} a ${R} ${R} 0 1 0 ${R * 2} 0 a ${R} ${R} 0 1 0 ${-R * 2} 0 M ${b.x} ${b.y} h ${b.w} v ${b.h} h ${-b.w} z')`);
+    drawStill();
+  }
+  function drawStill() { // the desktop picture: the cold still
+    const sc = new Ignite.Controller(stillEngine); sc.set('offline'); stillEngine.update(0.05, {}); stillEngine.update(0.05, {});
+    const sh = sc.sheet({ cx, cy, r }); stillBack.setOpts(sh.opts);
+    stillBack.draw(ctxs.still, { cx, cy, r, hue: sh.hue, dt: 0, motion: false, ink: true });
+    sc.drawUnder(ctxs.still, { cx, cy, r }); stillEngine.draw(ctxs.still, cx, cy, r); sc.drawOver(ctxs.still, { cx, cy, r });
+  }
+  const ghost = Ignite.ghost(C('ghost'));
+  const cur = C('cur');
+  const cap = C('cap');
+  const say = (t) => { cap.textContent = `MOCKUP · ${t}`; };
+
+  // ---- The timeline ---------------------------------------------------------------------------------------------------
+  let t0 = performance.now(), phase = 'still', fadeK = 0, fadeStart = null, timers = [];
+  const after = (ms, fn) => timers.push(setTimeout(fn, ms));
+  function replay() {
+    for (const t of timers) clearTimeout(t); timers = [];
+    ghost.clear(); C('ghost').style.color = '';
+    helper.set('offline', { force: true }); helperEngine.hue = [...Ignite.GOLD];
+    live.set('offline', { force: true });
+    C('helper').style.opacity = 1; C('live').style.opacity = 0; C('liveSheet').style.opacity = 0;
+    for (const el of [C('helper'), C('live'), C('liveSheet')]) el.style.transition = 'none';
+    phase = 'still'; fadeStart = null;
+    cur.style.left = `${cx + r * 1.6}px`; cur.style.top = `${cy + r * 0.9}px`;
+    say('the desktop while ARES is quit: the helper sits on the still, click-through everywhere else');
+    after(1200, () => { cur.style.left = `${cx + 6}px`; cur.style.top = `${cy + 8}px`; });
+    after(2000, () => { helper.pointer('move', cx + 6, cy + 8, { cx, cy, r }); say('hover: the core warms, HOLD TO WAKE'); });
+    after(3200, () => { helper.pointer('down', cx + 6, cy + 8, { cx, cy, r }); say('hold ~0.7 s: the ring fills'); });
+    // commit → ARES launched quietly (open -g -j: no Dock bounce, no window); the helper charges from the real steps
+    after(3200 + 760, () => { helper.pointer('up', 0, 0, { cx, cy, r }); helper.wantHover = 0; helper.set('charging'); say('ignite: ARES launches hidden; the ring follows the real start-up steps'); ghost.line('igniting', 1500); });
+    const steps = [['memory', 'ok', '98 facts', 500], ['voice', 'ok', 'Katherine', 700], ['brain', 'start', '', 900], ['brain', 'ok', 'Claude ready', 1900], ['ears', 'start', '', 1000], ['link', 'ok', 'phone :8765 · relay', 1700], ['ears', 'ok', 'wake word', 2600], ['scene', 'ok', 'live', 2900]];
+    for (const [name, status, detail, at] of steps) after(4000 + at, () => { const s = { name, status, detail, total: 6 }; ghost.step(s); helper.step(s); });
+    after(4000 + 3100, () => { helper.ready(); say('all six steps in: a held breath, then the wake'); });
+  }
+  // The crossfade: at the helper's wake, ARES's two surfaces fade in on the bloom while the helper fades out (same geometry)
+  function onHelperWake() {
+    phase = 'handover'; fadeStart = performance.now();
+    live.set('wake', { force: true }); liveEngine.hue = [...Ignite.GOLD]; liveEngine.cold = 0.25;
+    liveBack.ripples.push({ t0: liveBack.t, k: 1.7 });
+    for (const el of [C('live'), C('liveSheet')]) { el.style.transition = 'opacity 1.1s ease'; el.style.opacity = 1; }
+    C('helper').style.transition = 'opacity 1.1s ease'; C('helper').style.opacity = 0;
+    say('WAKE: bloom + shockwave; the live desktop fades in as the helper fades out, no jump');
+    after(1500, () => { phase = 'live'; C('ghost').style.color = 'rgba(207,239,255,.45)'; ghost.line('all systems nominal'); say('awake · the wake line is typed and spoken'); });
+  }
+  let last = performance.now();
+  function frame(now) {
+    requestAnimationFrame(frame);
+    const real = Math.min(1, (now - last) / 1000); last = now;
+    const dt = Math.min(0.05, real);
+    const g = { cx, cy, r };
+    // helper (stepped by wall-clock time, so a throttled tab still plays at the right pace)
+    for (let left = real; left > 0; left -= 0.05) { helper.update(Math.min(0.05, left)); helperEngine.update(Math.min(0.05, left), {}); }
+    for (const ev of helper.events.splice(0)) { if (ev === 'wake') onHelperWake(); }
+    const hs = helper.sheet(g); helperBack.setOpts(hs.opts);
+    const hc = ctxs.helper;
+    helperBack.draw(hc, { cx, cy, r, hue: hs.hue, dt, motion: false, ink: true });
+    helper.drawUnder(hc, g); helperEngine.draw(hc, cx, cy, helper.radius(r)); helper.drawOver(hc, g);
+    // live
+    if (phase === 'handover' || phase === 'live') {
+      liveEngine.setState('idle');
+      for (let left = real; left > 0; left -= 0.05) { live.update(Math.min(0.05, left)); liveEngine.update(Math.min(0.05, left), {}); }
+      for (const ev of live.events.splice(0)) { if (ev === 'online') { live.wakeLine = 'Back already? Picking up where we left off.'; live.lineShown = 0; } }
+      const ls = live.sheet(g); liveBack.setOpts(ls.opts);
+      ctxs.liveSheet.clearRect(0, 0, W, H);
+      liveBack.draw(ctxs.liveSheet, { cx, cy, r, hue: live.mode === 'online' ? liveEngine.hue : ls.hue, dt, motion: true, ink: true });
+      const lc = ctxs.live; lc.clearRect(0, 0, W, H);
+      live.drawUnder(lc, g); liveEngine.draw(lc, cx, cy, live.radius(r)); live.drawOver(lc, g);
+      if (live.mode === 'online') drawCallouts(lc, g);
+    }
+  }
+  function drawCallouts(ctx, g) { // a sketch of the four callouts so the live desktop reads as live
+    ctx.save(); ctx.font = '8.5px "SF Mono", ui-monospace, Menlo, monospace'; ctx.letterSpacing = '0.14em'; ctx.lineWidth = 1;
+    for (const [id, deg, val] of [['JOBS', -118, 'NONE RUNNING'], ['HOST', -62, 'MAC · ONLINE'], ['CLAUDE', 142, '5H 11% · WEEK 44%'], ['BATTERY', 38, '87% · ON BATTERY']]) {
+      const a = deg * Math.PI / 180, right = Math.cos(a) > 0;
+      const ax = g.cx + Math.cos(a) * g.r * 1.14, ay = g.cy + Math.sin(a) * g.r * 1.14, ex = g.cx + Math.cos(a) * g.r * 1.9, ey = g.cy + Math.sin(a) * g.r * 1.9;
+      ctx.strokeStyle = 'rgba(62,230,255,.42)'; ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex, ey); ctx.lineTo(ex + (right ? 40 : -40), ey); ctx.stroke();
+      ctx.fillStyle = 'rgba(62,230,255,.9)'; ctx.beginPath(); ctx.arc(ax, ay, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.textAlign = right ? 'left' : 'right'; ctx.fillStyle = 'rgba(62,230,255,.88)'; ctx.fillText(id, ex + (right ? 2 : -2), ey - 5);
+      ctx.fillStyle = 'rgba(62,230,255,.55)'; ctx.fillText(val, ex + (right ? 2 : -2), ey + 11);
+    }
+    ctx.restore();
+  }
+  addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(frame);
+  replay();
+  stage.addEventListener('click', replay);
+})();
+</script>
+</body>
+</html>

@@ -389,7 +389,6 @@ class Wallpaper extends EventEmitter {
         // A new name each time: macOS caches desktop pictures by path
         const file = path.join(dir, `ares-${d.id}-${Date.now()}.png`);
         fs.writeFileSync(file, png);
-        for (const old of fs.readdirSync(dir)) if (old.startsWith(`ares-${d.id}-`) && path.join(dir, old) !== file) fs.rmSync(path.join(dir, old), { force: true });
         const target = screens.find((s) => s.id === d.id) ? d.id : screens[0]?.id;
         if (target == null) continue;
         let r = await this.helperJson(['wallpaper-set', String(target), file, '3', '1']).catch((err) => ({ ok: false, error: err.message }));
@@ -401,6 +400,9 @@ class Wallpaper extends EventEmitter {
           r.retried = true; r.applied = await applied();
         }
         this.log('lock still', { display: d.id, size: `${Math.round(d.size.width * d.scaleFactor)}x${Math.round(d.size.height * d.scaleFactor)}`, evening, ok: r.ok, error: r.error, retried: r.retried, applied: r.applied });
+        // Older stills go only once the new one is in place (macOS keeps showing a deleted file's cached picture otherwise); the last two stay
+        const olds = fs.readdirSync(dir).filter((f) => f.startsWith(`ares-${d.id}-`) && path.join(dir, f) !== file).sort();
+        for (const old of olds.slice(0, -1)) fs.rmSync(path.join(dir, old), { force: true });
       }
       this.scheduleStill();
     })().finally(() => { this.rendering = null; });

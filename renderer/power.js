@@ -50,10 +50,10 @@
         break;
       case 'handover':
         if (!helperDriven) break; // this page played the charge itself: 'online' arrives from the controller
-        if (P.mode !== 'online') P.set('online', { force: true });
+        // the helper reached its bloom: play the wake here too (the rings spring open, the shockwave) while the page fades in
+        P.set('wake', { force: true });
         root.classList.remove('power-wait'); root.classList.add('power-handover');
-        quiet(false); modeClass('online');
-        setTimeout(() => { ghost.line('all systems nominal'); sayWake(); }, 700);
+        setTimeout(() => { quiet(false); modeClass('online'); ghost.line('all systems nominal'); sayWake(); }, 1400);
         break;
       case 'mode':
         onMode(m);
@@ -116,10 +116,11 @@
       // a reload after the start (or a very slow page): no ceremony, straight to live
       if (!st.steps?.length) { P.set('online', { force: true }); modeClass('online'); return; }
     }
-    if (P.mode !== 'offline') { modeClass('online'); return; } // (?power=online: a reload while she's up)
+    if (P.mode !== 'offline') { root.classList.remove('power-wait', 'power-quiet'); modeClass('online'); return; } // (?power=online: a reload while she's up)
     helperDriven = Boolean(st.helper || st.helperAlive);
     modeClass('offline'); quiet(true);
     if (helperDriven) { root.classList.add('power-wait'); return; } // the helper's window shows the charge; wait for the handover
+    root.classList.remove('power-wait'); // this page plays the charge itself
     for (const s of st.steps || []) { ghost.step(s); P.step(s); }
     if (st.ready) { wake = st.line || null; P.ready(); }
   }).catch(() => {});

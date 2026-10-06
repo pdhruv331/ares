@@ -172,6 +172,7 @@
       this.flickered = false;
       this.hueDrain = null;
       this.hintText = '';
+      this.clipR = 0;            // > 0: this page paints only a disc of clipR·r around the reactor (the helper): effects stay inside it
     }
     get S_() { return this.S; }
 
@@ -359,7 +360,7 @@
     get fps() {
       if (['charging', 'breath', 'wake', 'tostandby', 'fromstandby', 'spindown'].includes(this.mode)) return 60;
       if (this.hold || this.hover > 0.02 || this.notchHover > 0.02 || this.title < 1) return 60;
-      if (this.mode === 'standby') return 8;
+      if (this.mode === 'standby') return 24;
       if (this.mode === 'offline') return 4;
       return undefined;
     }
@@ -368,11 +369,13 @@
       const e = this.engine, m = this.mode, S = this.S;
       const lay = layout(g.cx, g.cy, g.r, S);
       const still = m === 'offline' || (m === 'spindown' && this.t / TIMING.spindown > 0.8);
-      const standby = m === 'standby' || m === 'tostandby';
+      const standby = m === 'standby' || (m === 'tostandby' && this.t > TIMING.standbyIn * 0.7); // (the band's sheet re-render lands late in the glide, not on its first frame)
+      // A clipped page (the helper) keeps the sheet gold while charging: the dots inside its disc must match the still's outside
+      const charging = m === 'charging' || m === 'breath';
       return {
-        hue: m === 'wake' ? mix(GOLD, CYAN, this.shock) : e.hue,
-        opts: { bright: still || standby ? 1 : 0, warm: still ? 1 : 0, hideLabel: still || standby, scale: S,
-          band: still ? lay.band.offline : standby ? lay.band.standby : null, notch: standby ? lay.notch : null },
+        hue: m === 'wake' ? mix(GOLD, CYAN, this.shock) : this.clipR && charging ? GOLD : e.hue,
+        opts: { bright: still || standby || (this.clipR && charging) ? 1 : 0, warm: still || (this.clipR && charging) ? 1 : 0, hideLabel: still || standby || (this.clipR && charging), scale: S,
+          band: still || (this.clipR && charging) ? lay.band.offline : standby ? lay.band.standby : null, notch: standby ? lay.notch : null },
         shock: m === 'wake' ? this.shock : 0,
       };
     }
@@ -382,15 +385,18 @@
     /** Under the reactor: the drained dots near it and the growing glow while charging. g = { cx, cy, r }. */
     drawUnder(ctx, g) {
       const m = this.mode, { cx, cy, r } = g;
+      const reach = this.clipR ? Math.min(this.clipR * 0.92, 2.4) : 2.4; // how far effects may spread (of r)
       if (m === 'charging' || m === 'breath') {
         const c = this.shown;
-        const drain = ctx.createRadialGradient(cx, cy, r * 0.9, cx, cy, r * 2.4);
+        const drain = ctx.createRadialGradient(cx, cy, r * 0.9, cx, cy, r * reach);
         drain.addColorStop(0, rgba(COLORS.ink, 0.22 * c)); drain.addColorStop(1, rgba(COLORS.ink, 0));
         ctx.fillStyle = drain; ctx.fillRect(cx - r * 2.5, cy - r * 2.5, r * 5, r * 5);
-        glow(ctx, mix(GOLD, WHITE, c * 0.6), cx, cy, r * (1.2 + c * 0.9), 0.1 + c * 0.22);
+        glow(ctx, mix(GOLD, WHITE, c * 0.6), cx, cy, r * Math.min(1.2 + c * 0.9, reach * 0.55), 0.1 + c * 0.22);
       }
-      if (m === 'wake' && this.bloom > 0) glow(ctx, mix(WHITE, CYAN, 0.3), cx, cy, r * (1.6 + (1 - this.bloom) * 1.6), this.bloom * 0.9);
-      if (m === 'offline' || m === 'spindown') glow(ctx, GOLD, cx, cy, r * 1.5, 0.08 * (m === 'offline' ? 1 : this.title));
+      if (m === 'wake' && this.bloom > 0) glow(ctx, mix(WHITE, CYAN, 0.3), cx, cy, r * Math.min(1.6 + (1 - this.bloom) * 1.6, reach * 0.55), this.bloom * 0.9);
+      // The still's soft glow is part of the floor: it stays through the charge (nothing dims below the still)
+      if (m === 'offline' || m === 'charging' || m === 'breath') glow(ctx, GOLD, cx, cy, r * 1.5, 0.08);
+      else if (m === 'spindown') glow(ctx, GOLD, cx, cy, r * 1.5, 0.08 * this.title);
     }
 
     /** Over the reactor: the streaks, the charge ring and %, the hold rings, the title block, the notch, the hints. */

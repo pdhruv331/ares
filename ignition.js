@@ -5,7 +5,7 @@
 //   <support>/ignition/ignition.sock   ARES listens; the helper connects and reads JSON lines:
 //        {"type":"hello","steps":[…],"ready":bool}  {"type":"step","name","status","detail","total"}  {"type":"ready"}
 //        {"type":"handover"} (the live scene is up: fade out and exit)  {"type":"exit"}
-//      and may send {"type":"hello","version"} {"type":"wake-done"} (its wake animation finished; ARES reveals the live scene)
+//      and may send {"type":"hello","version"} {"type":"wake"} (its charge reached the bloom: ARES fades the live scene in now)
 //   <support>/ignition/ares.pid        ARES's pid while it runs (the helper runs only while this pid is dead)
 //   <support>/ignition/geometry.json   the reactor's place on each display (wallpaper.js geometries()), for the helper and the still
 //   <support>/ignition/shutdown.json   { state: 'running' | 'clean', why, at, version, uptime }: how ARES last stopped (the wake line)
@@ -115,7 +115,7 @@ class Ignition extends EventEmitter {
     this.send({ type: 'ready' });
     // Without a helper the window plays the wake itself and the live scene is simply there; with one, the reveal waits for its wake
     if (!this.helper) this.emit('handover');
-    else this.handoverTimer = setTimeout(() => this.handover(), 4000); // (if the helper never says so)
+    else this.handoverTimer = setTimeout(() => this.handover(), 5000); // (if the helper never reaches its wake)
   }
   handover() {
     if (this.handedOver) return;
@@ -138,7 +138,7 @@ class Ignition extends EventEmitter {
         const line = buf.slice(0, i); buf = buf.slice(i + 1);
         let msg; try { msg = JSON.parse(line); } catch { continue; }
         if (msg.type === 'hello') { this.helper = c; this.log('ignition helper connected', { version: msg.version }); this.emit('helper', true); }
-        if (msg.type === 'wake-done') this.handover();
+        if (msg.type === 'wake') this.handover();
       }
     });
     c.on('close', () => { this.clients.delete(c); if (this.helper === c) { this.helper = null; this.emit('helper', false); if (this.ready && !this.handedOver) this.handover(); } });

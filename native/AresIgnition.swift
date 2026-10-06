@@ -129,7 +129,7 @@ final class Panel: NSObject, WKScriptMessageHandler {
     switch type {
     case "ready": ready = true; log("page ready (\(geo.cx),\(geo.cy),\(geo.r)) visible=\(window.isVisible) onActiveSpace=\(window.isOnActiveSpace)"); for js in queued { web.evaluateJavaScript(js) }; queued.removeAll()
     case "ignite": app?.ignite(why: "hold")
-    case "wake-done": app?.wakeDone()
+    case "wake": app?.wake() // the bloom: ARES fades its live desktop in now; this window fades out on the same curve
     case "sound": if let name = body["name"] as? String { app?.play(name, stop: body["stop"] as? Bool ?? false) }
     case "log": log("page: \(body["text"] ?? "")")
     default: break
@@ -239,7 +239,8 @@ final class Ignition: NSObject, NSApplicationDelegate {
     if aresPid() == nil {
       let cfg = config()
       if let app = cfg["app"] as? String, !app.isEmpty {
-        let t = Process(); t.executableURL = URL(fileURLWithPath: "/usr/bin/open"); t.arguments = ["-a", app]; try? t.run()
+        // -g: don't activate (no Space switch, nothing comes to the front); -j: launch hidden (no Dock bounce). ARES shows its desktop itself.
+        let t = Process(); t.executableURL = URL(fileURLWithPath: "/usr/bin/open"); t.arguments = ["-g", "-j", "-a", app]; try? t.run()
         launchedAt = Date()
       } else { log("no app to launch in config.json (development): waiting for ARES to be started by hand") }
     }
@@ -267,7 +268,7 @@ final class Ignition: NSObject, NSApplicationDelegate {
     default: break
     }
   }
-  func wakeDone() { link.send(["type": "wake-done"]) }
+  func wake() { link.send(["type": "wake"]); handedOver = true; DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { self.finish() } }
   func finish() { log("done"); for p in panels { p.window.orderOut(nil) }; NSApp.terminate(nil) }
 
   // ---- Sounds (the same WAVs as the window; silent when ARES's setting says so) ------------------------------------------------------------
