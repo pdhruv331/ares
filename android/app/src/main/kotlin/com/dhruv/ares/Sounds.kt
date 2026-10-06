@@ -19,8 +19,10 @@ class Sounds(private val ctx: Context) {
 
     init {
         pool.setOnLoadCompleteListener { _, id, status -> if (status == 0) loaded += id }
-        for (name in listOf("tick", "hold_rise", "clunk", "standby_down", "wake_chime", "bloom", "winddown", "thud", "nope", "charge_hum"))
-            ctx.resources.getIdentifier(name, "raw", ctx.packageName).takeIf { it != 0 }?.let { ids[name] = pool.load(ctx, it, 1) }
+        // R.raw constants, not a name lookup: the release build's resource shrinker keeps only what the code references
+        val res = mapOf("tick" to R.raw.tick, "hold_rise" to R.raw.hold_rise, "clunk" to R.raw.clunk, "standby_down" to R.raw.standby_down, "wake_chime" to R.raw.wake_chime,
+            "bloom" to R.raw.bloom, "winddown" to R.raw.winddown, "thud" to R.raw.thud, "nope" to R.raw.nope, "charge_hum" to R.raw.charge_hum)
+        for ((name, id) in res) ids[name] = pool.load(ctx, id, 1)
     }
     private fun allowed(): Boolean = inFront && ctx.getSystemService(AudioManager::class.java).ringerMode == AudioManager.RINGER_MODE_NORMAL
 
