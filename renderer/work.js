@@ -754,7 +754,7 @@ const Work = (() => {
     const o = orbs();
     const stage = document.getElementById('brain')?.parentElement;
     if (!o || !stage) return;
-    const hide = document.body.classList.contains('work-open');
+    const hide = document.body.classList.contains('work-open') || window.SCENE_LOOK === 'reactor'; // (the reactor draws every orb's label itself)
     for (const j of jobs) {
       if (!j.project || !o.has(j.id) || hide || !['queued', 'running', 'approval', 'paused'].includes(j.status)) { labels.get(j.id)?.remove(); labels.delete(j.id); continue; }
       let el = labels.get(j.id);
@@ -772,6 +772,15 @@ const Work = (() => {
   })();
   window.ares.work.onShow((id) => (id ? show(id) : showGallery()));
   window.addEventListener('orb-open', (e) => open(e.detail));
+  // Thrown into the reactor (scene.js): a finished job is put away; one in progress is cancelled (as the panel's buttons would)
+  window.addEventListener('orb-absorbed', async (e) => {
+    const { id, status } = e.detail || {};
+    const j = jobs.find((x) => x.id === id);
+    if (!j) return;
+    if (['done', 'failed', 'cancelled'].includes(status)) { await window.ares.work.dismiss(id); return; }
+    const r = await window.ares.work.cancel(id);
+    window.ares.comms.note('ares', r?.error ? `I couldn't stop "${j.title}": ${r.error}.` : `Stopped "${j.title}", sir.`, { notice: true });
+  });
   window.addEventListener('orbs-ready', () => { applyMotion({ reduceMotion }); orbs().sync(jobs); });
   panel.querySelector('.work-close').addEventListener('click', close);
   window.ares.work.list().then((all) => { jobs = all; renderList(); });

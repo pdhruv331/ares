@@ -8,6 +8,7 @@
   if (MODE === 'still') window.SCENE_STILL = true; // brain3d keeps its frame so it can be copied
   const bridge = window.wp || null;
   const core = document.querySelector('.core');
+  if (q.get('look') && window.Scene) Scene.setLook(q.get('look')); // the still is told its look on the query
 
   // ---- Frame rate --------------------------------------------------------------------------------------
   // 60 fps on mains, 30 and a simpler scene on battery; nothing at all while
@@ -58,6 +59,13 @@
       case 'attention':
         HUD.attention(msg.on);
         break;
+      case 'offline':
+        HUD.offline?.(msg.on);
+        break;
+      case 'readouts': // the HOST / CLAUDE / BATTERY values (readouts.js); JOBS from the jobs this page has
+        readouts = msg.readouts || null;
+        pushReadouts();
+        break;
       case 'spot': { // the window's brain moved or shrank (panels, icons): this one goes with it, so there's one brain
         const core = document.querySelector('.core');
         if (core) { // the first placement lands at once (no slide at launch); later moves glide like the window's
@@ -65,14 +73,41 @@
           core.style.transform = `translate(${msg.dx || 0}px, ${msg.dy || 0}px) scale(${msg.s || 1})`;
           core.dataset.spot = '1';
         }
+        lastSpot = msg;
+        applyCentre();
         drawUntil = performance.now() + 1600;
         break;
       }
     }
   }
+  // Under the live ARES desktop this page draws only the sheet, centred on the window's reactor (the spot message carries
+  // its centre on the screen); where this page shows the reactor itself, the sheet is centred on that
+  let lastSpot = null;
+  function applyCentre() {
+    if (!window.Scene) return;
+    const m = lastSpot;
+    Scene.setCentre(window.SCENE_HIDE_BRAIN && m && Number.isFinite(m.cx) ? { x: m.cx - window.screenX, y: m.cy - window.screenY, r: m.r } : null);
+  }
+  // The callouts' short values, as the window shows them (renderer/callouts.js)
+  let readouts = null;
+  const pct = (v) => (Number.isFinite(v) ? `${Math.round(v)}%` : '—');
+  function pushReadouts() {
+    if (!window.Scene) return;
+    if (!readouts || MODE !== 'wallpaper') { Scene.setReadouts(null); return; }
+    const act = jobs.filter((j) => ['queued', 'running', 'approval', 'paused'].includes(j.status));
+    const need = act.filter((j) => j.status === 'approval').length, working = act.filter((j) => j.status === 'running').length;
+    const h = readouts.host, c = readouts.claude, b = readouts.battery;
+    const five = c?.five?.pct, week = c?.week?.pct;
+    Scene.setReadouts({
+      jobs: { value: act.length ? `${working} WORKING${need ? ` · ${need} NEED${need === 1 ? 'S' : ''} YOU` : act.length - working ? ` · ${act.length - working} WAITING` : ''}` : 'NONE RUNNING', amber: need > 0 },
+      host: { value: h ? `${String(h.name || 'MAC').toUpperCase()} · ${h.phone?.paired && !h.phone.connected ? 'PHONE OFF' : 'ONLINE'}` : 'MAC · …', amber: Boolean(h?.phone?.paired && !h.phone.connected) },
+      claude: { value: c ? `5H ${pct(five)} · WEEK ${pct(week)}` : 'NO READING', amber: Number.isFinite(five) && five >= 80 },
+      battery: { value: b ? `${pct(b.pct)} · ${b.charging ? 'CHARGING' : b.source === 'ac' ? 'ON POWER' : 'ON BATTERY'}` : 'NO BATTERY', amber: Boolean(b && !b.charging && b.source !== 'ac' && b.pct <= 20) },
+    });
+  }
 
   let jobs = [];
-  const syncJobs = () => window.JobOrbs?.sync(jobs);
+  const syncJobs = () => { window.JobOrbs?.sync(jobs); pushReadouts(); };
   addEventListener('orbs-ready', syncJobs);
 
   // ---- Optional clock and greeting ----------------------------------------------------------------------
@@ -91,9 +126,11 @@
     clock.hidden = MODE !== 'wallpaper' || !p.clock;
     tickClock();
     if (window.JobOrbs) window.JobOrbs.reduceMotion = Boolean(p.reduceMotion);
-    // The backdrop under the live ARES desktop: stars only (the ARES window above draws the brain)
+    if (p.look && window.Scene) Scene.setLook(p.look);
+    // The backdrop under the live ARES desktop: the sheet only (the ARES window above draws the reactor and its orbs)
     window.SCENE_HIDE_BRAIN = p.brain === false;
     core.hidden = window.SCENE_HIDE_BRAIN;
+    applyCentre();
     drawUntil = performance.now() + 1500;
   }
 
@@ -108,9 +145,17 @@
     out.width = W; out.height = H;
     const ctx = out.getContext('2d');
     // The page background, then each layer where it sits
-    ctx.fillStyle = '#02050a';
+    const reactor = window.SCENE_LOOK === 'reactor';
+    ctx.fillStyle = reactor ? '#03070d' : '#02050a';
     ctx.fillRect(0, 0, W, H);
     const cr = core.getBoundingClientRect();
+    if (reactor) {
+      if (tint) ctx.filter = 'hue-rotate(-155deg) saturate(1.15)';
+      ctx.drawImage(document.getElementById('matrix'), 0, 0, W, H);
+      ctx.drawImage(document.getElementById('hud'), cr.left * dpr, cr.top * dpr, cr.width * dpr, cr.height * dpr);
+      ctx.filter = 'none';
+      return out.toDataURL('image/png');
+    }
     const glow = ctx.createRadialGradient((cr.left + cr.width / 2) * dpr, (cr.top + cr.height / 2) * dpr, 0, (cr.left + cr.width / 2) * dpr, (cr.top + cr.height / 2) * dpr, Math.min(W, H) * 0.42);
     const glowRgb = tint ? '255, 170, 90' : '62, 230, 255';
     glow.addColorStop(0, `rgba(${glowRgb}, 0.09)`);

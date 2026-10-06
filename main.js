@@ -47,6 +47,7 @@ const { Theme } = require('./theme');
 const { Control } = require('./control');
 const { Autonomy, PROJECTS_DIR } = require('./autonomy');
 const { ClaudeUsage } = require('./claude-usage');
+const { Readouts } = require('./readouts');
 const { ClaudeSessions } = require('./claude-sessions');
 const { ClaudeControl } = require('./claude-control');
 const { Surface } = require('./surface');
@@ -84,6 +85,8 @@ let customPanels; // "add a panel showing …" (custom-panels.js): specs in <sup
 let voicemail; // voicemails from the Twilio fallback when the phone agent can't answer (voicemail.js)
 let wallpaper; // the starry backdrop below the desktop icons, the lock-screen still (wallpaper.js)
 let claudeCtl;   // the user's Claude Code sessions: list, summaries, hooks, replies (claude-control.js)
+let readouts;    // the reactor's HOST / CLAUDE / BATTERY readouts (readouts.js)
+let tailscaleUp = null; // Tailscale's backend state (null = not installed), for the HOST readout
 let claudeUsage; // the Claude plan's 5-hour/weekly limits, from Claude Code's rate-limit events (claude-usage.js)
 let desk;      // desk mode (desk.js): no wake word needed while the user is at the Mac
 let vision;    // hand gestures (vision.js): the camera helper and the gesture engine, only while desk mode is active
@@ -199,7 +202,21 @@ function writeSettings(patch) {
 function uiPrefs() {
   const s = readSettings();
   return { reduceMotion: Boolean(s.reduceMotion), magnetic: s.ui?.magnetic !== false, panels: s.ui?.[panelsKey()] || {}, maxPins: Number(s.ui?.maxPins) || 3, calendarCollapseSec: Number(s.ui?.calendarCollapseSec) || 60,
-    owner: process.env.ARES_OWNER_NAME || 'Dhruv', themeBar: Boolean(theme?.live) }; // the ARES bar has the top row's items
+    owner: process.env.ARES_OWNER_NAME || 'Dhruv', themeBar: Boolean(theme?.live), look: look() }; // the ARES bar has the top row's items
+}
+/** The scene's look (docs/reactor-prompt.md): the reactor (default) or the brain. Instant everywhere, persisted. */
+const look = () => (readSettings().look === 'brain' ? 'brain' : 'reactor');
+function setLook(l) {
+  l = l === 'brain' ? 'brain' : 'reactor';
+  if (l === look()) return;
+  writeSettings({ look: l });
+  log('look', l);
+  if (win && !win.isDestroyed()) win.webContents.send('ui-prefs', uiPrefs());
+  wallpaper?.prefs();
+  wallpaper?.saverState(true);
+  theme?.scene({ type: 'look', look: l });
+  if (wallpaper?.opts.lockStill) wallpaper.renderStills();
+  refreshTray();
 }
 /** Panel positions are remembered separately for the desktop (and lifted) and for the window. */
 const panelsKey = () => (surface && surface.name !== 'window' ? 'desktopPanels' : 'panels');
@@ -262,6 +279,9 @@ function menuSections() {
     view: [
       { label: `Show / Hide  (${HOTKEY.replace('Alt', '⌥')})`, click: toggleWindow },
       { label: 'Toggle Full Screen  (⌃⌘F)', click: toggleFullScreen },
+      { type: 'separator' },
+      { label: 'Look: Reactor', type: 'radio', checked: look() === 'reactor', click: () => setLook('reactor') },
+      { label: 'Look: Brain', type: 'radio', checked: look() === 'brain', click: () => setLook('brain') },
       { type: 'separator' },
       ...wallpaperMenu(),
       ...(theme ? theme.menu(refreshTray) : []),
@@ -1729,6 +1749,18 @@ ipcMain.handle('job-delete', async (_e, id) => {
   } catch (err) { return { error: err.message }; }
 });
 ipcMain.handle('ui-prefs', () => uiPrefs());
+ipcMain.handle('readouts', () => readouts?.snapshot() || null);
+ipcMain.handle('readouts-detail', () => readouts?.detail() || null);
+ipcMain.handle('readouts-act', (_e, name) => (readouts ? readouts.act(String(name), 'mac') : { ok: false, message: 'not ready' }));
+/** Tailscale's state for the HOST readout: running, off, or null when it isn't installed. */
+function checkTailscale() {
+  if (!fs.existsSync(TAILSCALE)) { tailscaleUp = null; return; }
+  require('child_process').execFile(TAILSCALE, ['status', '--json'], { timeout: 15000 }, (err, out) => {
+    let up = false;
+    try { up = JSON.parse(out).BackendState === 'Running'; } catch { up = !err; }
+    if (up !== tailscaleUp) { tailscaleUp = up; readouts?.push('tailscale'); }
+  });
+}
 // Where the user left each dashboard panel (renderer/dash.js), and the dashboard's current data
 ipcMain.on('ui-panels', (_e, panels) => { if (panels && typeof panels === 'object') writeUi({ [panelsKey()]: panels }); });
 ipcMain.handle('dash-state', () => ({ ...(dashboard?.snapshot() || {}), timers: bridge?.timers() || [], call: liveCall(), claude: claudeUsage?.statusLines() || [], calendar: calendar?.snapshot() || null, tasks: tasks?.snapshot() || null, custom: customPanels?.view() || [] }));
@@ -2185,7 +2217,7 @@ app.whenReady().then(async () => {
   createVision();
   createWindow({ show: !openedAtLogin }); // at login, wait quietly in the menu bar
   theme = new Theme({
-    log, readSettings, writeSettings, supportDir: app.getPath('userData'), appDir: __dirname, onOpen: openView, brainVisible,
+    log, readSettings, writeSettings, supportDir: app.getPath('userData'), appDir: __dirname, onOpen: openView, brainVisible, look,
     menuSections, onMenuAction: () => refreshTray(), selfIds: ['com.dhruv.ares', 'com.github.Electron'],
     onLive: () => { if (win && !win.isDestroyed()) win.webContents.send('ui-prefs', uiPrefs()); }, // never while quitting
     systemStats, dashAct, jobAnswer: (id, yes) => jobs.answer(id, yes), // the WORK drop-down's Approve / Decline (a click: the owner)
@@ -2193,6 +2225,21 @@ app.whenReady().then(async () => {
   });
   wallpaper.on('desk', () => theme.updateOrb());
   theme.jobs(jobs.list());
+  // The reactor's readouts: live HOST / CLAUDE / BATTERY values for the window and the wallpaper backdrop
+  readouts = new Readouts({
+    log, readSettings, powerMonitor, usage: () => claudeUsage?.snapshot?.() || null, jobs: () => jobs.list(),
+    phone: () => {
+      const live = [...(phone?.listeners || [])].filter((l) => l.native);
+      const d = live.length ? (phone.devices || []).find((x) => x.hash === live[0].hash) : null;
+      return { paired: Boolean(phone?.devices?.length), connected: live.length > 0, name: d?.name || null };
+    },
+    tailscale: () => tailscaleUp, theme: () => Boolean(theme?.live), audit: control?.audit,
+    autonomy: () => ({ pauseProjects: () => jobs.running.filter((j) => j.project && j.status === 'running').map((j) => { jobs.pause(j.id, 'paused from the CLAUDE readout'); return j.title; }) }),
+  });
+  readouts.on('change', (snap) => { if (win && !win.isDestroyed()) win.webContents.send('readouts', snap); wallpaper?.scene({ type: 'readouts', readouts: snap }); });
+  readouts.start();
+  checkTailscale();
+  setInterval(checkTailscale, 60_000);
   theme.weather(dashboard?.snapshot().weather);
   theme.start().catch((err) => log('theme start failed', err.message))
     .then(() => { if (!app.isPackaged && process.env.ARES_TEST_THEME) theme.test(process.env.ARES_TEST_THEME.split(',')); }); // development

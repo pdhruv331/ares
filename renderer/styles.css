@@ -802,3 +802,46 @@ html[data-hands="engaged"] .ear::after { content: " · HANDS"; color: var(--cyan
 .dc-prow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 6px; align-items: center; font-size: 10px; }
 .dc-prow b { font-weight: 500; color: #effcff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dc-prow span { font-size: 8px; letter-spacing: 0.16em; color: rgba(var(--c), 0.7); }
+
+/* ---- The reactor look (docs/reactor-prompt.md; scene.js, reactor.js, callouts.js, overlap.js) ------------------------------ */
+#matrix { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; transition: opacity 0.24s ease; }
+html.look-brain #matrix, html.look-reactor #stars, html.look-reactor #brain { display: none; }
+html.look-reactor .frame, html.look-reactor .frame::before { background: #03070d; }
+html.look-reactor.s-desktop .frame::before, html.look-reactor.s-sinking .frame::before { opacity: 0; }
+html.s-desktop #matrix, html.s-sinking #matrix, html.blend.s-lifted #matrix, html.panel-lift #matrix { opacity: 0 !important; }
+html.look-reactor .core { transform-origin: 50% 53%; }
+html.look-reactor .core.comms-dim { opacity: 0.8; }
+/* Translucency when things overlap (overlap.js): whatever is covered fades to 20% */
+.dp.faded, .dp-card.faded { opacity: 0.2 !important; }
+.dp, .callout-card { transition-property: opacity; transition-duration: 0.15s; }
+/* The caption under the reactor: one line (two for a long sentence), small, theme cyan */
+html.look-reactor .sub-ares { font: 400 12px/1.5 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: 0.06em; color: var(--cyan); max-width: 86%; }
+html.look-reactor .sub-ares span { color: rgba(62, 230, 255, 0.4); }
+html.look-reactor .sub-ares span.lit { color: var(--cyan); text-shadow: 0 0 8px rgba(62, 230, 255, 0.35); }
+html.look-reactor .sub-ares span.now { color: #effcff; text-shadow: 0 0 10px rgba(62, 230, 255, 0.8); }
+html.look-reactor .sub-ares.notice { font-size: 11px; }
+html.look-reactor .sub-user { font-size: 10.5px; }
+/* A job orb carried near the reactor: what letting go will do */
+.orb-hint { color: var(--amber); text-shadow: 0 0 8px var(--amber); }
+/* Readout cards: EDITH brackets, a slightly see-through backing, rows, bars and a few actions */
+.callout-card { z-index: 7; background: radial-gradient(120% 90% at 50% 0%, rgba(var(--c), 0.07), rgba(2, 8, 14, 0.76) 60%); }
+.callout-card .dc-in { gap: 8px; }
+.callout-card .dc-tag { color: rgba(var(--c), 0.8); }
+.cc-body { display: flex; flex-direction: column; gap: 6px; }
+.cc-row { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 8px; font-size: 10px; line-height: 1.45; }
+.cc-row b { font-weight: 500; font-size: 8px; letter-spacing: 0.2em; color: rgba(var(--c), 0.75); padding-top: 2px; }
+.cc-row span { color: #d6f2fb; } .cc-row .amber, .cc-job.amber em { color: var(--amber); }
+.cc-note { font-size: 10.5px; color: var(--muted); }
+.cc-gauge { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 4px 8px; font-size: 10px; align-items: center; }
+.cc-gauge b { font-weight: 500; font-size: 8px; letter-spacing: 0.2em; color: rgba(var(--c), 0.75); }
+.cc-gauge span { color: #d6f2fb; }
+.cc-gauge .cc-bar { grid-column: 1 / -1; }
+.cc-bar { height: 3px; background: rgba(var(--c), 0.14); border-radius: 2px; overflow: hidden; }
+.cc-bar i { display: block; height: 100%; background: rgb(var(--c)); box-shadow: 0 0 6px rgba(var(--c), 0.8); transition: width 0.4s ease; }
+.cc-bar.amber i { background: var(--amber); box-shadow: 0 0 6px rgba(255, 181, 71, 0.8); }
+.cc-job { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; font-size: 10.5px; color: #effcff; }
+.cc-job span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-job em { font-style: normal; font-size: 8.5px; letter-spacing: 0.15em; color: rgba(var(--c), 0.8); align-self: center; }
+.cc-job .cc-bar { grid-column: 1 / -1; }
+.dc-btn.amber { color: var(--amber); background: rgba(255, 181, 71, 0.1); box-shadow: inset 0 0 0 1px rgba(255, 181, 71, 0.5); }
+.dc-btn:disabled { opacity: 0.5; cursor: default; }

@@ -17,6 +17,7 @@
   let energy = 1;
   let target = 1;
   let last = performance.now();
+  let drawn = false;
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   function resize() {
@@ -36,6 +37,8 @@
   function frame(now) {
     requestAnimationFrame(frame);
     if (!gate(now)) { if (document.hidden) last = now; return; }
+    if (window.SCENE_LOOK === 'reactor') { last = now; if (drawn) { ctx.clearRect(0, 0, w, h); drawn = false; } return; } // the dot matrix instead
+    drawn = true;
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     energy += (target - energy) * Math.min(1, dt * 2); // ease between states

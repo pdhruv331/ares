@@ -8,6 +8,7 @@
   wrap('setState', (state) => send({ type: 'state', state }));
   wrap('pulse', (strength = 1) => send({ type: 'pulse', strength }));
   wrap('attention', (on) => send({ type: 'attention', on: Boolean(on) }));
+  wrap('offline', (on) => send({ type: 'offline', on: Boolean(on) }));
   wrap('setSpectrum', (arr) => { spectrum = arr; });
   wrap('setLevel', (v) => {
     const now = performance.now();

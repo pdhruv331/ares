@@ -114,6 +114,13 @@ contextBridge.exposeInMainWorld('ares', {
   onRemotePairing: (fn) => ipcRenderer.on('remote-pairing', (_e, info) => fn(info)),
   onTimerDone: (fn) => ipcRenderer.on('timer-done', (_e, label) => fn(label)),
   uiPrefs: () => ipcRenderer.invoke('ui-prefs'),
+  // The reactor's readout callouts (renderer/callouts.js ↔ readouts.js): live values, the fuller card, tier-2 actions
+  readouts: {
+    get: () => ipcRenderer.invoke('readouts'),
+    detail: () => ipcRenderer.invoke('readouts-detail'),
+    act: (name) => ipcRenderer.invoke('readouts-act', name),
+    on: (fn) => ipcRenderer.on('readouts', (_e, d) => fn(d)),
+  },
   onUiPrefs: (fn) => ipcRenderer.on('ui-prefs', (_e, p) => fn(p)),
   onFullscreen: (fn) => ipcRenderer.on('fullscreen-changed', (_e, on) => fn(on)),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),

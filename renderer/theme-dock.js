@@ -149,7 +149,8 @@
   // ---- The ARES orb: a white core, a halo that breathes with her real voice, violet + a comet while thinking ----
   const orb = $('orb');
   const octx = orb.getContext('2d');
-  const scene = { state: 'idle', level: 0, target: 0, attention: false, ripples: [] };
+  const scene = { state: 'idle', level: 0, target: 0, attention: false, ripples: [], look: 'reactor' };
+  const mini = window.Reactor ? new Reactor.Engine() : null; // the reactor look: the Kotlin's "small" reactor (no sparks, orbs or scanner)
   let orbOn = false, raf = 0, lastFrame = 0, t0 = performance.now();
   function sizeOrb() { const k = window.devicePixelRatio || 1; orb.width = orb.height = 160 * k; octx.setTransform(k, 0, 0, k, 0, 0); }
   function colour() { return scene.attention ? AMBER : scene.state === 'thinking' ? VIOLET : CYAN; }
@@ -166,6 +167,12 @@
     const [r, g, b] = colour();
     const cx = 80, cy = 80, lv = scene.level;
     octx.clearRect(0, 0, 160, 160);
+    if (scene.look === 'reactor' && mini) {
+      mini.setState(scene.state);
+      mini.update(dt, { level: scene.level, attention: scene.attention });
+      mini.draw(octx, cx, cy, 34, { small: true });
+      return;
+    }
     // Halo
     const breath = 0.5 + 0.5 * Math.sin(t * (scene.state === 'idle' ? 1.3 : 2.6));
     const R = 20 + breath * 2.5 + lv * 12;
@@ -234,6 +241,7 @@
         if (s.type === 'state') scene.state = s.state;
         else if (s.type === 'level') scene.target = Math.min(1, (s.v || 0) * 1.5);
         else if (s.type === 'attention') scene.attention = s.on;
+        else if (s.type === 'look') scene.look = s.look === 'brain' ? 'brain' : 'reactor';
         if (s.type === 'state' && s.state !== 'speaking' && s.state !== 'listening') scene.target = 0;
         break;
       }

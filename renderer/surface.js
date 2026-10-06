@@ -46,7 +46,7 @@ const Surface = (() => {
   // Something open over the desktop: the whole window takes clicks, so one click anywhere closes it, as in the app
   // (it can't have the keyboard here, so there's no Esc)
   const popover = () => { // (Dash, Work and Comms are later scripts' globals, not window properties)
-    try { return Boolean(Dash.card || Work.isOpen || Comms.isOpen || !document.getElementById('statusPanel').hidden); } catch { return false; }
+    try { return Boolean(Dash.card || Work.isOpen || Comms.isOpen || Callouts.isOpen || !document.getElementById('statusPanel').hidden); } catch { return false; }
   };
   let lastHits = '';
   function reportHits() {
@@ -61,7 +61,8 @@ const Surface = (() => {
     const subs = document.getElementById('subs');
     if (subs.innerText.trim()) { const r = subs.getBoundingClientRect(); rects.push({ x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) }); }
     for (const o of window.JobOrbs?.hits?.() || []) rects.push({ x: Math.round(o.x - o.r), y: Math.round(o.y - o.r), w: Math.round(o.r * 2), h: Math.round(o.r * 2) });
-    const hits = { rects, all: popover(), held };
+    for (const c of window.Scene?.hits?.() || []) rects.push({ x: Math.round(c.x), y: Math.round(c.y), w: Math.round(c.w), h: Math.round(c.h) });
+    const hits = { rects, all: popover(), held: held || Boolean(window.Scene?.held) };
     const key = JSON.stringify(hits);
     if (key === lastHits) return;
     lastHits = key;
@@ -72,6 +73,9 @@ const Surface = (() => {
   addEventListener('pointerup', () => { held = false; setTimeout(reportHits, 30); }, true);
   addEventListener('pointercancel', () => { held = false; reportHits(); }, true);
 
+  // As the desktop (and lifted while blended) the backdrop window below draws the dot-matrix sheet: this page's copy is hidden
+  window.SCENE_TRANSPARENT = true; // the frame's own background is the ink (it fades for the glass, and away as the desktop)
+  window.SCENE_BACKDROP_OFF = () => name === 'desktop' || name === 'sinking' || (blend && name === 'lifted');
   window.ares.surface.on(({ name: next, blend: b, panel }) => set(next, { blend: b, panel }));
   let pinned = false; // measuring: a forced mode the main process doesn't override (hold(null) releases it)
   window.ares.surface.onMode((m) => { if (!pinned) applyMode(m); });

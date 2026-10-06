@@ -485,7 +485,7 @@ function start() {
 
   const FINISHED = ['done', 'failed'];
   const SHOW_DAYS = 3;
-  window.JobOrbs = {
+  window.JobOrbs3D = { // (window.JobOrbs, in scene.js, forwards here in the brain look)
     /** Which jobs have orbs: anything in progress, plus finished ones not yet put away (the newest few). */
     sync(jobs) {
       const now = Date.now();
@@ -563,7 +563,8 @@ function start() {
   stage.appendChild(tip);
   const ORB_STATUS = { queued: 'queued', running: 'working', approval: 'needs your OK', done: 'done', failed: 'failed', paused: 'paused' };
   stage.addEventListener('mousemove', (e) => {
-    const j = window.JobOrbs.pick(e.clientX, e.clientY);
+    if (window.SCENE_LOOK === 'reactor') return;
+    const j = window.JobOrbs3D.pick(e.clientX, e.clientY);
     stage.style.cursor = j ? 'pointer' : '';
     tip.hidden = !j;
     if (!j) return;
@@ -575,7 +576,8 @@ function start() {
   });
   stage.addEventListener('mouseleave', () => { tip.hidden = true; stage.style.cursor = ''; });
   stage.addEventListener('click', (e) => {
-    const j = window.JobOrbs.pick(e.clientX, e.clientY, e.pointerType === 'touch' ? 30 : 16); // a fingertip is less precise
+    if (window.SCENE_LOOK === 'reactor') return;
+    const j = window.JobOrbs3D.pick(e.clientX, e.clientY, e.pointerType === 'touch' ? 30 : 16); // a fingertip is less precise
     if (!j) return;
     tip.hidden = true;
     window.dispatchEvent(new CustomEvent('orb-open', { detail: j.id }));
@@ -608,6 +610,7 @@ function start() {
   const target = new THREE.Color();
   let last = 0;
   let bootStart = null;
+  let drawn = false;
   const gate = Perf.gate(); // declared by perf.js
   function frame(t) {
     requestAnimationFrame(frame);
@@ -615,6 +618,8 @@ function start() {
     const dt = Math.min(0.05, last ? (t - last) / 1000 : 0.016);
     last = t;
     if (!w || window.SCENE_HIDE_BRAIN) return; // (the wallpaper backdrop under the live ARES desktop)
+    if (window.SCENE_LOOK === 'reactor') { if (drawn) { renderer.clear(); drawn = false; } return; } // the reactor look (scene.js)
+    drawn = true;
     const live = hud.live();
     if (live.state !== state && live.state === 'thinking') for (let i = 0; i < 6; i++) fire(pick(), 1); // spark of thought
     state = live.state;

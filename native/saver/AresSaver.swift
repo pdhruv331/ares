@@ -72,17 +72,19 @@ final class AresSaverView: ScreenSaverView, WKNavigationDelegate {
     guard loaded, let web else { return }
     let battery = Self.onBattery()
     var jobs = "[]"
+    var look = "reactor"
     let file = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/ARES/saver-state.json")
     if let data = try? Data(contentsOf: file),
        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
        let t = obj["t"] as? Double, Date().timeIntervalSince1970 * 1000 - t < 6 * 3600 * 1000, // ignore a stale file
        let list = obj["jobs"], let out = try? JSONSerialization.data(withJSONObject: list), let s = String(data: out, encoding: .utf8) {
       jobs = s
+      if let l = obj["look"] as? String, l == "brain" { look = "brain" }
     }
-    let state = "\(battery)|\(jobs)"
+    let state = "\(battery)|\(look)|\(jobs)"
     if state == lastState { return }
     lastState = state
-    web.evaluateJavaScript("window.ARESWall && (ARESWall.setMode({battery: \(battery)}), ARESWall.jobs(\(jobs)))", completionHandler: nil)
+    web.evaluateJavaScript("window.ARESWall && (ARESWall.setMode({battery: \(battery)}), ARESWall.prefs({look: '\(look)'}), ARESWall.jobs(\(jobs)))", completionHandler: nil)
   }
 
   private static func onBattery() -> Bool {

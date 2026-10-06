@@ -25,6 +25,7 @@ const HUD = (() => {
   let bootStart = null;
   let last = 0;
   let use3D = false;        // brain3d.mjs renders the real brain; this file then only draws the rings
+  let offline = false;      // no brain: the reactor look shows amber
 
   // ---- Build the brain (seeded, so it's the same shape every launch) ---------------------
   let seed = 7;
@@ -272,11 +273,17 @@ const HUD = (() => {
     const dt = Math.min(0.05, last ? (t - last) / 1000 : 0.016);
     last = t;
     const { width: w, height: h } = canvas.getBoundingClientRect();
-    ctx.clearRect(0, 0, w, h);
-
     const p = PALETTE[state];
     for (const k of ['r', 'g', 'b', 'spin', 'glow']) color[k] += (p[k] - color[k]) * 0.05;
     level += (targetLevel - level) * 0.25;
+    if (window.SCENE_LOOK === 'reactor') { // the reactor look (scene.js) draws this canvas; the halo's values still tick
+      const H = halo;
+      H.energy *= Math.exp(-dt * 3);
+      H.attention += (H.attTarget - H.attention) * Math.min(1, dt * 2.5);
+      H.hover += (H.hoverTarget - H.hover) * Math.min(1, dt * 6);
+      return;
+    }
+    ctx.clearRect(0, 0, w, h);
     bootStart ??= t;
     const boot = Math.min(1, (t - bootStart) / 1600);
     const ease = 1 - Math.pow(1 - boot, 3);
@@ -381,7 +388,11 @@ const HUD = (() => {
     },
     setLevel(v) { targetLevel = Math.max(0, Math.min(1, v)); },
     // For the 3D brain (brain3d.mjs): an orb carried close, or a wake/absorb pulse, brightens it
-    live: () => ({ state, level, color: { ...color, glow: color.glow * (1 + halo.hover * 0.9 + halo.energy * 0.8) } }),
+    live: () => ({ state, level, color: { ...color, glow: color.glow * (1 + halo.hover * 0.9 + halo.energy * 0.8) },
+      pulse: halo.energy, attention: halo.attention, hover: halo.hover, offline, spectrum }),
+    /** No brain (Claude Code missing or signed out): the reactor runs amber. */
+    offline(on) { offline = Boolean(on); },
+    get isOffline() { return offline; },
     /** A short bright pulse (wake word). `strength` 1.6 = something was just sucked into the brain. */
     pulse(strength = 1) {
       halo.energy = Math.max(halo.energy, strength);

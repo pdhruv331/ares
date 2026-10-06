@@ -17,7 +17,8 @@ const [cmd, ...args] = process.argv.slice(2);
 async function page() {
   const browser = await chromium.connectOverCDP(`http://127.0.0.1:${PORT}`, { timeout: 5000 });
   const pages = browser.contexts().flatMap((c) => c.pages());
-  const main = pages.find((p) => /renderer\/index\.html/.test(p.url())) || pages[0];
+  const want = process.env.ARES_HARNESS_PAGE || 'renderer/index.html'; // ARES_HARNESS_PAGE=wallpaper.html drives the backdrop page instead
+  const main = pages.find((p) => p.url().includes(want)) || pages[0];
   if (!main) throw new Error('no window');
   return { browser, main };
 }

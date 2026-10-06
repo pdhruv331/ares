@@ -309,6 +309,14 @@ function localCommand(raw) {
   const text = raw.trim().replace(/[.!?]+$/, '')
     .replace(/^((hey|ok(ay)?)\s+)?(ares|aries|ayres|arias)\b[,.!]?\s*/i, '')
     .replace(/^(can|could|would|will) you\s+/i, '');
+  // The readout callouts open by voice too ("how's my Claude usage?", "battery?", "what's running?", "how's the Mac?")
+  const callout = /\b(claude|usage limit|rate limit)\b/i.test(text) && /\b(usage|limit|used|left|how much|how's|hows|how is|status)\b/i.test(text) ? 'claude'
+    : /\bbattery\b/i.test(text) && /\b(how|what|status|level|left|charge|low)\b/i.test(text) ? 'battery'
+    : /^(what's|whats|what is) (running|working|in progress|the work)\b|^(how are|hows|how's) (the|my) jobs\b|^(show|open) (the )?jobs( readout| callout)?$/i.test(text) ? 'jobs'
+    : /^(how's|hows|how is) (the|my) (mac|host|machine|laptop)\b|^(show|open) (the )?host( readout| callout)?$/i.test(text) ? 'host' : null;
+  if (callout && window.Callouts) {
+    return { reply: '', after: () => { Callouts.open(callout); window.ares.resumeListening(); } };
+  }
   if (/^(please\s+)?(stay awake|keep listening|stay with me|conversation mode|always listen(ing)?( mode)?)\b/i.test(text)) {
     return {
       reply: voiceIdOn
@@ -867,7 +875,11 @@ document.addEventListener('keydown', (e) => {
 });
 
 // Integration status (voice + brain are next up)
-window.ares.brainAvailable().then((on) => document.querySelector('[data-key="brain"]').classList.add(on ? 'online' : 'pending'));
+window.ares.brainAvailable().then((on) => { document.querySelector('[data-key="brain"]').classList.add(on ? 'online' : 'pending'); if (!on) HUD.offline?.(true); });
+// The look (◉ menu: Reactor / Brain), applied as soon as it's known and whenever it changes
+const applyLook = (p) => { if (p?.look && window.Scene) Scene.setLook(p.look); };
+window.ares.uiPrefs().then(applyLook);
+window.ares.onUiPrefs(applyLook);
 window.ares.ttsAvailable().then((on) => document.querySelector('[data-key="voice"]').classList.add(on ? 'online' : 'pending'));
 
 // ---- Boot -----------------------------------------------------------------

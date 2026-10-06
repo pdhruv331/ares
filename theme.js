@@ -61,7 +61,7 @@ class Theme {
       pidFile: path.join(this.dir, 'ares.pid'), offlineCommands: () => this.offlineCommands() });
     this.dock = new Dock({ dir: this.dir, helper: o.helper, log: o.log, appDir: o.appDir, onSummon: () => o.onOpen('summon'),
       onAccessibility: () => this.askAccessibility(), onFront: (id) => this.front(id),
-      readOpts: () => this.opts.dock, saveOpts: (p) => this.save({ dock: { ...this.opts.dock, ...p } }) });
+      readOpts: () => this.opts.dock, saveOpts: (p) => this.save({ dock: { ...this.opts.dock, ...p } }), look: () => (o.look ? o.look() : 'reactor') });
     this.drop = new Drop({ log: o.log, appDir: o.appDir, onAct: (a) => this.dropAct(a) }); // status + WORK, drawn by ARES
     this.popups = {}; // menuId -> [{ run }]: what each line of an open drop-down does
     this.hoverSeq = 0;

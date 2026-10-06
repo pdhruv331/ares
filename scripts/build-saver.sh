@@ -19,7 +19,7 @@ xcrun swiftc -O -swift-version 5 -parse-as-library -module-name AresSaver native
 
 echo "› Screen saver: bundling the scene"
 SCENE="$OUT/Contents/Resources/scene"
-cp native/saver/saver.html renderer/wallpaper.css renderer/perf.js renderer/stars.js renderer/neural.js renderer/wallpaper.js "$SCENE/"
+cp native/saver/saver.html renderer/wallpaper.css renderer/perf.js renderer/stars.js renderer/neural.js renderer/reactor.js renderer/scene.js renderer/wallpaper.js "$SCENE/"
 npx esbuild renderer/brain3d.mjs --bundle --format=iife --minify --log-level=warning --outfile="$SCENE/brain3d.js"
 [[ -f native/saver/thumbnail.png ]] && cp native/saver/thumbnail*.png "$OUT/Contents/Resources/"
 

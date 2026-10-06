@@ -23,3 +23,11 @@ html, body {
 .clock b { display: block; font-weight: 300; font-size: 44px; letter-spacing: 0.06em; color: rgba(207, 239, 255, 0.42); }
 .clock span { font-size: 12px; text-transform: uppercase; }
 .clock[hidden] { display: none; }
+
+/* The reactor look (scene.js): the dot-matrix sheet full-bleed, the reactor's canvas the whole screen (its centre a little below
+   the middle, as in the window), the starfield and the 3D brain off */
+#matrix { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+html.look-brain #matrix, html.look-reactor #stars, html.look-reactor #brain { display: none; }
+html.look-reactor body { background: #03070d; }
+html.look-reactor .core { left: 0; top: 0; width: 100%; height: 100%; transform-origin: 50% 53%; }
+.close-hint { display: none; }

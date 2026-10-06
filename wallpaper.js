@@ -132,6 +132,8 @@ class Wallpaper extends EventEmitter {
     send('wp-scene', this.lastScene.state);
     send('wp-scene', this.lastScene.attention);
     send('wp-scene', this.lastScene.spot);
+    if (this.lastScene.offline) send('wp-scene', this.lastScene.offline);
+    if (this.lastScene.readouts) send('wp-scene', this.lastScene.readouts);
     send('wp-jobs', this.jobList);
     this.refreshModes();
   }
@@ -146,6 +148,8 @@ class Wallpaper extends EventEmitter {
     if (msg.type === 'state') this.lastScene.state = msg;
     if (msg.type === 'attention') this.lastScene.attention = msg;
     if (msg.type === 'spot') this.lastScene.spot = msg; // where the window's brain sits (shifted aside for panels or icons)
+    if (msg.type === 'readouts') this.lastScene.readouts = msg;
+    if (msg.type === 'offline') this.lastScene.offline = msg;
     if (!this.views.size) return;
     this.send('wp-scene', msg);
     if (msg.type === 'state') this.refreshModes(); // 60 fps while listening or speaking
@@ -175,10 +179,11 @@ class Wallpaper extends EventEmitter {
   }
 
   /** For the screen saver: a small read-only file with whether work is running (it never talks to ARES). */
-  saverState() {
+  saverState(force = false) {
     const running = this.jobList.filter((j) => ['queued', 'running', 'approval'].includes(j.status));
-    const body = JSON.stringify({ t: Date.now(), jobs: running.slice(0, 8).map(({ id, status, size }) => ({ id, status, size })) });
-    if (body.slice(body.indexOf(',')) === this.lastSaverBody) return;
+    const look = this.readSettings().look === 'brain' ? 'brain' : 'reactor';
+    const body = JSON.stringify({ t: Date.now(), look, jobs: running.slice(0, 8).map(({ id, status, size, title }) => ({ id, status, size, title })) });
+    if (body.slice(body.indexOf(',')) === this.lastSaverBody && !force) return;
     this.lastSaverBody = body.slice(body.indexOf(','));
     fs.writeFile(path.join(this.supportDir, 'saver-state.json'), body, () => {});
   }
@@ -354,7 +359,8 @@ class Wallpaper extends EventEmitter {
       };
       require('electron').ipcMain.on('wp-still', onStill);
       const timer = setTimeout(() => { this.log('lock still timed out'); done(null); }, 30_000);
-      win.loadFile(path.join(this.appDir, 'renderer', 'wallpaper.html'), { query: { mode: 'still', ...(evening ? { tint: 'evening' } : {}) } });
+      const look = this.readSettings().look === 'brain' ? 'brain' : 'reactor';
+      win.loadFile(path.join(this.appDir, 'renderer', 'wallpaper.html'), { query: { mode: 'still', look, ...(evening ? { tint: 'evening' } : {}) } });
     });
   }
 

@@ -137,6 +137,7 @@ const Dash = (() => {
     const was = health[key] || '';
     health[key] = ok ? '' : reason || 'error';
     if (was !== health[key]) { renderStatus(); if (!ok) blip('needs'); }
+    if (key === 'brain' || key === 'brainFound') HUD.offline?.(Boolean(health.brain || health.brainFound)); // the reactor runs amber without a brain
   }
   $('statusBtn').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -269,9 +270,13 @@ const Dash = (() => {
   let W = stage.clientWidth, H = stage.clientHeight;
   // The brain fills the stage: centred 8px above the middle, halo radius 44% of the shorter side (as in neural.js).
   // As the live desktop it moves (and shrinks if it must) to keep clear of the desktop icons: `place` is where it is.
+  // The reactor look (scene.js): radius 26% of the stage height, centred 3% below the middle; its footprint for the flow takes
+  // in the orbit and the inner part of the callouts (1.5× its radius).
   let spot = { dx: 0, dy: 0, s: 1 };
-  const brainR = () => Math.min(W, H) * 0.44 * spot.s;
-  const brain = () => ({ x: W / 2 + spot.dx, y: H / 2 - 8 + spot.dy, r: brainR() * 0.85 });
+  const reactor = () => window.SCENE_LOOK === 'reactor';
+  const brainR = () => (reactor() ? Scene.radiusFor(W, H) * 1.5 : Math.min(W, H) * 0.44) * spot.s;
+  const brainY = () => (reactor() ? H / 2 + H * 0.03 : H / 2 - 8);
+  const brain = () => ({ x: W / 2 + spot.dx, y: brainY() + spot.dy, r: brainR() * (reactor() ? 1 : 0.85) });
 
   // ---- Desktop icons: walls for panels, the brain and orbs -------------------------------------------------------
   // Finder's icon rectangles (window coordinates, from the main process) merged into clusters, in stage coordinates.
@@ -329,14 +334,15 @@ const Dash = (() => {
     let best = { dx: 0, dy: 0, s: 1, score: walls.length ? Infinity : 0 };
     if (!keep.length) placeTopBar();
     if (walls.length) {
-      const R0 = Math.min(W, H) * 0.44;
+      const R0 = reactor() ? Scene.radiusFor(W, H) * 1.5 : Math.min(W, H) * 0.44;
+      const y0 = brainY();
       for (const s of [1, 0.9, 0.8, 0.7, 0.62, 0.55]) {
-        const reach = R0 * s * 1.12; // the ring, the pedestal and the job orbs' orbits
+        const reach = R0 * s * (reactor() ? 1 : 1.12); // the ring, the pedestal and the job orbs' orbits
         for (let fx = 0; fx <= 1.0001; fx += 0.04) {
           for (const fy of [0.5, 0.42, 0.58, 0.36, 0.64]) {
             const cx = reach + (W - 2 * reach) * fx, cy = clamp(H * fy, reach * 0.9, H - reach * 0.9);
-            const score = circleWallOverlap(cx, cy, reach) * 12 + Math.hypot(cx - W / 2, cy - (H / 2 - 8)) / W * 80 + (1 - s) * 120;
-            if (score < best.score) best = { dx: cx - W / 2, dy: cy - (H / 2 - 8), s, score };
+            const score = circleWallOverlap(cx, cy, reach) * 12 + Math.hypot(cx - W / 2, cy - y0) / W * 80 + (1 - s) * 120;
+            if (score < best.score) best = { dx: cx - W / 2, dy: cy - y0, s, score };
           }
         }
       }
@@ -347,8 +353,24 @@ const Dash = (() => {
     core.style.setProperty('--bx', `${Math.round(spot.dx)}px`);
     core.style.setProperty('--by', `${Math.round(spot.dy)}px`);
     core.style.setProperty('--bs', String(spot.s));
-    window.ares.scene?.({ type: 'spot', dx: Math.round(spot.dx), dy: Math.round(spot.dy), s: spot.s }); // the backdrop's brain follows (one brain, not two rings)
+    reportSpot(); // the backdrop's scene follows (one brain, not two rings; the sheet centred on this reactor)
   }
+  // Where the scene sits, for the backdrop window below: the shift and scale, and the reactor's centre and radius on the
+  // screen (the sheet under the live desktop is drawn around it). Sent when it changes, and when the window moves.
+  let spotKey = '';
+  function reportSpot(force = false) {
+    const b = brain();
+    const st = stage.getBoundingClientRect();
+    const r0 = reactor() ? Scene.radiusFor(W, H) * spot.s : brainR() * 0.85;
+    const msg = { type: 'spot', dx: Math.round(spot.dx), dy: Math.round(spot.dy), s: spot.s,
+      cx: Math.round(window.screenX + st.left + b.x), cy: Math.round(window.screenY + st.top + b.y), r: Math.round(r0) };
+    const key = JSON.stringify(msg);
+    if (key === spotKey && !force) return;
+    spotKey = key;
+    window.ares.scene?.(msg);
+  }
+  setInterval(() => reportSpot(), 1000);
+  addEventListener('scene-look', () => { placeBrain(); layout(); reportSpot(true); });
   function setWalls() {
     clusterIcons();
     placeBrain();
@@ -1843,7 +1865,13 @@ const Dash = (() => {
       else if (s === 'speaking') say('speaking…', 'day', 0);
       else { clearTimeout(tickerTimer); tickerTimer = setTimeout(calm, 4000); }
     },
-    get panels() { return [...panels.values()].map((p) => ({ id: p.id, mode: p.mode, x: p.x, y: p.y, tx: p.tx, ty: p.ty, ...sizeOf(p), slot: p.slot && `${p.slot.side}${p.rank}`, tier: p.tier, pinned: p.pinned, flex: p.flex })); },
+    get panels() { return [...panels.values()].map((p) => ({ id: p.id, mode: p.mode, x: p.x, y: p.y, tx: p.tx, ty: p.ty, ...sizeOf(p), slot: p.slot && `${p.slot.side}${p.rank}`, tier: p.tier, pinned: p.pinned, flex: p.flex, ox: p.ox, oy: p.oy })); },
+    /** The open detail card's box (stage px), or null. */
+    get cardBox() { return card && !card.closing && card.box ? { ...card.box, el: card.el } : null; },
+    /** The translucency rule (overlap.js): a panel under something fades to 20%. */
+    fade(id, on) { const p = panels.get(id); if (p?.el) p.el.classList.toggle('faded', Boolean(on)); },
+    /** The stage's rectangle on screen. */
+    get stageRect() { return stage.getBoundingClientRect(); },
     /** Esc: fold an open detail card back. True if there was one. */
     closeCard() { if (!card) return false; closeCard(); return true; },
     /** Open a panel's details (a hand gesture's click or spread; the mouse goes through press/letGo). */

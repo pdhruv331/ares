@@ -22,8 +22,8 @@ const NEAR = 240;            // px from the bottom where the pointer is watched 
 const HIDE_MS = 700;         // edge reveal: hide this long after the pointer leaves
 
 class Dock {
-  constructor({ dir, helper, log, appDir, readOpts, saveOpts, onSummon, onAccessibility, onFront }) {
-    Object.assign(this, { helper, log, appDir, readOpts, saveOpts, onSummon, onAccessibility, onFront });
+  constructor({ dir, helper, log, appDir, readOpts, saveOpts, onSummon, onAccessibility, onFront, look }) {
+    Object.assign(this, { helper, log, appDir, readOpts, saveOpts, onSummon, onAccessibility, onFront, look });
     this.dir = path.join(dir, 'dock');
     this.win = null;
     this.apps = [];               // [{ path, id, name }]
@@ -89,6 +89,7 @@ class Dock {
     this.send({ type: 'apps', apps: this.apps.map(withIcon), folders: this.folders().map(withIcon) });
     this.send({ type: 'prefs', icons: o.icons, reveal: o.reveal });
     this.send({ type: 'running', running: [...this.running], front: this.front, badges: this.badges });
+    this.send({ type: 'scene', msg: { type: 'look', look: this.look?.() || 'reactor' } });
     this.send({ type: 'orb', on: this.orb });
     this.send({ type: 'reveal', on: o.reveal === 'always' || this.revealed });
   }
