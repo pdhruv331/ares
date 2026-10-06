@@ -120,7 +120,7 @@ class Power extends EventEmitter {
    * Power down: the spin-down with the real steps in reverse, then DORMANT (the process stays; see the top). Returns the line she
    * says first (so the caller can answer the voice command), or null if already on the way out. `fully` = the real quit instead.
    */
-  powerDown(why = 'user', { fully = false } = {}) {
+  powerDown(why = 'user', { fully = false, say = true } = {}) {
     if (this.quitting || this.mode === 'dormant' || this.mode === 'charging') return null;
     this.quitting = true;
     this.fully = fully;
@@ -133,7 +133,7 @@ class Power extends EventEmitter {
     this.audit?.record({ kind: 'power', what: 'power down', why, tier: 1, detail: running.length ? `${running.length} jobs paused` : '' });
     this.mode = 'spindown';
     this.saidDone = false; this.onSaid = null;
-    this.emit('say', { line });
+    if (say) this.emit('say', { line }); // (a voice command on the Mac speaks it as its answer instead: main.js reports 'said' when that turn ends)
     this.emit('change', { mode: 'spindown', status: this.status(), why, line });
     const t0 = Date.now();
     const step = (name, status, detail = '') => this.emit('step', { name, status, detail });

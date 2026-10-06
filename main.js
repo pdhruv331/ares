@@ -748,7 +748,7 @@ ipcMain.on('hands-act', (_e, what) => {
 ipcMain.handle('test-hands', (_e, clip, opts) => { if (!app.isPackaged) vision?.replay(clip, opts || {}); return vision?.state || null; });
 // The conversation's timing, for judging speech heard without the wake word (addressed.js)
 const talk = { lastReplyAt: 0, askedQuestion: false, fromWake: false };
-ipcMain.on('reply-done', (_e, asked) => { talk.lastReplyAt = Date.now(); talk.askedQuestion = Boolean(asked); });
+ipcMain.on('reply-done', (_e, asked) => { talk.lastReplyAt = Date.now(); talk.askedQuestion = Boolean(asked); if (power?.mode === 'spindown') power.lineSaid(); });
 ipcMain.on('listener-awake', (_e, on) => setAwake(on));
 ipcMain.on('scene', (_e, msg) => { wallpaper?.scene(msg); theme?.scene(msg); });
 ipcMain.on('theme-status', (_e, s) => theme?.status(s));
@@ -1490,7 +1490,7 @@ function killSwitch(said, source) {
 const POWER_PHRASE = /^(?:(?:hey|ok(?:ay)?)\s+)?(?:ares|aries)?[,.]?\s*(?:please\s+)?(?:power (?:down|off)|shut (?:yourself )?down|go offline|switch (?:yourself )?off)\b/i;
 function powerPhrase(said, source) {
   if (!power || !POWER_PHRASE.test(said.trim())) return null;
-  const line = power.powerDown(`voice (${source})`);
+  const line = power.powerDown(`voice (${source})`, { say: source !== 'mac' }); // the Mac's turn speaks the answer itself
   if (!line) return null;
   remember('user', said, source); remember('ares', line, source, true);
   return line;
