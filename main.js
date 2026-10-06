@@ -1019,6 +1019,30 @@ function speakInto(text, out) {
     .finally(() => { out.done = true; out.wake?.(); });
 }
 
+/** The phone app was opened: a short greeting in her voice (time of day, one useful fact), streamed like a reply. Not while quiet. */
+async function phoneGreet(send) {
+  const h = new Date().getHours();
+  const greet = h < 5 ? 'Still up, sir?' : h < 12 ? 'Morning, sir.' : h < 17 ? 'Afternoon, sir.' : 'Evening, sir.';
+  let fact = '';
+  try { fact = wakeLines.fact(wakeContext()) || ''; } catch {}
+  const tails = fact ? [fact.charAt(0).toUpperCase() + fact.slice(1).replace(/\.?$/, '.')] : ['At your service.', 'What can I do for you?', 'Right here.', 'Go ahead.'];
+  const text = power?.mode !== 'online' ? greet : `${greet} ${tails[Math.floor(Math.random() * tails.length)]}`;
+  send({ type: 'text', delta: text });
+  const quiet = power?.mode !== 'online' || await silentNow().catch(() => false);
+  if (!quiet && speech.available) {
+    const c = { chunks: [], done: false };
+    speakInto(text, c);
+    let sent = 0;
+    for (;;) {
+      while (sent < c.chunks.length) send({ type: 'audio', clip: 0, pcm: Buffer.from(c.chunks[sent++]).toString('base64') });
+      if (c.done) break;
+      await new Promise((r) => { c.wake = r; });
+    }
+    send({ type: 'clipend', clip: 0 });
+  }
+  send({ type: 'done', text });
+}
+
 let phoneStream = null; // the phone conversation in progress: actions are delivered straight into it
 async function phoneAsk({ text, voice, images = [] }, send) {
   phoneStream = send;
@@ -1210,6 +1234,7 @@ function startPhone() {
     readSettings,
     writeSettings,
     ask: phoneAsk,
+    greet: phoneGreet,
     transcribe: (audio, type) => transcribe(audio, type),
     history: () => conversation.slice(-40),
     pushKey: () => vapid().publicKey,

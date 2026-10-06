@@ -153,6 +153,22 @@ class Session(private val ctx: Context, private val ui: Ui) {
     private fun set(s: State) { state = s; ui.state(s) }
 
     /** Ask ARES something. `voice`: she answers out loud too (when you spoke to her). */
+    /** The app was opened: she greets out loud (the Mac composes the line; nothing is asked of the brain). Quiet if she's busy. */
+    fun greet() {
+        if (busy) return
+        speaker.stop()
+        val mine = AtomicBoolean().also { cancel = it }
+        thread(name = "ares-greet") {
+            runCatching {
+                client.greet(mine, AresClient.Listener(
+                    text = { t -> main.post { if (!mine.get()) { ui.reply(t, false); ui.caption(t) } } },
+                    audio = { pcm, clip -> if (!mine.get()) speaker.play(pcm, clip) },
+                    done = { t -> main.post { if (!mine.get()) ui.reply(t, true) } },
+                ))
+            }
+        }
+    }
+
     fun ask(said: String, voice: Boolean) {
         if (said.isBlank() || busy) return
         busy = true

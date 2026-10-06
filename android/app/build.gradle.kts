@@ -54,12 +54,4 @@ val copyBrain by tasks.registering(Copy::class) {
 }
 android.sourceSets["main"].assets.srcDir(brainAssets.get().asFile)
 
-// The Mac's power sounds (renderer/sounds/*.wav, made by scripts/make-sounds.js) as raw resources: the phone plays quieter versions
-val soundRes = layout.buildDirectory.dir("generated/soundRes")
-val copySounds by tasks.registering(Copy::class) {
-    into(soundRes.map { it.dir("raw") })
-    from(rootProject.file("../renderer/sounds")) { include("*.wav") }
-    rename { it.replace('-', '_') } // resource names: letters, digits, underscores
-}
-android.sourceSets["main"].res.srcDir(soundRes.get().asFile)
-tasks.named("preBuild") { dependsOn(copyBrain, copySounds) }
+tasks.named("preBuild") { dependsOn(copyBrain) }

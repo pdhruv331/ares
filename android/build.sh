@@ -4,7 +4,6 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21
-[ -f ../renderer/sounds/bloom.wav ] || (cd .. && node scripts/make-sounds.js >/dev/null) # the power sounds, bundled as raw resources
 CODE=$(( $(date +%s) / 60 )) # every build gets a higher version code (minutes since 1970)
 ./gradlew assembleRelease --console=plain -q -ParesVersionCode=$CODE
 cp app/build/outputs/apk/release/app-release.apk ARES.apk

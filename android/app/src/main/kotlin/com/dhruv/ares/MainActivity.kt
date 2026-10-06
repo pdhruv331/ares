@@ -56,9 +56,7 @@ class MainActivity : Activity(), Session.Ui {
     // Power from the phone (docs/ignition-prompt.md §4d-4f): the Mac's state mirrored on the orb, the orb hold, the ⏻ sheet
     private lateinit var powerBtn: View
     private lateinit var schedChip: TextView
-    private lateinit var sounds: Sounds
     private var lastPower: PowerStore.Mode? = null
-    private var lastCharge = 0f
     private var powerSheet: Dialog? = null
     private var asked = false // this phone asked for the last change: toast it
     private val powerChanged = { showPower() }
@@ -82,7 +80,6 @@ class MainActivity : Activity(), Session.Ui {
         fallback = findViewById(R.id.reactorFallback)
         fallback.levelSource = { session.level }
         PowerStore.load(this)
-        sounds = Sounds(this)
         // Tap the orb = talk (or hush her); hold it ~0.8 s = standby / wake, a ring filling around it meanwhile
         val hold = HoldDetector(this, onTap = { tapOrb() }, onHold = { holdOrb() }, onRing = { k, done -> fallback.holdK = if (done) 0f else k })
         fallback.setOnTouchListener { _, e -> hold.onTouch(e); true }
@@ -190,15 +187,16 @@ class MainActivity : Activity(), Session.Ui {
         showJobs()
         pollStatus()
         refreshSetup()
-        sounds.inFront = true
         PowerStore.listen(powerChanged)
         probeRelay()
         if (log.childCount == 0) loadHistory()
+        // She greets out loud when the app is opened (at most every 20 minutes; the Mac composes the line, no brain turn)
+        val now = System.currentTimeMillis()
+        if (now - Ares.prefs(this).getLong("greetAt", 0) > 20 * 60_000) { Ares.prefs(this).edit().putLong("greetAt", now).apply(); session.greet() }
     }
 
     override fun onPause() {
         session.setHandsFree(false, "left") // listening from behind another screen is unreliable; tap or ask again when back
-        sounds.inFront = false
         PowerStore.unlisten(powerChanged)
         statusPoll?.interrupt()
         reactor.onPause() // no drawing while you're elsewhere
@@ -219,7 +217,6 @@ class MainActivity : Activity(), Session.Ui {
 
     override fun onDestroy() {
         session.release()
-        sounds.release()
         super.onDestroy()
     }
 
@@ -251,25 +248,11 @@ class MainActivity : Activity(), Session.Ui {
         schedChip.visibility = if (sch == null || !PowerStore.reach) View.GONE else View.VISIBLE
         if (sch != null) schedChip.text = listOfNotNull(sch.standby?.let { "☾ standby $it" }, sch.wake?.let { "☀ wake $it" }).joinToString(" · ") + if (sch.skipped) " · skipped tonight" else ""
         state(session.state) // the hint under the orb
-        // Sounds and haptics (docs/ignition-prompt.md §4e; the Mac's own sequences, "siphon" wake / "turbine" down, see Haptics)
         val was = lastPower
         lastPower = mode
-        val charge = PowerStore.chargeK
-        if (mode == PowerStore.Mode.CHARGING && charge > lastCharge) {
-            // a real start-up step landed: the hum rises, a burst of siphon ticks; at 100% the held breath (hum out, the inhale)
-            if (charge >= 0.999f) { sounds.stop("charge-hum"); sounds.play("inhale", 0.8f) } else { sounds.rate("charge-hum", 0.8f + 0.9f * charge); Haptics.siphonStep(this, charge) }
-        }
-        lastCharge = if (mode == PowerStore.Mode.CHARGING) charge else 0f
         if (was != null && was != mode) {
-            when {
-                mode == PowerStore.Mode.STANDBY -> { sounds.play("standby-down"); Haptics.turbineStandby(this) }
-                mode == PowerStore.Mode.ONLINE && was == PowerStore.Mode.CHARGING -> { sounds.play("bloom"); Haptics.double(this) }
-                mode == PowerStore.Mode.ONLINE && was == PowerStore.Mode.STANDBY -> { sounds.play("wake-chime"); Haptics.turbineWake(this) }
-                mode == PowerStore.Mode.SPINDOWN -> { sounds.play("clunk"); fallback.postDelayed({ sounds.play("winddown", 0.9f) }, 250); Haptics.turbineDown(this) }
-                mode == PowerStore.Mode.OFFLINE && was == PowerStore.Mode.SPINDOWN -> sounds.play("thud")
-                mode == PowerStore.Mode.CHARGING -> sounds.play("charge-hum", 0.8f, loop = true)
-            }
-            if (was == PowerStore.Mode.CHARGING) sounds.stop("charge-hum")
+            if (mode == PowerStore.Mode.STANDBY) Haptics.soft(this)
+            if (mode == PowerStore.Mode.ONLINE && (was == PowerStore.Mode.CHARGING || was == PowerStore.Mode.STANDBY)) Haptics.double(this)
             if (asked && mode in setOf(PowerStore.Mode.ONLINE, PowerStore.Mode.STANDBY, PowerStore.Mode.OFFLINE)) {
                 asked = false
                 Toast.makeText(this, "Mac ARES → ${PowerStore.header().lowercase()}", Toast.LENGTH_SHORT).show()
@@ -294,8 +277,8 @@ class MainActivity : Activity(), Session.Ui {
             mode == PowerStore.Mode.ONLINE -> powerAct("standby")
             mode == PowerStore.Mode.STANDBY || mode == PowerStore.Mode.OFFLINE -> powerAct("wake")
             mode == PowerStore.Mode.QUIT -> wakeThroughRelay()
-            mode == PowerStore.Mode.ASLEEP -> { Haptics.error(this); sounds.play("nope"); showCaption("Mac asleep · can't wake. Open the lid or plug it in.", 4000) }
-            mode == PowerStore.Mode.UNREACHABLE -> { Haptics.error(this); sounds.play("nope"); showCaption("I can't reach the Mac. Is Tailscale on?", 4000); probeRelay() }
+            mode == PowerStore.Mode.ASLEEP -> { Haptics.error(this); showCaption("Mac asleep · can't wake. Open the lid or plug it in.", 4000) }
+            mode == PowerStore.Mode.UNREACHABLE -> { Haptics.error(this); showCaption("I can't reach the Mac. Is Tailscale on?", 4000); probeRelay() }
             else -> Haptics.tick(this)
         }
     }
@@ -307,7 +290,7 @@ class MainActivity : Activity(), Session.Ui {
             val r = runCatching { AresClient(this).powerAct(action) }
             runOnUiThread {
                 val ok = r.getOrNull()?.optBoolean("ok") == true
-                if (!ok) { asked = false; Haptics.error(this); sounds.play("nope"); showCaption(r.getOrNull()?.optString("message")?.ifBlank { null } ?: "I couldn't reach the Mac, sir.", 4000) }
+                if (!ok) { asked = false; Haptics.error(this); showCaption(r.getOrNull()?.optString("message")?.ifBlank { null } ?: "I couldn't reach the Mac, sir.", 4000) }
                 else r.getOrNull()?.let { PowerStore.fromPower(this, it) }
             }
         }
@@ -324,7 +307,7 @@ class MainActivity : Activity(), Session.Ui {
                 runOnUiThread {
                     PowerStore.markIgniting(false); asked = false
                     if (a.ok) PowerStore.setHelper(false)
-                    Haptics.error(this); sounds.play("nope")
+                    Haptics.error(this)
                     showCaption(a.error ?: "Mac asleep · can't wake. Open the lid or plug it in.", 5000)
                 }
                 return@thread
@@ -364,7 +347,7 @@ class MainActivity : Activity(), Session.Ui {
         slide.onDetent = { Haptics.tick(this) }
         slide.onSpringBack = { Haptics.tick(this) }
         slide.onComplete = {
-            Haptics.heavy(this); sounds.play("clunk")
+            Haptics.heavy(this)
             d.dismiss()
             powerAct("powerdown")
         }

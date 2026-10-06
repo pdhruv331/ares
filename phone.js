@@ -35,6 +35,7 @@ class PhoneServer extends EventEmitter {
    * @param {() => object} o.readSettings
    * @param {(patch: object) => void} o.writeSettings
    * @param {(req: {text: string, voice: boolean}, send: (msg: object) => void) => Promise<void>} o.ask
+   * @param {(send: (msg: object) => void) => Promise<void>} [o.greet]  the app was opened: a short spoken greeting (text + her voice), no brain turn
    * @param {(audio: Buffer, type: string) => Promise<string>} o.transcribe
    * @param {() => object[]} o.history
    * @param {string} o.apkDir          where android/build.sh puts ARES.apk and ARES.json (the Android app's updates)
@@ -277,6 +278,15 @@ class PhoneServer extends EventEmitter {
       return json(200, { ok: true, text });
     }
 
+    // The app opened: greet out loud (text, then her voice sentence by sentence, like a reply; no brain turn)
+    if (req.method === 'POST' && url.pathname === '/api/greet') {
+      if (!this.greet) return json(503, { ok: false });
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+      let open = true;
+      req.on('close', () => { open = false; });
+      await this.greet((msg) => { if (open) res.write(JSON.stringify(msg) + '\n'); });
+      return res.end();
+    }
     if (req.method === 'POST' && url.pathname === '/api/ask') {
       const { text, voice, images } = JSON.parse((await this.body(req, 15e6)).toString() || '{}');
       if (!text || typeof text !== 'string') return json(400, { ok: false });

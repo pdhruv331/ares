@@ -128,24 +128,28 @@ class AresClient(private val ctx: Context) {
         val body = JSONObject().put("text", text).put("voice", voice)
         if (images.isNotEmpty()) body.put("images", JSONArray(images.map { (type, data) -> JSONObject().put("media_type", type).put("data", data) }))
         val c = open("/api/ask", "POST", readTimeout = 300_000) // she may be using tools for a while
-        try {
-            c.sendJson(body)
-            c.check()
-            var reply = ""
-            c.inputStream.bufferedReader().useLines { lines ->
-                for (line in lines) {
-                    if (cancel.get()) break
-                    if (line.isBlank()) continue
-                    val m = JSONObject(line)
-                    when (m.optString("type")) {
-                        "text" -> { reply += m.optString("delta"); on.text(reply) }
-                        "audio" -> on.audio(android.util.Base64.decode(m.optString("pcm"), android.util.Base64.DEFAULT), m.optInt("clip", -1))
-                        "action" -> on.action(m.optString("url"), m.optString("label"))
-                        "done" -> { reply = m.optString("text", reply); on.done(reply) }
-                    }
+        try { c.sendJson(body); c.check(); stream(c, cancel, on) } finally { c.disconnect() }
+    }
+    /** The app was opened: her greeting, text then voice, the same stream shape as a reply. */
+    fun greet(cancel: AtomicBoolean, on: Listener) {
+        val c = open("/api/greet", "POST", readTimeout = 30_000)
+        try { c.sendJson(JSONObject()); c.check(); stream(c, cancel, on) } finally { c.disconnect() }
+    }
+    private fun stream(c: HttpURLConnection, cancel: AtomicBoolean, on: Listener) {
+        var reply = ""
+        c.inputStream.bufferedReader().useLines { lines ->
+            for (line in lines) {
+                if (cancel.get()) break
+                if (line.isBlank()) continue
+                val m = JSONObject(line)
+                when (m.optString("type")) {
+                    "text" -> { reply += m.optString("delta"); on.text(reply) }
+                    "audio" -> on.audio(android.util.Base64.decode(m.optString("pcm"), android.util.Base64.DEFAULT), m.optInt("clip", -1))
+                    "action" -> on.action(m.optString("url"), m.optString("label"))
+                    "done" -> { reply = m.optString("text", reply); on.done(reply) }
                 }
             }
-        } finally { c.disconnect() }
+        }
     }
 
     // ---- Work: the Mac's background jobs ---------------------------------------------------------------
