@@ -2242,6 +2242,7 @@ app.whenReady().then(async () => {
     supportDir: app.getPath('userData'), appDir: __dirname, log, isPackaged: app.isPackaged, version: app.getVersion(), readSettings, writeSettings,
     helperApp: app.isPackaged ? path.join(process.resourcesPath, 'ARES Ignition.app') : path.join(__dirname, 'native', 'build', 'ARES Ignition.app'),
     appPath: app.isPackaged ? path.resolve(process.resourcesPath, '..', '..') : null,
+    relay: () => relay,
   });
   ignition.start();
   ignition.on('step', (s) => { win?.webContents.send('power', { type: 'step', step: s }); wallpaper?.scene({ type: 'power-step', step: s }); if (power?.mode === 'charging') phone?.broadcast({ type: 'power-step', step: s }); });
@@ -2276,6 +2277,7 @@ app.whenReady().then(async () => {
   speech.start();
   { const vs = speech.status(); ignition.step('voice', 'ok', vs.dev || vs.backup || vs.reserve ? 'backup voice' : 'Katherine'); }
   relay = new Relay({ log, firebaseFile: path.join(app.getPath('userData'), 'google-services.json') });
+  ignition.writeConfig(); // (now that the relay is known: relay.json for the helper)
   calls = createCalls();
   control = new Control({
     helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-control') : path.join(__dirname, 'native', 'build', 'ares-control'),

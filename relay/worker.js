@@ -4,7 +4,15 @@
 //   POST /register    the Mac registers the phone's FCM token             (signed by the Mac)
 //   POST /notify      the Mac's own notifications, sent through FCM too  (signed by the Mac)
 //   POST /delivered   which calls the relay already notified, so the Mac's catch-up doesn't repeat them (signed)
+//   POST /wake        the phone asks for ARES to be started while she's fully quit (signed by the PHONE's wake key, see below)
+//   POST /wake/status the phone asks whether the ignition helper has polled lately (= the Mac is awake with ARES quit)
+//   POST /helper/poll the ignition helper on the Mac, every ~20 s while ARES is quit (signed by the Mac): takes a pending wake
 //   GET  /health
+//
+// Wake from off (docs/ignition-prompt.md §4d): the Mac registers each phone with a short id and a random WAKE KEY along with its
+// push token. The phone signs POST /wake with that key; the Worker keeps the request in KV for 3 minutes; the helper's next poll
+// takes it and launches ARES. The helper's polls are also its heartbeat (written to KV at most every 4 minutes: the free tier
+// allows 1000 writes a day), so the phone can tell "ARES quit, Mac awake" from "Mac asleep". Nothing else is accepted this way.
 //
 // Secrets (wrangler secret put): ELEVENLABS_WEBHOOK_SECRET, FCM_SERVICE_ACCOUNT (the service-account JSON),
 // RELAY_SECRET (shared with the Mac's .env). KV binding ARES_KV holds only the phone's push token(s) and, for
@@ -78,6 +86,19 @@ async function accessToken(sa) {
 
 async function tokens(env) { return JSON.parse((await env.ARES_KV.get('tokens')) || '[]'); }
 
+/** The phone: "x-ares-id: <device id>", "x-ares-time", "x-ares-sig: <hex hmac of `${time}.${body}` with that device's wake key>". */
+async function phoneSigned(req, body, env) {
+  const id = req.headers.get('x-ares-id') || '';
+  const t = req.headers.get('x-ares-time');
+  if (!/^[0-9a-f]{8,32}$/.test(id) || !t || Math.abs(Date.now() - Number(t)) > 5 * 60_000) return null;
+  const entry = (await tokens(env)).find((x) => x.id === id && x.wake);
+  if (!entry) return null;
+  return same(req.headers.get('x-ares-sig') || '', await hmac(entry.wake, `${t}.${body}`)) ? entry : null;
+}
+const ageSec = (at) => (at ? Math.round((Date.now() - Number(at)) / 1000) : null);
+/** How long ago the helper last polled (seconds), or null. */
+async function helperAge(env) { return ageSec(await env.ARES_KV.get('helper')); }
+
 /** A data message to every registered phone (the app builds the notification itself). Drops dead tokens. */
 async function sendToPhones(env, data, { ttl = 3600 } = {}) {
   const list = await tokens(env);
@@ -145,6 +166,19 @@ export default {
     const body = await req.text();
     if (body.length > 2_000_000) return new Response('Too large', { status: 413 });
 
+    // ---- Wake from off: the phone's side (signed with its own wake key, never the Mac's secret) ----
+    if (url.pathname === '/wake' || url.pathname === '/wake/status') {
+      const phone = await phoneSigned(req, body, env);
+      if (!phone) return new Response('Bad signature', { status: 401 });
+      const helper = await helperAge(env);
+      const pending = await env.ARES_KV.get('wake');
+      if (url.pathname === '/wake/status') return json({ ok: true, helper, pending: Boolean(pending) });
+      // 'helper' null or stale (> 6 min) = the Mac is asleep or has no helper running: say so, but keep the wake for 3 minutes anyway
+      await env.ARES_KV.put('wake', JSON.stringify({ at: Date.now(), device: phone.device, id: phone.id }), { expirationTtl: 180 });
+      console.log('wake requested by', phone.device, 'helper age', helper);
+      return json({ ok: true, helper, awake: helper != null && helper < 6 * 60 });
+    }
+
     if (url.pathname === '/elevenlabs') {
       if (!(await elevenLabsSigned(req, body, env.ELEVENLABS_WEBHOOK_SECRET))) return new Response('Bad signature', { status: 401 });
       const evt = JSON.parse(body);
@@ -164,8 +198,10 @@ export default {
     const msg = JSON.parse(body || '{}');
     if (url.pathname === '/register') {
       if (!/^[\w:.-]{20,4096}$/.test(msg.token || '')) return json({ error: 'bad token' }, 400);
-      const list = (await tokens(env)).filter((t) => t.token !== msg.token && t.device !== msg.device);
-      list.push({ token: msg.token, device: String(msg.device || '').slice(0, 80), at: Date.now() });
+      const list = (await tokens(env)).filter((t) => t.token !== msg.token && t.device !== msg.device && (!msg.id || t.id !== msg.id));
+      const entry = { token: msg.token, device: String(msg.device || '').slice(0, 80), at: Date.now() };
+      if (/^[0-9a-f]{8,32}$/.test(msg.id || '') && /^[0-9a-f]{32,128}$/.test(msg.wake || '')) { entry.id = msg.id; entry.wake = msg.wake; }
+      list.push(entry);
       await env.ARES_KV.put('tokens', JSON.stringify(list.slice(-5)));
       return json({ ok: true, phones: list.length });
     }
@@ -178,6 +214,14 @@ export default {
       const data = { type: 'note', ...msg.data };
       if (JSON.stringify(data).length > 3800) return json({ error: 'too large for a push' }, 413);
       return json({ ok: true, ...(await sendToPhones(env, data, { ttl: Number(msg.ttl) || 3600 })) });
+    }
+    // ---- Wake from off: the helper's side (the Mac's signature) ----
+    if (url.pathname === '/helper/poll') {
+      const last = Number(await env.ARES_KV.get('helper')) || 0;
+      if (Date.now() - last > 4 * 60_000) await env.ARES_KV.put('helper', String(Date.now()), { expirationTtl: 86400 }); // the heartbeat, sparsely
+      const pending = await env.ARES_KV.get('wake');
+      if (pending) { await env.ARES_KV.delete('wake'); console.log('wake handed to the helper'); }
+      return json({ ok: true, wake: pending ? JSON.parse(pending) : null });
     }
     if (url.pathname === '/delivered') {
       const ids = (msg.ids || []).slice(0, 50);

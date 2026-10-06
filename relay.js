@@ -31,7 +31,10 @@ class Relay {
     return out;
   }
 
-  register(token, device) { return this.post('/register', { token, device }); }
+  /** Register a phone: its push token, name and (so a signed wake from it can reach the ignition helper) its id and wake key. */
+  register(token, device, { id, wake } = {}) { return this.post('/register', { token, device, id, wake }); }
+  /** What the ignition helper does every ~20 s while ARES is quit: the heartbeat, and any pending wake. (Here for tests and tools.) */
+  poll() { return this.post('/helper/poll', { at: Date.now() }); }
   unregisterAll() { return this.post('/unregister', { all: true }); }
 
   /** A Mac notification to the Android app over FCM. Returns how many phones got it (0 on failure). */

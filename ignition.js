@@ -9,7 +9,8 @@
 //   <support>/ignition/ares.pid        ARES's pid while it runs (the helper runs only while this pid is dead)
 //   <support>/ignition/geometry.json   the reactor's place on each display (wallpaper.js geometries()), for the helper and the still
 //   <support>/ignition/shutdown.json   { state: 'running' | 'clean', why, at, version, uptime }: how ARES last stopped (the wake line)
-//   <support>/ignition/config.json     what the helper needs: the app to launch, sounds on/off
+//   <support>/ignition/config.json     what the helper needs: the app to launch, sounds on/off, keep the Mac awake on power while off
+//   <support>/ignition/relay.json      (0600) the relay's URL and the Mac's secret, so the helper can poll for a wake from the phone
 const EventEmitter = require('events');
 const net = require('net');
 const fs = require('fs');
@@ -89,8 +90,15 @@ class Ignition extends EventEmitter {
   }
   writeConfig() {
     const s = this.readSettings();
-    const cfg = { app: this.appPath || null, sounds: (s.power || {}).sounds !== false, dev: !this.isPackaged, version: this.version };
+    const cfg = { app: this.appPath || null, sounds: (s.power || {}).sounds !== false, keepAwakeOff: Boolean((s.power || {}).keepAwakeOff), dev: !this.isPackaged, version: this.version };
     try { fs.writeFileSync(path.join(this.dir, 'config.json'), JSON.stringify(cfg)); } catch {}
+    // The relay (wake from off, docs/ignition-prompt.md §4d): the helper signs its polls with the Mac's secret
+    const r = this.relay?.();
+    const file = path.join(this.dir, 'relay.json');
+    try {
+      if (r?.ready) fs.writeFileSync(file, JSON.stringify({ url: r.url, secret: r.secret }), { mode: 0o600 });
+      else fs.rmSync(file, { force: true });
+    } catch {}
   }
   writeGeometry(list) {
     try { fs.writeFileSync(path.join(this.dir, 'geometry.json'), JSON.stringify({ at: Date.now(), displays: list })); } catch {}
