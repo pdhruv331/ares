@@ -18,6 +18,7 @@ const os = require('os');
 
 const COVERED = 0.985; // this much hidden by app windows = nothing worth drawing
 const STILL_EVERY_MS = 60 * 60_000; // with "warmer in the evening" on: re-render at most hourly when the tint changes
+const STILL_VERSION = 2; // bump when the still's drawing changes (docs/ignition-prompt.md §1): a still in use is re-rendered once at start
 
 class Wallpaper extends EventEmitter {
   /**
@@ -65,6 +66,12 @@ class Wallpaper extends EventEmitter {
     powerMonitor.on('on-ac', () => this.refreshModes());
     this.sync();
     this.saverState();
+    // The still's design changed since it was last rendered (a new build): re-render it once she's up, so the ignition helper's
+    // reactor sits exactly over the picture's
+    if (this.opts.lockStill && (this.readSettings().wallpaper?.stillVersion || 0) < STILL_VERSION) {
+      this.save({ stillVersion: STILL_VERSION });
+      setTimeout(() => this.renderStills(), 20_000);
+    }
   }
 
   stop() {

@@ -23,7 +23,15 @@ guard let supportDir = arg("--support") else { FileHandle.standardError.write(Da
 let atLogin = args.contains("--login")
 let dir = URL(fileURLWithPath: supportDir).appendingPathComponent("ignition")
 let resources = Bundle.main.resourceURL ?? URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent()
-func log(_ s: String) { print("\(ISO8601DateFormatter().string(from: Date())) \(s)") }
+func log(_ s: String) {
+  let line = "\(ISO8601DateFormatter().string(from: Date())) \(s)\n"
+  FileHandle.standardError.write(Data(line.utf8))
+  // and <support>/ignition/helper.log (launched by `open` or launchd there's no terminal; kept short)
+  let f = dir.appendingPathComponent("helper.log")
+  if let h = try? FileHandle(forWritingTo: f) { h.seekToEndOfFile(); h.write(Data(line.utf8)); h.closeFile() } else { try? line.write(to: f, atomically: true, encoding: .utf8) }
+  if let size = try? FileManager.default.attributesOfItem(atPath: f.path)[.size] as? Int, size > 200_000 { try? FileManager.default.removeItem(at: f) }
+}
+let windowLevel = Int(arg("--level") ?? "") ?? -1 // (testing: the level the windows sit at; -1 = just below app windows, like the ARES desktop)
 
 // ---- ARES's state ---------------------------------------------------------------------------------------------------------------
 func aresPid() -> pid_t? {
@@ -96,7 +104,7 @@ final class Panel: NSObject, WKScriptMessageHandler {
   init(geo: Geometry, screen: NSScreen, app: Ignition) {
     self.geo = geo; self.app = app
     window = NSWindow(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false, screen: screen)
-    window.level = NSWindow.Level(rawValue: -1) // just below app windows, above the desktop icons: where the ARES desktop window lives (surface.js)
+    window.level = NSWindow.Level(rawValue: windowLevel) // just below app windows, above the desktop icons: where the ARES desktop window lives (surface.js)
     window.isOpaque = false; window.backgroundColor = .clear; window.hasShadow = false
     window.ignoresMouseEvents = true
     window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
@@ -110,15 +118,16 @@ final class Panel: NSObject, WKScriptMessageHandler {
     web.setValue(false, forKey: "drawsBackground")
     web.autoresizingMask = [.width, .height]
     window.contentView = web
-    var comps = URLComponents(url: resources.appendingPathComponent("ignition.html"), resolvingAgainstBaseURL: false)!
-    comps.queryItems = [URLQueryItem(name: "geo", value: "\(Int(geo.cx)),\(Int(geo.cy)),\(Int(geo.r))"), URLQueryItem(name: "mode", value: "ignition"), URLQueryItem(name: "power", value: "cold")]
-    web.loadFileURL(comps.url!, allowingReadAccessTo: resources)
+    // The geometry and the cold start go in as a script at document start (loadFileURL refuses a file URL with a query)
+    let boot = "window.SCENE_GEOMETRY = { cx: \(Int(geo.cx)), cy: \(Int(geo.cy)), r: \(Int(geo.r)) }; window.SCENE_POWER = 'cold'; window.SCENE_IGNITION = true;"
+    cfg.userContentController.addUserScript(WKUserScript(source: boot, injectionTime: .atDocumentStart, forMainFrameOnly: true))
     window.orderFrontRegardless()
+    web.loadFileURL(resources.appendingPathComponent("ignition.html"), allowingReadAccessTo: resources)
   }
   func userContentController(_ c: WKUserContentController, didReceive m: WKScriptMessage) {
     guard let body = m.body as? [String: Any], let type = body["type"] as? String else { return }
     switch type {
-    case "ready": ready = true; for js in queued { web.evaluateJavaScript(js) }; queued.removeAll()
+    case "ready": ready = true; log("page ready (\(geo.cx),\(geo.cy),\(geo.r)) visible=\(window.isVisible) onActiveSpace=\(window.isOnActiveSpace)"); for js in queued { web.evaluateJavaScript(js) }; queued.removeAll()
     case "ignite": app?.ignite(why: "hold")
     case "wake-done": app?.wakeDone()
     case "sound": if let name = body["name"] as? String { app?.play(name, stop: body["stop"] as? Bool ?? false) }
@@ -153,7 +162,8 @@ final class Ignition: NSObject, NSApplicationDelegate {
   var aliveSince: Date?
 
   func applicationDidFinishLaunching(_ n: Notification) {
-    NSApp.setActivationPolicy(.prohibited)
+    log("starting pid \(getpid())")
+    NSApp.setActivationPolicy(.accessory) // (LSUIElement: no Dock, no Cmd-Tab; .prohibited would forbid windows altogether)
     try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     try? "\(getpid())".write(to: dir.appendingPathComponent("helper.pid"), atomically: true, encoding: .utf8)
     // Already running (another helper)? Only one.
