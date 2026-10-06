@@ -196,6 +196,56 @@ class FakeJobs extends EventEmitter {
     real.shutdown();
   }
 
+  // ---- Power routines (docs/ignition-prompt.md §4f): scheduled standby / wake, the 5-minute notice, skip tonight -----------
+  {
+    const acts = [];
+    let mode = 'online';
+    const pa = new Autonomy({
+      jobs, audit, supportDir: support, readSettings: () => ({}), writeSettings: () => {}, log: () => {}, oneShot: async () => '{}',
+      push: async (n) => { pushed.push(n); return 1; }, notice: () => {}, phoneUrl: () => null, cli: '/usr/bin/true',
+      power: (action, why) => { acts.push(action); mode = action === 'standby' ? 'standby' : 'online'; return { ok: true, message: action }; }, powerMode: () => mode,
+    });
+    pa.state.paused = false; pa.state.routines = [];
+    const RealDate = Date;
+    const at = (h, m) => { const d = new RealDate(); d.setHours(h, m, 0, 0); return d.getTime(); };
+    const freeze = (t) => { global.Date = class extends RealDate { constructor(...a) { super(...(a.length ? a : [t])); } static now() { return t; } }; };
+    try {
+      const sb = await pa.handle('routine/create', { title: 'Standby', at: '00:00', action: 'standby' }, owner);
+      check('a standby routine is created without a task', /Standby scheduled: standby at 00:00/.test(sb.message), sb.message);
+      const wk = await pa.handle('routine/create', { title: 'Wake', at: '7:30', action: 'wake' }, owner);
+      check('a wake routine too', /Wake scheduled: wake at 07:30/.test(wk.message), wk.message);
+      const again = await pa.handle('routine/create', { at: '23:30', action: 'standby' }, owner);
+      check('a new standby time replaces the old one', pa.state.routines.filter((r) => r.schedule.kind === 'power' && r.schedule.action === 'standby').length === 1 && /23:30/.test(again.message), again.message);
+      const sched = pa.powerSchedule();
+      check('the schedule for the phone chip has both times', sched.standby === '23:30' && sched.wake === '07:30', JSON.stringify(sched));
+      // 5 minutes before: the notice, once
+      pushed.length = 0;
+      freeze(at(23, 26)); pa.tickRoutines(); pa.tickRoutines();
+      check('five minutes before, one notice with Skip tonight / Standby now', pushed.length === 1 && pushed[0].tag === 'standby-soon' && pushed[0].buttons.some((b) => b.api === '/api/power/skip'), JSON.stringify(pushed[0] || {}));
+      // the hour: standby runs once
+      freeze(at(23, 30)); pa.tickRoutines(); pa.tickRoutines();
+      check('at the time, standby runs once', acts.join(',') === 'standby', acts.join(','));
+      // the wake routine, from standby, next morning
+      freeze(at(7, 31) + 86400000); pa.tickRoutines();
+      check('the wake runs from standby', acts.join(',') === 'standby,wake', acts.join(','));
+      // skip tonight: nothing runs at the hour
+      freeze(at(22, 0) + 86400000); const skip = pa.skipPower('standby');
+      check('skip tonight is remembered', skip.ok && pa.powerSchedule().skipped, skip.message);
+      freeze(at(23, 30) + 86400000); pushed.length = 0; pa.tickRoutines();
+      check('a skipped standby does not run and sends no notice', acts.join(',') === 'standby,wake' && pushed.length === 0, acts.join(','));
+      // the day after, it's back
+      freeze(at(23, 31) + 2 * 86400000); pa.tickRoutines();
+      check('the night after, standby runs again', acts.join(',') === 'standby,wake,standby', acts.join(','));
+      // dormant: a wake routine still ticks, an ordinary routine doesn't
+      mode = 'dormant'; pa.dormant = true;
+      await pa.handle('routine/create', { title: 'Brief', task: 'Brief me', every: 'day', at: '07:30' }, owner);
+      const before = jobs.jobs.length;
+      freeze(at(7, 31) + 3 * 86400000); pa.tickRoutines();
+      check('dormant: the scheduled wake runs, ordinary routines wait', acts.at(-1) === 'wake' && jobs.jobs.length === before, acts.join(','));
+      check('audit records the power routine runs', audit.recent(50).some((e) => /standby on schedule/.test(e.what)));
+    } finally { global.Date = RealDate; }
+  }
+
   fs.rmSync(support, { recursive: true, force: true });
   console.log(failures ? `\n${failures} FAILED` : '\nall passed');
   a.shutdown();

@@ -392,6 +392,8 @@ function powerMenu() {
       { label: 'Auto Standby on Low Battery (15%)', type: 'checkbox', checked: Boolean(a.lowBattery), click: act((item) => power.setAuto({ lowBattery: item.checked })) },
       { label: 'Wake When I\'m Back (unlock, desk mode)', type: 'checkbox', checked: a.wakeOnReturn !== false, click: act((item) => power.setAuto({ wakeOnReturn: item.checked })) },
       { type: 'separator' },
+      { label: 'Keep the Mac Awake on Power While ARES Is Off', type: 'checkbox', checked: Boolean(o.keepAwakeOff), toolTip: 'So the phone can wake her (power adapter only). Off: the Mac sleeps as usual and the phone says so.', click: act((item) => { power.save({ keepAwakeOff: item.checked }); applyReachable(); ignition?.writeConfig(); }) },
+      { type: 'separator' },
       { label: 'Cold Reactor at Login (ignition helper)', type: 'checkbox', enabled: app.isPackaged, checked: Boolean(ignition?.agentOn), click: act((item) => { power.save({ helperAtLogin: item.checked }); ignition.setAgent(item.checked); }) },
     ] },
   ];
@@ -406,12 +408,33 @@ async function finishWake() {
   ignition.setReady(line ? { text: line.shown, spoken: mode === 'spoken' && !silent ? line.spoken : null } : null);
   if (power.mode === 'charging') setTimeout(() => power.setOnline('fallback'), 7000); // (if the window never reports its wake)
 }
+/** The power state as the phone sees it (docs/ignition-prompt.md §4d): the mode, the standby status line, the scheduled standby/wake. */
+function powerView(why) {
+  if (!power) return null;
+  const mode = power.mode === 'tostandby' ? 'standby' : power.mode === 'fromstandby' ? 'online' : power.mode;
+  const v = { mode, status: power.status(), schedule: autonomy?.powerSchedule?.() || null, since: power.dormantSince || null, keepAwakeOff: Boolean(power.opts.keepAwakeOff) };
+  if (mode === 'charging') v.steps = ignition.state().steps;
+  if (why) v.why = why;
+  return v;
+}
+/** Standby / wake / power down / toggle / skip (tonight's scheduled standby), from the phone or a power routine. */
+function powerAct(action, why) {
+  if (!power) return { ok: false, message: 'Power control is not running.' };
+  switch (action) {
+    case 'standby': return power.standby(true, why) ? { ok: true, message: 'Standing by.' } : { ok: false, message: power.mode === 'standby' ? 'Already standing by.' : `Can't stand by while ${power.mode}.` };
+    case 'wake': return power.wake(why) ? { ok: true, message: power.mode === 'charging' ? 'Igniting.' : 'Awake.' } : { ok: false, message: power.mode === 'online' ? 'Already awake.' : `Can't wake while ${power.mode}.` };
+    case 'toggle': return power.toggle(why) ? { ok: true } : { ok: false, message: `Can't change while ${power.mode}.` };
+    case 'powerdown': { const line = power.powerDown(why); return line ? { ok: true, message: line } : { ok: false, message: power.mode === 'dormant' ? 'Already powered down.' : `Can't power down while ${power.mode}.` }; }
+    case 'skip': return autonomy?.skipPower ? autonomy.skipPower('standby') : { ok: false, message: 'No scheduled standby.' };
+    default: return { ok: false, message: 'standby, wake, powerdown, toggle or skip' };
+  }
+}
 /** Dormant (power.js): everything but the window, the theme bar, the tray and the backdrop stops. Never the microphone or the camera. */
 async function sleepServices() {
   const stop = (name, fn) => { try { fn(); } catch (err) { log('dormant: stop failed', { name, error: err.message }); } };
   stop('listener', () => listener?.stop());
   stop('vision', () => vision?.stop());
-  stop('phone', () => phone?.stop());
+  stop('phone', () => phone?.setCold(true)); // the server stays up: the phone sees the state and can wake her (docs/ignition-prompt.md §4d)
   stop('remote', () => remote?.stop());
   stop('calls', () => calls?.stop());
   stop('voicemail', () => voicemail?.stop());
@@ -437,7 +460,7 @@ async function wakeServices() {
   desk?.hold(false);
   listener.start();
   setTimeout(() => ignition.step('ears', listener.ready || listener.child ? 'ok' : 'fail', listener.ready ? 'wake word' : listener.child ? 'starting' : 'listener missing'), 1200);
-  step('link', () => { phone?.start(); startRemote(); calls.start().catch((err) => log('calls start failed', err.message)); voicemail.start(); return `phone :${PHONE_PORT}${relay?.ready ? ' · relay' : ''}`; });
+  step('link', () => { if (phone?.server) phone.setCold(false); else phone?.start(); startRemote(); calls.start().catch((err) => log('calls start failed', err.message)); voicemail.start(); return `phone :${PHONE_PORT}${relay?.ready ? ' · relay' : ''}`; });
   dashboard.start(); calendar.start(); tasks.start().catch((err) => log('tasks start failed', err.message)); customPanels.start();
   if (autonomy) autonomy.dormant = false;
   if (vision?.opts?.enabled) { try { vision.start(); } catch {} }
@@ -914,7 +937,9 @@ async function transcribe(audio, type = 'audio/ogg') {
 let keepAwake = null;
 /** Section R: stay reachable from the phone. No idle sleep while ARES runs on power (a setting, default on); battery sleeps as usual. */
 function applyReachable() {
-  const want = readSettings().stayReachable !== false && !powerMonitor.isOnBatteryPower();
+  // Dormant ("ARES is off" to the user): only if "Keep the Mac Awake on Power While ARES Is Off" is on (default off), like the helper
+  const off = power?.mode === 'dormant' || power?.mode === 'spindown';
+  const want = (off ? Boolean(power.opts.keepAwakeOff) : readSettings().stayReachable !== false) && !powerMonitor.isOnBatteryPower();
   if (want && keepAwake == null) { keepAwake = powerSaveBlocker.start('prevent-app-suspension'); log('stay reachable', { on: true }); }
   if (!want && keepAwake != null) { powerSaveBlocker.stop(keepAwake); keepAwake = null; log('stay reachable', { on: false, battery: powerMonitor.isOnBatteryPower() }); }
 }
@@ -1181,14 +1206,19 @@ function startPhone() {
     fileFor: (id) => control?.fileFor(id),
     status: phoneStatus,
     autonomy: () => autonomy,
+    power: powerView,
+    powerAct,
+    relayInfo: (d) => (relay.ready ? { url: relay.url, id: phone.deviceId(d), key: phone.wakeKey(d) } : null),
     log,
   });
+  // The relay knows each phone by its id, push token and wake key (so a signed wake from the phone can reach the ignition helper)
+  const registerPhone = (d) => relay.register(d.fcm, d.name, { id: phone.deviceId(d), wake: phone.wakeKey(d) }).then((r) => log('relay registered', { phones: r.phones }), (err) => log('relay register failed', err.message));
   phone.on('fcm', (d) => {
     if (!relay.ready) return log('relay not set up: fcm token kept for later');
-    relay.register(d.fcm, d.name).then((r) => log('relay registered', { phones: r.phones }), (err) => log('relay register failed', err.message));
+    registerPhone(d);
   });
   // Tokens the Mac already knows (e.g. the relay was set up after pairing): make sure the relay has them
-  if (relay.ready) for (const d of phone.devices.filter((x) => x.fcm)) relay.register(d.fcm, d.name).catch((err) => log('relay register failed', err.message));
+  if (relay.ready) for (const d of phone.devices.filter((x) => x.fcm)) registerPhone(d);
   phone.on('paired', (d) => {
     refreshTray();
     notice(`Phone paired (${d.name}). You can reach me from the ARES app now, sir.`);
@@ -2214,7 +2244,7 @@ app.whenReady().then(async () => {
     appPath: app.isPackaged ? path.resolve(process.resourcesPath, '..', '..') : null,
   });
   ignition.start();
-  ignition.on('step', (s) => { win?.webContents.send('power', { type: 'step', step: s }); wallpaper?.scene({ type: 'power-step', step: s }); });
+  ignition.on('step', (s) => { win?.webContents.send('power', { type: 'step', step: s }); wallpaper?.scene({ type: 'power-step', step: s }); if (power?.mode === 'charging') phone?.broadcast({ type: 'power-step', step: s }); });
   ignition.on('ready', ({ line }) => { win?.webContents.send('power', { type: 'ready', line }); wallpaper?.scene({ type: 'power-ready' }); });
   ignition.on('handover', () => { // the bloom: the window and the backdrop fade in (the helper fades out on the same curve)
     win?.webContents.send('power', { type: 'handover' });
@@ -2349,7 +2379,8 @@ app.whenReady().then(async () => {
   await startWork();
   control.workDir = jobs?.dir; // a job's files may be sent to the phone too
   autonomy = new Autonomy({ jobs, audit: control.audit, supportDir: app.getPath('userData'), readSettings, writeSettings, log, oneShot: claude.oneShot,
-    push: (n) => pushToPhones(n), notice: (line) => notice(line), phoneUrl: () => phoneUrl, cli: claude.CLI });
+    push: (n) => pushToPhones(n), notice: (line) => notice(line), phoneUrl: () => phoneUrl, cli: claude.CLI,
+    power: (action, why) => powerAct(action, why), powerMode: () => power?.mode || 'online' });
   autonomy.on('change', () => { const v = autonomy.view(); win?.webContents.send('autonomy-change', v); phone?.broadcast({ type: 'autonomy', state: v }); refreshTray(); });
   autonomy.on('paused', ({ why, paused }) => { theme?.toast({ kind: 'needs', label: 'PAUSED', tag: 'AUTONOMY', value: 'Everything on hold', detail: paused.join(', ') || why, urgent: true }); pushToPhones({ title: 'ARES: everything paused', body: paused.length ? paused.join(', ') : `Kill switch (${why}).`, tag: 'autonomy-paused', buttons: [{ title: 'Resume all', api: '/api/autonomy/resume', body: {} }] }).catch(() => {}); });
   claudeUsage.on('warn', (w) => autonomy.usage(w.pct));
@@ -2414,9 +2445,10 @@ app.whenReady().then(async () => {
     wallpaper?.scene({ type: 'power', mode: c.mode === 'dormant' ? 'offline' : c.mode, status: c.status }); // (the backdrop's controller knows offline, not dormant)
     wallpaper?.setPower(c.mode, c.status);
     theme?.power(c.mode);
-    phone?.broadcast({ type: 'power', mode: c.mode === 'tostandby' ? 'standby' : c.mode === 'fromstandby' ? 'online' : c.mode, status: c.status });
+    phone?.broadcast({ type: 'power', ...powerView(c.why) });
     if (c.mode === 'standby' || c.mode === 'online') notice(c.mode === 'standby' ? `Standing by (${c.why}).` : c.why.startsWith('auto') ? `Awake again (${c.why}).` : '');
-    if (c.mode === 'dormant') { applyReachable(); dashboard?.setVisible(false); }
+    if (c.mode === 'dormant' || c.mode === 'charging') applyReachable(); // (dormant has its own keep-awake setting)
+    if (c.mode === 'dormant') dashboard?.setVisible(false);
     refreshTray();
   });
   power.on('step', (s) => win?.webContents.send('power', { type: 'step', step: s, reverse: true }));

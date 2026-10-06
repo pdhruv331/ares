@@ -353,6 +353,7 @@ class Autonomy extends EventEmitter {
   }
   describeSchedule(s) {
     if (!s) return '?';
+    if (s.kind === 'power') return `${s.action === 'wake' ? 'wake' : 'standby'} at ${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}${s.days ? ` (${s.days.map((d) => DAY_NAMES[d]).join(', ')})` : ''}`;
     if (s.kind === 'event') return s.event === 'unlock' ? 'when the Mac is unlocked' : 'when the Mac wakes';
     if (s.kind === 'interval') return s.minutes % 60 === 0 ? `every ${s.minutes / 60} hour${s.minutes > 60 ? 's' : ''}` : `every ${s.minutes} minutes`;
     const t = `${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}`;
@@ -364,6 +365,14 @@ class Autonomy extends EventEmitter {
     const s = r.schedule;
     if (!r.enabled || !s || s.kind === 'event') return null;
     const now = Date.now();
+    if (s.kind === 'power') {
+      const d = new Date(); d.setSeconds(0, 0);
+      for (let i = 0; i < 8; i++) {
+        const c = new Date(d); c.setDate(d.getDate() + i); c.setHours(s.hour, s.minute, 0, 0);
+        if (c.getTime() > now && (!s.days || s.days.includes(c.getDay()))) return c.getTime();
+      }
+      return null;
+    }
     if (s.kind === 'interval') return (r.lastRun || now) + s.minutes * 60_000 - (r.lastRun ? 0 : 0);
     const d = new Date(); d.setSeconds(0, 0);
     for (let i = 0; i < 8; i++) {
@@ -372,8 +381,24 @@ class Autonomy extends EventEmitter {
     }
     return null;
   }
-  createRoutine({ title, task, every, at, days, on, source }, ctx) {
+  createRoutine({ title, task, every, at, days, on, source, action }, ctx) {
     const owner = this.owner(ctx); if (owner) return owner;
+    // A POWER routine (docs/ignition-prompt.md §4f): "stand by at midnight", "wake me at 7:30". No worker runs: power.js acts at the time.
+    if (action) {
+      const act = String(action).toLowerCase();
+      if (!['standby', 'wake'].includes(act)) throw new Error('action: standby or wake');
+      if (!at) throw new Error(`a time for the ${act}`);
+      const s = this.parseSchedule({ every: every || 'day', at, days });
+      if (s.kind !== 'daily') throw new Error('a power routine needs a time of day');
+      // One per action: a new time replaces the old
+      this.state.routines = this.state.routines.filter((r) => r.schedule?.kind !== 'power' || r.schedule.action !== act);
+      const r = { id: `r-${crypto.randomBytes(3).toString('hex')}`, title: String(title || (act === 'wake' ? 'Wake' : 'Standby')).slice(0, 60), task: '', schedule: { ...s, kind: 'power', action: act }, enabled: true, created: Date.now(), lastRun: null, runs: [], source: source || ctx.source || 'mac' };
+      this.state.routines.push(r);
+      this.save();
+      this.audit.record({ what: `power routine: ${this.describeSchedule(r.schedule)}`, tier: 2, kind: 'routine', source: r.source, approval: 'tier 2' });
+      this.emit('change');
+      return { message: `${act === 'wake' ? 'Wake' : 'Standby'} scheduled: ${this.describeSchedule(r.schedule)} [${r.id}]${act === 'standby' ? '. Five minutes before, the phone gets a notice with Skip tonight.' : '.'}` };
+    }
     if (!title || !task) throw new Error('a routine needs a title and what to do');
     const schedule = this.parseSchedule({ every, at, days, on });
     // An interval routine's first run is one interval from now, not this instant
@@ -402,10 +427,20 @@ class Autonomy extends EventEmitter {
     if (act === 'on' || act === 'enable') { r.enabled = true; this.save(); return { message: `"${r.title}" is on; next ${this.nextRun(r) ? when(this.nextRun(r)) : this.describeSchedule(r.schedule)}.` }; }
     if (act === 'off' || act === 'disable') { r.enabled = false; this.save(); return { message: `"${r.title}" is off.` }; }
     if (act === 'delete' || act === 'remove') { this.state.routines = this.state.routines.filter((x) => x !== r); this.save(); this.audit.record({ what: `routine deleted: "${r.title}"`, tier: 2, kind: 'routine', source: ctx.source, approval: 'tier 2' }); return { message: `Deleted "${r.title}".` }; }
-    if (act === 'run' || act === 'now') { const job = this.runRoutine(r, 'asked'); return { message: job ? `Running "${r.title}" now [${job.id}].` : 'It couldn\'t start (paused, or the day\'s run limit is used up).' }; }
+    if (act === 'run' || act === 'now') { const job = this.runRoutine(r, 'asked'); return { message: !job ? 'It couldn\'t start (paused, or the day\'s run limit is used up).' : job.power ? `${r.title}: ${job.message}` : `Running "${r.title}" now [${job.id}].` }; }
     throw new Error('action: on, off, run or delete');
   }
   runRoutine(r, why = 'scheduled') {
+    if (r.schedule?.kind === 'power') {
+      // Standby / wake at the time: never while everything is paused by the kill switch (a wake is harmless, a standby is not)
+      if (this.state.paused && r.schedule.action === 'standby') return null;
+      r.lastRun = Date.now(); r.warnedFor = null; this.save();
+      const out = this.power ? this.power(r.schedule.action, `routine "${r.title}"`) : { ok: false, message: 'no power control' };
+      this.log('power routine', { id: r.id, action: r.schedule.action, why, ...out });
+      this.audit.record({ what: `${r.schedule.action} on schedule (${r.title})`, tier: 1, kind: 'power', source: 'routine', detail: out.message || '' });
+      this.emit('change');
+      return { power: true, ...out };
+    }
     if (this.state.paused) return null;
     if (why === 'scheduled' && this.runsLeft() <= 0) { this.log('routine held', { id: r.id, why: 'runs per day' }); return null; }
     const job = this.jobs.start({ title: r.title, task: `${r.task}\n\n(This is the routine "${r.title}", run ${why === 'scheduled' ? 'on its schedule' : 'on request'} on ${new Date().toLocaleString('en-GB')}. The user may be away: the result goes to their phone, so make it self-contained.)`, size: 'small', source: 'routine', routineId: r.id });
@@ -417,10 +452,12 @@ class Autonomy extends EventEmitter {
     return job;
   }
   tickRoutines() {
-    if (this.state.paused || this.dormant) return; // (dormant: power.js)
+    if (this.state.paused) return;
     const now = Date.now();
     for (const r of this.state.routines) {
       if (!r.enabled || r.schedule.kind === 'event') continue;
+      if (r.schedule.kind === 'power') { this.tickPower(r, now); continue; }
+      if (this.dormant) continue; // (dormant: power.js; only the power routines keep ticking, so a scheduled wake happens)
       const due = r.schedule.kind === 'interval' ? !r.lastRun || now - r.lastRun >= r.schedule.minutes * 60_000 : (() => {
         const d = new Date(); const s = r.schedule;
         if (s.days && !s.days.includes(d.getDay())) return false;
@@ -429,6 +466,53 @@ class Autonomy extends EventEmitter {
       })();
       if (due) this.runRoutine(r, 'scheduled');
     }
+  }
+  /** Today's slot of a daily/power routine (ms), or null when today isn't one of its days. */
+  slotToday(s, d = new Date()) {
+    if (s.days && !s.days.includes(d.getDay())) return null;
+    const t = new Date(d); t.setHours(s.hour, s.minute, 0, 0);
+    return t.getTime();
+  }
+  /** A power routine: the 5-minute notice to the phone (standby only, with Skip tonight / Standby now), then the act, once per slot. */
+  tickPower(r, now) {
+    const target = this.slotToday(r.schedule);
+    if (target == null) return;
+    if (r.skipUntil && now < r.skipUntil && target < r.skipUntil) return; // skipped tonight
+    const mode = this.powerMode?.() || 'online';
+    if (r.schedule.action === 'standby' && now >= target - 5 * 60_000 && now < target && r.warnedFor !== target && mode === 'online') {
+      r.warnedFor = target; this.save();
+      const jobs = (this.jobs.running || []).filter((j) => j.status === 'running').length;
+      this.push?.({ title: 'Standing by in 5 min', body: `${jobs ? `${jobs} job${jobs === 1 ? '' : 's'} keep${jobs === 1 ? 's' : ''} running` : 'Nothing running'} · the phone link stays up`, tag: 'standby-soon',
+        buttons: [{ title: 'Skip tonight', api: '/api/power/skip', body: {} }, { title: 'Standby now', api: '/api/power/standby', body: {} }] }).catch?.(() => {});
+    }
+    if (now >= target && now - target < 10 * 60_000 && (!r.lastRun || r.lastRun < target)) {
+      // Standby only from online; wake from standby or dormant (otherwise there's nothing to do, and it counts as done)
+      const fits = r.schedule.action === 'standby' ? mode === 'online' : mode === 'standby' || mode === 'dormant';
+      if (fits) this.runRoutine(r, 'scheduled'); else { r.lastRun = now; this.save(); }
+    }
+  }
+  /** The next scheduled standby and wake, for the phone's chip and the ◉ menu: { standby: 'HH:MM'|null, wake, standbyAt, wakeAt, skipped }. */
+  powerSchedule() {
+    const out = { standby: null, wake: null, standbyAt: null, wakeAt: null, skipped: false };
+    for (const r of this.state.routines) {
+      if (!r.enabled || r.schedule?.kind !== 'power') continue;
+      const next = this.nextRun(r);
+      const hhmm = `${String(r.schedule.hour).padStart(2, '0')}:${String(r.schedule.minute).padStart(2, '0')}`;
+      if (r.schedule.action === 'standby') { out.standby = hhmm; out.standbyAt = next; out.skipped = Boolean(r.skipUntil && Date.now() < r.skipUntil); }
+      else { out.wake = hhmm; out.wakeAt = next; }
+    }
+    return out.standby || out.wake ? out : null;
+  }
+  /** "Skip tonight": the next scheduled standby (or wake) is left out, once. */
+  skipPower(action = 'standby') {
+    const r = this.state.routines.find((x) => x.enabled && x.schedule?.kind === 'power' && x.schedule.action === action);
+    if (!r) return { ok: false, message: `No scheduled ${action}.` };
+    const next = this.nextRun(r);
+    if (!next) return { ok: false, message: `No upcoming ${action}.` };
+    r.skipUntil = next + 60_000; r.warnedFor = next; this.save();
+    this.audit.record({ what: `scheduled ${action} skipped once`, tier: 1, kind: 'power', source: 'phone' });
+    this.emit('change');
+    return { ok: true, message: `Skipping tonight's ${action} (${this.describeSchedule(r.schedule)}).` };
   }
   /** Mac events (unlock, wake): the routines waiting on them. */
   event(name) {

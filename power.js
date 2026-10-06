@@ -17,7 +17,7 @@ const EventEmitter = require('events');
 const TICK_MS = 30_000;
 const SPINDOWN_MIN_MS = 3900;  // the animation's length (renderer/ignite.js TIMING.spindown)
 const SPINDOWN_CAP_MS = 25_000; // memory consolidation's cap at quit (main.js)
-const DEFAULTS = { auto: { lock: false, idleMin: 0, nightHour: null, lowBattery: false, wakeOnReturn: true }, sounds: true, wakeLine: 'spoken', helperAtLogin: true };
+const DEFAULTS = { auto: { lock: false, idleMin: 0, nightHour: null, lowBattery: false, wakeOnReturn: true }, sounds: true, wakeLine: 'spoken', helperAtLogin: true, keepAwakeOff: false };
 
 class Power extends EventEmitter {
   /**
@@ -150,7 +150,7 @@ class Power extends EventEmitter {
       } else step('memory', 'ok', 'nothing new');
       // 3. phone notified
       step('phone', 'start');
-      try { this.phone?.({ type: 'power', mode: 'offline', why }); step('phone', 'ok', this.linkAlive() ? 'told' : 'not connected'); } catch (err) { step('phone', 'fail', err.message); }
+      try { this.phone?.({ type: 'power', mode: 'spindown', status: this.status(), why, note: 'phone told' }); step('phone', 'ok', this.linkAlive() ? 'told' : 'not connected'); } catch (err) { step('phone', 'fail', err.message); }
       // 4. ears closed, 5. voice off
       step('ears', 'start'); try { this.closeEars?.(); step('ears', 'ok', 'closed'); } catch (err) { step('ears', 'fail', err.message); }
       step('voice', 'start'); try { this.voiceOff?.(); step('voice', 'ok', 'off'); } catch (err) { step('voice', 'fail', err.message); }

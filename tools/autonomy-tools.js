@@ -39,12 +39,14 @@ function register({ tool, bridge }) {
   tool('create_routine',
     'A ROUTINE: a task ARES runs by itself on a schedule or on an event ("every weekday at 8, brief me on my day", "every Friday, summarise '
     + 'what I worked on", "when the Mac wakes, check for important email"). Each run is a background job whose result goes to the phone. '
+    + 'With `action`, a power routine: a scheduled standby or wake ("stand by at midnight, wake me at 7:30" = two calls). '
     + 'Only when the user asks for one, or says yes to your offer: never on your own.',
     {
-      title: z.string(), task: z.string().describe('A complete brief for the worker, every time it runs'),
+      title: z.string(), task: z.string().optional().describe('A complete brief for the worker, every time it runs (not needed for a power routine)'),
       every: z.string().optional().describe('"day", "weekday", "weekend", "week", a day name, "hour", or "30 minutes"'),
       at: z.string().optional().describe('Time of day, "08:00" or "6pm"'), days: z.array(z.string()).optional().describe('Day names, e.g. ["mon","wed"]'),
       on: z.enum(['unlock', 'wake']).optional().describe('Run on an event instead of a time'),
+      action: z.enum(['standby', 'wake']).optional().describe('A POWER routine instead of a task: put ARES in standby ("stand by at midnight") or wake her ("wake me at 7:30") at `at`, daily (or on `days`). No worker runs; task may be empty. One per action: a new time replaces the old.'),
     },
     async (a) => (await auto('routine/create', a)).message);
   tool('list_routines', 'The user\'s routines: on/off, schedule, last and next run.', {}, async () => (await auto('routine/list', {})).message);

@@ -21,6 +21,8 @@ const FILE_TYPES = {
 // Worker-made pages run their scripts in an opaque origin: no network, no cookies, no way into the app
 const MINI_APP_CSP = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'; base-uri 'none'; frame-ancestors 'self'";
 const PAGE_CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; img-src 'self' data: blob:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+// What answers while ARES is dormant (everything else says she's powered down)
+const COLD_OK = new Set(['/api/status', '/api/me', '/api/events', '/api/app', '/api/app/apk', '/api/push/fcm']);
 const MAX_UPLOADS = 5;
 const UPLOAD_LIMIT = 60e6; // base64 JSON: about 40 MB of files
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
@@ -41,11 +43,16 @@ class PhoneServer extends EventEmitter {
    * @param {() => object|null} o.firebase  Firebase options for the Android app's push (relay.js)
    * @param {(id: string) => object|null} [o.fileFor]  a file sent to the phone (control.js): { path, name, mime, size }
    * @param {() => object|null} [o.autonomy]  autonomy.js: projects, goals, routines, the kill switch
+   * @param {() => object|null} [o.power]  the Mac's power state for the phone (main.js powerView): { mode, status, schedule, … }
+   * @param {(action: string, why: string) => {ok: boolean, message?: string}} [o.powerAct]  standby | wake | powerdown | toggle | skip
+   * @param {(device: object) => object|null} [o.relayInfo]  { url, id, key }: how this phone may ask the relay to wake a fully quit ARES
    * @param {Function} o.log
    */
   constructor(o) {
     super();
     Object.assign(this, o);
+    // Dormant (power.js): the server stays up so the phone can see the state and wake her, but only the cold routes answer
+    this.cold = false;
     this.code = null;
     this.attempts = 0;
     this.listeners = new Set(); // apps holding /api/events open: { hash, native, send }
@@ -87,7 +94,18 @@ class PhoneServer extends EventEmitter {
     });
   }
 
-  stop() { this.server?.close(); fs.unwatchFile(this.appFile); }
+  stop() { this.server?.close(); this.server = null; fs.unwatchFile(this.appFile); }
+  /** Power down = dormant: keep listening (the live lines stay open for the state), answer only the cold routes. */
+  setCold(on) { this.cold = Boolean(on); }
+
+  /** A short id for a paired phone (what the relay knows it by) and its wake key (made once, kept with the device). */
+  deviceId(d) { return d.hash.slice(0, 16); }
+  wakeKey(d) {
+    if (d.wake) return d.wake;
+    const wake = crypto.randomBytes(32).toString('hex');
+    this.writeSettings({ phoneDevices: this.devices.map((x) => (x.hash === d.hash ? { ...x, wake } : x)) });
+    return wake;
+  }
 
   get appFile() { return path.join(this.apkDir, 'ARES.json'); }
   /** The latest Android build on this Mac: { versionCode, versionName, sha256, size }, or null. */
@@ -177,6 +195,11 @@ class PhoneServer extends EventEmitter {
     if (!url.pathname.startsWith('/api/')) return res.writeHead(404).end();
     if (!this.authed(req)) return json(401, { ok: false, error: 'not paired' });
 
+    // Power from the phone (docs/ignition-prompt.md §4d): the state, and standby / wake / power down over this channel.
+    // Works while dormant too: that's how the orb hold wakes her without the relay.
+    if (url.pathname === '/api/power' || url.pathname.startsWith('/api/power/')) return this.powerRoute(req, res, url, json);
+    if (this.cold && !COLD_OK.has(url.pathname)) return json(503, { ok: false, error: 'ARES is powered down. Hold the orb to wake her.', cold: true });
+
     // The phone's corner readouts: host, battery, Claude windows (control.js has the fuller system_info tool)
     if (req.method === 'GET' && url.pathname === '/api/status') return json(200, { ok: true, ...(await (this.status?.() ?? {})) });
     if (req.method === 'GET' && url.pathname === '/api/me') {
@@ -213,7 +236,7 @@ class PhoneServer extends EventEmitter {
       const l = { hash: me.hash, native: !url.searchParams.has('web'), send: (m) => res.write(JSON.stringify(m) + '\n'), end: () => res.end() };
       const ping = setInterval(() => l.send({ type: 'ping' }), 25000);
       this.listeners.add(l);
-      l.send({ type: 'hello', name: me.name, app: this.appInfo(), firebase: this.firebase?.() || null, fcm: Boolean(me.fcm) });
+      l.send({ type: 'hello', name: me.name, app: this.appInfo(), firebase: this.firebase?.() || null, fcm: Boolean(me.fcm), power: this.power?.() || null, relay: this.relayInfo?.(me) || null });
       this.log('phone events open', { name: me.name, open: this.listeners.size });
       req.on('close', () => { clearInterval(ping); this.listeners.delete(l); });
       return;
@@ -268,6 +291,19 @@ class PhoneServer extends EventEmitter {
     }
 
     return res.writeHead(404).end();
+  }
+
+  // ---- Power: standby, wake, power down from the phone (a paired phone is the owner; the app confirms power down itself) ------
+  async powerRoute(req, res, url, json) {
+    if (req.method === 'GET') return json(200, { ok: true, ...(this.power?.() || { mode: 'unknown' }) });
+    if (req.method !== 'POST') return json(405, { ok: false });
+    const b = JSON.parse((await this.body(req, 4096)).toString() || '{}');
+    const action = String(url.pathname.split('/')[3] || b.action || '').toLowerCase();
+    if (!['standby', 'wake', 'powerdown', 'toggle', 'skip'].includes(action)) return json(404, { ok: false, error: 'standby, wake, powerdown, toggle or skip' });
+    const me = this.device(req);
+    this.log('phone power', { action, device: me.name });
+    const r = this.powerAct ? this.powerAct(action, `phone (${me.name})`) : { ok: false, message: 'power control is not running' };
+    return json(r.ok ? 200 : 409, { ok: r.ok, message: r.message || '', ...(this.power?.() || {}) });
   }
 
   // ---- Autonomy: projects, goals, routines and the kill switch, from the phone (a paired phone is the owner) -------------
