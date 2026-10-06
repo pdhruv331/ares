@@ -1,7 +1,10 @@
 // ares-ignition: "ARES Ignition.app" (docs/ignition-prompt.md §2, §3). While ARES is quit, the desktop shows the offline still; this
 // small native app sits over the still's reactor on every display with a transparent, click-through window and draws the SAME cold
 // reactor (renderer/reactor.js + renderer/ignite.js in a WKWebView), so hovering warms it, holding it charges it, and the handover to
-// the live ARES is seamless. ~0% CPU at rest (the page draws at 4 fps while cold), no microphone, no network, not in the Dock.
+// the live ARES is seamless. ~0% CPU at rest (the page draws at 4 fps while cold), no microphone, not in the Dock. Its ONE network
+// use (docs/ignition-prompt.md §4d): while ARES is quit it polls the ARES relay every 20 s (outbound, signed with the Mac's secret
+// from ignition/relay.json) for a wake the paired phone asked for, and ignites on one. No ports, nothing else accepted.
+// With config.json "keepAwakeOff" it also holds a no-idle-sleep assertion while on the power adapter, so that wake can arrive.
 //
 //   ares-ignition --support <ARES support folder> [--login]
 //
@@ -11,9 +14,12 @@
 // to the page; on "handover" fade out and exit.
 //
 // Files it reads (all written by ARES, ignition.js): ignition/ares.pid, ignition/geometry.json (the reactor's place per display),
-// ignition/config.json ({ app, sounds }). It writes ignition/helper.pid while it runs.
+// ignition/config.json ({ app, sounds, keepAwakeOff }), ignition/relay.json ({ url, secret }). It writes ignition/helper.pid while it runs.
 import AppKit
 import Carbon.HIToolbox
+import CryptoKit
+import IOKit.ps
+import IOKit.pwr_mgt
 import WebKit
 
 setvbuf(stdout, nil, _IOLBF, 0)
@@ -50,6 +56,16 @@ func geometries() -> [Geometry] {
 func config() -> [String: Any] {
   guard let data = try? Data(contentsOf: dir.appendingPathComponent("config.json")), let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
   return json
+}
+/** The relay (relay.js on the Mac, relay/worker.js on Cloudflare): where to poll for a wake from the phone, and the Mac's signing secret. */
+func relayConfig() -> (url: String, secret: String)? {
+  guard let data = try? Data(contentsOf: dir.appendingPathComponent("relay.json")), let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let url = json["url"] as? String, let secret = json["secret"] as? String, !url.isEmpty, !secret.isEmpty else { return nil }
+  return (url, secret)
+}
+func onACPower() -> Bool {
+  guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(), let type = IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() else { return true }
+  return (type as String) == kIOPMACPowerKey
 }
 
 // ---- The socket to ARES ----------------------------------------------------------------------------------------------------------
@@ -160,6 +176,9 @@ final class Ignition: NSObject, NSApplicationDelegate {
   var mouseMonitor: Any?
   var launchedAt: Date?
   var aliveSince: Date?
+  var polling = false
+  var relayFailures = 0
+  var assertion: IOPMAssertionID = 0
 
   func applicationDidFinishLaunching(_ n: Notification) {
     log("starting pid \(getpid())")
@@ -174,10 +193,57 @@ final class Ignition: NSObject, NSApplicationDelegate {
     mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] e in self?.mouse(e); return e }
     Timer.scheduledTimer(withTimeInterval: 1.0 / 15, repeats: true) { [weak self] _ in self?.pollPointer() }
     Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in self?.pollAres() }
+    // Wake from the phone while ARES is quit: one outbound poll of the relay every 20 s (its heartbeat tells the phone the Mac is awake)
+    Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in self?.pollRelay() }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.pollRelay() }
+    Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.applyKeepAwake() }
+    applyKeepAwake()
     NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in self?.buildPanels() }
     log("up: \(panels.count) display(s), login=\(atLogin)")
   }
-  func applicationWillTerminate(_ n: Notification) { try? FileManager.default.removeItem(at: dir.appendingPathComponent("helper.pid")); unregisterHotKey() }
+  func applicationWillTerminate(_ n: Notification) { try? FileManager.default.removeItem(at: dir.appendingPathComponent("helper.pid")); unregisterHotKey(); releaseKeepAwake() }
+
+  // ---- The relay: a wake asked for from the phone (docs/ignition-prompt.md §4d) ------------------------------------------------------------
+  func pollRelay() {
+    guard !polling, !igniting, aresPid() == nil, let relay = relayConfig(), let url = URL(string: relay.url + "/helper/poll") else { return }
+    polling = true
+    let body = "{\"at\":\(Int(Date().timeIntervalSince1970 * 1000))}"
+    let time = String(Int(Date().timeIntervalSince1970 * 1000))
+    let mac = HMAC<SHA256>.authenticationCode(for: Data("\(time).\(body)".utf8), using: SymmetricKey(data: Data(relay.secret.utf8)))
+    var req = URLRequest(url: url, timeoutInterval: 15)
+    req.httpMethod = "POST"
+    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    req.setValue(time, forHTTPHeaderField: "x-ares-time")
+    req.setValue(mac.map { String(format: "%02x", $0) }.joined(), forHTTPHeaderField: "x-ares-sig")
+    req.httpBody = Data(body.utf8)
+    URLSession.shared.dataTask(with: req) { [weak self] data, res, err in
+      DispatchQueue.main.async {
+        guard let self = self else { return }
+        self.polling = false
+        guard err == nil, let data = data, (res as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+          self.relayFailures += 1
+          if self.relayFailures == 1 || self.relayFailures % 30 == 0 { log("relay poll failed (\(self.relayFailures)): \(err?.localizedDescription ?? "HTTP \((res as? HTTPURLResponse)?.statusCode ?? 0)")") }
+          return
+        }
+        if self.relayFailures > 0 { log("relay reachable again"); self.relayFailures = 0 }
+        if let wake = json["wake"] as? [String: Any] {
+          log("wake from the phone (\(wake["device"] as? String ?? "?"))")
+          self.ignite(why: "phone")
+        }
+      }
+    }.resume()
+  }
+
+  // ---- "Keep the Mac awake on power while ARES is off" (config.json keepAwakeOff; the power adapter only) ---------------------------------
+  func applyKeepAwake() {
+    let want = (config()["keepAwakeOff"] as? Bool) == true && onACPower() && aresPid() == nil
+    if want && assertion == 0 {
+      var id: IOPMAssertionID = 0
+      if IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn), "ARES Ignition: reachable from the phone while ARES is off" as CFString, &id) == kIOReturnSuccess { assertion = id; log("keeping the Mac awake (on power)") }
+    } else if !want && assertion != 0 { releaseKeepAwake() }
+  }
+  func releaseKeepAwake() { if assertion != 0 { IOPMAssertionRelease(assertion); assertion = 0; log("no longer keeping the Mac awake") } }
 
   func buildPanels() {
     for p in panels { p.window.orderOut(nil) }
