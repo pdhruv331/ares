@@ -266,3 +266,31 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   `--disable-backgrounding-occluded-windows --disable-renderer-backgrounding` or the charge crawls when covered); `window.ares.power.act('standby'|'wake'|'powerdown')`
   from the harness; `ARES_TEST_STILL` renders the offline and standby stills; the helper's page can be opened over HTTP from
   `native/build/ARES Ignition.app/Contents/Resources/ignition.html?geo=…&mode=ignition&power=cold` and driven with `Ignition.rx({...})`.
+
+## The corner orb (docs/orb-prompt.md)
+
+- `orb.js` (main) + `renderer/orb.{html,js,css}` + `orb-preload.js`: a ≈30 pt mini `Reactor.Engine` in a corner (settings `theme.orb`
+  {enabled, corner br|bl|tr|tl, hideFullscreen}; ◉ → Theme Options). Shown when ARES runs but her desktop reactor can't be seen
+  (`brainVisible()` false, not summoned, power online; dim blue in standby; gone when dormant/charging). It replaced the orb in the
+  dock's centre slot (the slot is a spacer now). One panel window above everything, on all Spaces, never focused, click-through
+  except over its own circle, menu, cards and chips (the page posts `orb-hits`; the pointer is polled like the dock's).
+- `ares-theme orb-watch` (long-running): drag-in-progress (mouse held + drag pasteboard changed) so the window takes the drop and the
+  orb swells as the pointer nears; the focused field's caret rect (`caret on`) so the orb fades to 15% within 40 pt. Needs
+  Accessibility: the dev binary isn't trusted, so the caret fade only works in the installed app. `ares-theme front` / `refocus <id>`.
+- Click = the portal: `orb.portal(true)` tells the window where the circle grows from (`portal` IPC → renderer/surface.js clip-path
+  reveal with a bright edge, 0.6 s) then `showWindow()`; closing runs it back, sinks after 560 ms and refocuses the previous app.
+  `hideWindow()` and ⌥Space go through the orb while its portal is open; a sink from elsewhere (Esc, a click on another app) resets it.
+- Hold = push-to-talk: `listener.listen(30000, false)` (Voice ID still applies), release sends the listener `finish` (new command in
+  AresListener.swift). The orb's turn lasts until `reply-done`; a tool in SCREEN_TOOLS (main.js) or an answer > 320 chars opens the
+  portal. Captions: renderer/comms.js `mirror()` sends each sentence's schedule (segments, word starts, the clock) on the `scene`
+  channel as `{type:'caption'}`; main routes it to the orb only; the orb page keeps time itself (a covered window gets no frames; a
+  250 ms timer in comms.js keeps the clock snapshots coming). "Mute for 1 hour" = `orb.speechMuted`, checked in `tts-stream`.
+- Drops run through the existing pieces: jobs.start with `inputs` (summarise), `control.handle('phone/send')` / `control.pushFile`,
+  `orb-ask` → the window's `handle()` (start project: the brain proposes the brief, tier 3 stays with the bridge gate; explain; what's
+  on my screen), `memory.add`, `tasks.add`. Files: `control.classify` → blocked refused, outside asks first (ALLOW ONCE card).
+- Signals come from `orb.refresh()` (jobs list, `claudeCtl.sessions.list` cached 20 s, `liveCall()`, usage snapshot), `callEvent`
+  (calls 'inbound', voicemail), `usageWarn` (80/95, once per window), `jobFinished` (result cards for jobs the orb started).
+- Tests: `npx electron scripts/test-orb.js` (fakes + the real control.js scope rules; the window is real; nothing sent, no Claude).
+  Live: `window.ares.orb.test('state'|'act'|'card'|'call'|'usage'|'drag'|'caret'|'context'|'portal'|'reload'|'metrics', arg)` from the
+  harness; `ARES_HARNESS_PAGE=orb.html node scripts/harness.mjs eval …` reads the orb's page; screenshot with
+  `screencapture -l <id>` (id from `test('state').media`). Idle renderer CPU measured 0% (2026-10-06).
