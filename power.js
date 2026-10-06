@@ -169,7 +169,7 @@ class Power extends EventEmitter {
     return line;
   }
   /** ◉ → Quit ARES Completely: the spin-down, then the process ends and the ignition helper takes the reactor over. */
-  quitFully(why = 'menu') { return this.powerDown(why, { fully: true }); }
+  quitFully(why = 'menu') { this.log('quit fully', { why, mode: this.mode }); return this.powerDown(why, { fully: true }); }
 
   /** Wake from dormancy: the charge-to-wake follows the services starting again (main.js reports the steps). Instant from standby. */
   wake(why = 'user') {

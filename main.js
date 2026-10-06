@@ -2488,9 +2488,13 @@ ipcMain.handle('power-act', (_e, what, why = 'window') => {
 
 let memorySavedOnQuit = false;
 app.on('before-quit', (e) => {
-  if (power && !power.quitAllowed && !memorySavedOnQuit) { // a quit from elsewhere (Dock, a script): power down instead, the process stays
+  // A quit asked for through ARES's own surfaces (the ◉ menus, the Dock icon's Quit, ⌘Q while she's lifted) is deliberate: it
+  // gets the spin-down first, then the process ends and the ignition helper takes the reactor. Power Down itself never quits.
+  if (power && !power.quitAllowed && !memorySavedOnQuit) {
     e.preventDefault();
-    if (power.mode === 'online' || power.mode === 'standby') power.powerDown('quit request');
+    log('quit requested', { mode: power.mode });
+    if (power.mode === 'dormant') { power.quitAllowed = true; app.isQuitting = true; memorySavedOnQuit = true; app.quit(); return; } // already cold: just go
+    if (power.mode === 'online' || power.mode === 'standby') power.quitFully('quit request');
     return;
   }
   app.isQuitting = true;
