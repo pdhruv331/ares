@@ -6,7 +6,13 @@ HARD RULES
 - One scene code path: the window, the live desktop, the lifted view and the wallpaper backdrop all draw the SAME reactor scene (scene-link mirrors it as it mirrors the brain today). The screen saver and lock-screen still use the same drawing code.
 - The brain stays available as an option: ◉ menu "Look: Reactor / Brain" (default Reactor), like the phone's menu option. Switching is instant and persisted. Don't delete the brain code.
 - Keep every existing behaviour wired to the scene: states (idle / listening / thinking / speaking / offline), wake-word pulse, voice levels, desk mode indicators, the brain's role as the throw-into-to-close target (now the reactor), panels avoiding it (flow.js obstacle), icon walls on the desktop.
-- Performance: 2D canvas; at least as cheap as the brain. Keep the pacing rules (pause when covered/locked/asleep, 30 fps, 60 while listening/speaking, lower on battery, still frame in Low Power Mode). Measure CPU/GPU vs the brain and report.
+- Performance: the point of this look is also a SMOOTHER, LIGHTER desktop than the WebGL brain. Full screen at Retina is millions of pixels, so draw it in layers:
+  - STATIC layer (dot grid + schematic rings/labels): rendered once to a cached canvas; re-rendered only on resize, display change or a colour change (ease the colour on the cached layer with a cheap tint/composite, not a per-dot redraw).
+  - REACTOR layer: redrawn each frame but only inside the reactor's bounding box (+ orbit); orbs, callouts and the radar sweep are small dirty regions.
+  - RIPPLES: only while she speaks, as a few expanding rings composited over the cached dots (mask/composite), never a per-dot loop per frame.
+  - No canvas filters/shadowBlur per frame; glows are pre-rendered sprites. Consider OffscreenCanvas in a worker if the main thread is busy.
+  - Pacing: ~15 fps when idle (only slow rings/scanner move), 30 normally, 60 only while listening/speaking; keep the existing rules (pause when covered/locked/asleep, lower on battery, still frame in Low Power Mode). Only ONE live scene renderer per display (the backdrop and the desktop window must not both animate the same pixels).
+  - TARGET: noticeably less CPU and GPU than the brain, idle and speaking, on power and battery (Activity Monitor / powermetrics, same conditions, before vs after), and no dropped frames while speaking. Report the numbers; if it isn't lighter, optimise before shipping.
 
 1. THE REACTOR (port ReactorView.kt to the renderer, same proportions and behaviour)
 - Outer tick ring (90 ticks, every 9th longer) with a scanner sweeping round lighting the ticks behind it + a soft trail.
