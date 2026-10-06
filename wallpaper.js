@@ -167,7 +167,7 @@ class Wallpaper extends EventEmitter {
     const wasHere = this.main?.name;
     this.main = { win, wid: this.main?.wid, name: name === 'sinking' ? 'lifted' : name, mode: null };
     if (!this.main.wid) this.main.wid = Number(String(win.getMediaSourceId()).split(':')[1]) || null;
-    if ((wasHere === 'window') !== (this.main.name === 'window')) this.prefs();
+    if (wasHere == null || (wasHere === 'window') !== (this.main.name === 'window')) this.prefs(); // (the first report too: the backdrop may be up already)
     this.ensureWatcher();
     this.pushIds();
     this.sendIcons();
