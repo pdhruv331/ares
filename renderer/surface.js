@@ -20,6 +20,7 @@ const Surface = (() => {
     if (next === 'lifted' && extra.panel) root.dataset.lift = extra.panel; else delete root.dataset.lift;
     if (next === name) return;
     name = next;
+    if (next === 'desktop' || next === 'window') portalClear(); // (sunk some other way: no circle left behind)
     for (const s of ['desktop', 'lifted', 'sinking', 'window']) root.classList.toggle(`s-${s}`, s === next);
     drawUntil = performance.now() + 2500;
     if (next !== 'desktop') { held = false; lastHits = ''; }
@@ -92,8 +93,52 @@ const Surface = (() => {
     if (name === 'desktop' && mode.battery !== wasBattery) { window.SCENE_DPR = mode.battery ? 1 : undefined; dispatchEvent(new Event('scene-quality')); }
   }
 
+  // ---- The portal (docs/orb-prompt.md §2): summoned from the corner orb, ARES is revealed behind a circle that grows from
+  // the orb's centre to the whole screen, a thin bright edge on the growing circle, ~0.6 s ease-in-out; closing runs it
+  // back into the orb (the main process sinks the window as it reaches it).
+  const PORTAL_MS = 600;
+  let portalAnim = null, portalEdge = null;
+  function portal({ open, x, y }) {
+    const body = document.body;
+    if (open) {
+      portalAt = { x, y };
+      const r = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y)) + 2;
+      portalAnim?.cancel();
+      body.style.clipPath = `circle(0px at ${x}px ${y}px)`;
+      portalAnim = body.animate([{ clipPath: `circle(0px at ${x}px ${y}px)` }, { clipPath: `circle(${r}px at ${x}px ${y}px)` }], { duration: PORTAL_MS, easing: 'cubic-bezier(.45,0,.2,1)', fill: 'forwards' });
+      portalAnim.finished.then(() => { if (portalAt) { body.style.clipPath = ''; portalAnim?.cancel(); portalAnim = null; } }, () => {});
+      edge(x, y, 0, r);
+    } else if (portalAt) {
+      const { x: px, y: py } = portalAt;
+      const r = Math.hypot(Math.max(px, innerWidth - px), Math.max(py, innerHeight - py)) + 2;
+      portalAnim?.cancel();
+      portalAnim = body.animate([{ clipPath: `circle(${r}px at ${px}px ${py}px)` }, { clipPath: `circle(0px at ${px}px ${py}px)` }], { duration: PORTAL_MS, easing: 'cubic-bezier(.6,0,.4,1)', fill: 'forwards' });
+      edge(px, py, r, 0);
+      const anim = portalAnim;
+      anim.finished.then(() => { if (portalAnim === anim) { portalAt = null; } }, () => {});
+    }
+  }
+  let portalAt = null;
+  function edge(x, y, r0, r1) {
+    portalEdge?.remove();
+    const e = portalEdge = document.createElement('div');
+    e.className = 'portal-edge';
+    e.style.left = `${x}px`; e.style.top = `${y}px`;
+    document.body.append(e);
+    e.animate([{ width: `${r0 * 2}px`, height: `${r0 * 2}px`, opacity: 1 }, { width: `${r1 * 2}px`, height: `${r1 * 2}px`, opacity: 1, offset: 0.9 }, { width: `${r1 * 2}px`, height: `${r1 * 2}px`, opacity: 0 }],
+      { duration: PORTAL_MS, easing: r1 > r0 ? 'cubic-bezier(.45,0,.2,1)' : 'cubic-bezier(.6,0,.4,1)', fill: 'forwards' }).finished.then(() => { if (portalEdge === e) { e.remove(); portalEdge = null; } }, () => {});
+  }
+  function portalClear() {
+    if (!portalAt && !portalAnim) return;
+    portalAnim?.cancel(); portalAnim = null; portalAt = null;
+    document.body.style.clipPath = '';
+    portalEdge?.remove(); portalEdge = null;
+  }
+  window.ares.orb?.onPortal?.((p) => portal(p || {}));
+
   return {
     get name() { return name; },
+    get portal() { return Boolean(portalAt); },
     get paused() { return name === 'desktop' && mode.paused; },
     get hits() { return lastHits ? JSON.parse(lastHits) : null; },
     hold(m) { pinned = Boolean(m); if (m) { applyMode(m); if (m.state) herState = m.state; } },

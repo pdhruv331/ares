@@ -103,6 +103,13 @@ contextBridge.exposeInMainWorld('ares', {
   pin: (pinned) => ipcRenderer.send('window-pin', pinned),
   toggleFullscreen: () => ipcRenderer.send('window-fullscreen'),
   onSummoned: (fn) => ipcRenderer.on('summoned', fn),
+  // The corner orb (orb.js): a question asked from it, a click that stops her, the portal reveal (renderer/surface.js)
+  orb: {
+    onAsk: (fn) => ipcRenderer.on('orb-ask', (_e, text) => fn(text)),
+    onStop: (fn) => ipcRenderer.on('orb-stop', () => fn()),
+    onPortal: (fn) => ipcRenderer.on('portal', (_e, p) => fn(p)),
+    test: (what, arg) => ipcRenderer.invoke('test-orb', what, arg), // development builds only
+  },
   integrations: () => ipcRenderer.invoke('integrations'),
   onIntegrations: (fn) => ipcRenderer.on('integrations', (_e, s) => fn(s)),
   // COMMS: today's conversation on every device (history + live lines), and window-only lines to add to it

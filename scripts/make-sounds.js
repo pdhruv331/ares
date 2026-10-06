@@ -65,6 +65,19 @@ const sounds = {
   thud: () => { const n = noise(300); return render(0.5, (t) => Math.sin(TAU * 48 * t) * expDecay(t, 9) + 0.5 * n() * expDecay(t, 18), 0.4); },
   // Error: a low two-note "nope"
   nope: () => render(0.5, (t) => (t < 0.22 ? Math.sin(TAU * 196 * t) * env(t, 0.01, 0.2, 0, 0) : 0) + (t > 0.22 ? Math.sin(TAU * 147 * (t - 0.22)) * env(t - 0.22, 0.01, 0.26, 0, 0) : 0), 0.3),
+
+  // ---- The corner orb (docs/orb-prompt.md §8) ----
+  // The portal opening: a short whoosh that rises as the circle grows (0.6 s, like the reveal)
+  portal: () => { const n = noise(2600); return render(0.62, (t) => { const k = t / 0.62; const f = 180 + 900 * k * k; return n() * env(t, 0.12, 0.5, 0, 0) * (0.4 + 0.6 * k) * 0.8 + 0.25 * Math.sin(TAU * f * t) * env(t, 0.05, 0.57, 0, 0); }, 0.16); },
+  // ...and closing: the same breath, falling
+  'portal-close': () => { const n = noise(2200); return render(0.55, (t) => { const k = 1 - t / 0.55; const f = 160 + 800 * k * k; return n() * env(t, 0.03, 0.52, 0, 0) * (0.35 + 0.65 * k) * 0.8 + 0.22 * Math.sin(TAU * f * t) * env(t, 0.02, 0.5, 0, 0); }, 0.14); },
+  // Push-to-talk: a bright blip up (listening) and down (sent)
+  'ptt-on': () => render(0.14, (t) => Math.sin(TAU * (880 + 440 * t / 0.14) * t) * env(t, 0.01, 0.13, 0, 0), 0.2),
+  'ptt-off': () => render(0.14, (t) => Math.sin(TAU * (1320 - 440 * t / 0.14) * t) * env(t, 0.01, 0.13, 0, 0), 0.18),
+  // A result card: one gentle bell
+  chime: () => render(0.7, (t) => bell(t, 1174.7) * expDecay(t, 5) + 0.4 * bell(t, 1760) * expDecay(t, 6) * (t > 0.04 ? 1 : 0), 0.22),
+  // Needs you: two soft notes, a fourth apart
+  attend: () => render(0.75, (t) => bell(t, 659.3) * expDecay(t, 6) + (t > 0.2 ? bell(t - 0.2, 880) * expDecay(t - 0.2, 5) : 0), 0.24),
 };
 
 for (const [name, make] of Object.entries(sounds)) {

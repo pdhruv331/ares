@@ -578,6 +578,9 @@ html.blend.s-lifted .frame::before, html.blend.s-sinking .frame::before { opacit
 html.blend.s-lifted .titlebar, html.blend.s-sinking .titlebar { visibility: hidden; }
 html.blend.s-lifted .frame, html.blend.s-sinking .frame { border: none; box-shadow: none; background: transparent; }
 html.blend.s-lifted #stars { opacity: 0; }
+/* The portal's edge (renderer/surface.js): a thin bright circle on the growing reveal from the corner orb */
+.portal-edge { position: fixed; transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none; z-index: 9999; box-sizing: border-box;
+  border: 1.5px solid rgba(62, 230, 255, 0.95); box-shadow: 0 0 12px 2px rgba(62, 230, 255, 0.55), inset 0 0 18px rgba(62, 230, 255, 0.25); }
 /* Lifted for one panel (opened from the bar, the dock or a notification): only that panel */
 html.panel-lift .core, html.panel-lift .ticker, html.panel-lift .console, html.panel-lift #fx { opacity: 0 !important; pointer-events: none !important; }
 html.panel-lift:not([data-lift="call"]):not([data-lift="job"]) .panels { opacity: 0 !important; pointer-events: none !important; }

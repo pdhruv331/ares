@@ -215,6 +215,9 @@ final class Listener {
         case "listen":
             let ms = parts.count > 1 ? Double(parts[1]) ?? 6000 : 6000
             listen(timeout: ms / 1000, trusted: parts.contains("trusted"))
+        case "finish":
+            // Push-to-talk released (the corner orb): the capture ends now, with whatever was said so far
+            if mode == .capturing { silenceTimer?.invalidate(); deadlineTimer?.invalidate(); finishCommand() }
         case "awake":
             awake = parts.count > 1 && parts[1] == "on"
             if mode == .idle { startTask() }

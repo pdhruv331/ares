@@ -58,6 +58,7 @@ class MainActivity : Activity(), Session.Ui {
     private lateinit var schedChip: TextView
     private lateinit var sounds: Sounds
     private var lastPower: PowerStore.Mode? = null
+    private var lastCharge = 0f
     private var powerSheet: Dialog? = null
     private var asked = false // this phone asked for the last change: toast it
     private val powerChanged = { showPower() }
@@ -250,15 +251,21 @@ class MainActivity : Activity(), Session.Ui {
         schedChip.visibility = if (sch == null || !PowerStore.reach) View.GONE else View.VISIBLE
         if (sch != null) schedChip.text = listOfNotNull(sch.standby?.let { "☾ standby $it" }, sch.wake?.let { "☀ wake $it" }).joinToString(" · ") + if (sch.skipped) " · skipped tonight" else ""
         state(session.state) // the hint under the orb
-        // Sounds and haptics for the change itself
+        // Sounds and haptics (docs/ignition-prompt.md §4e; the Mac's own sequences, "siphon" wake / "turbine" down, see Haptics)
         val was = lastPower
         lastPower = mode
+        val charge = PowerStore.chargeK
+        if (mode == PowerStore.Mode.CHARGING && charge > lastCharge) {
+            // a real start-up step landed: the hum rises, a burst of siphon ticks; at 100% the held breath (hum out, the inhale)
+            if (charge >= 0.999f) { sounds.stop("charge-hum"); sounds.play("inhale", 0.3f) } else { sounds.rate("charge-hum", 0.8f + 0.9f * charge); Haptics.siphonStep(this, charge) }
+        }
+        lastCharge = if (mode == PowerStore.Mode.CHARGING) charge else 0f
         if (was != null && was != mode) {
             when {
-                mode == PowerStore.Mode.STANDBY -> { sounds.play("standby-down"); Haptics.soft(this) }
+                mode == PowerStore.Mode.STANDBY -> { sounds.play("standby-down"); Haptics.turbineStandby(this) }
                 mode == PowerStore.Mode.ONLINE && was == PowerStore.Mode.CHARGING -> { sounds.play("bloom"); Haptics.double(this) }
-                mode == PowerStore.Mode.ONLINE && was == PowerStore.Mode.STANDBY -> { sounds.play("wake-chime"); Haptics.double(this) }
-                mode == PowerStore.Mode.SPINDOWN -> { sounds.play("clunk"); sounds.play("winddown", 0.3f) }
+                mode == PowerStore.Mode.ONLINE && was == PowerStore.Mode.STANDBY -> { sounds.play("wake-chime"); Haptics.turbineWake(this) }
+                mode == PowerStore.Mode.SPINDOWN -> { sounds.play("clunk"); fallback.postDelayed({ sounds.play("winddown", 0.3f) }, 250); Haptics.turbineDown(this) }
                 mode == PowerStore.Mode.OFFLINE && was == PowerStore.Mode.SPINDOWN -> sounds.play("thud")
                 mode == PowerStore.Mode.CHARGING -> sounds.play("charge-hum", 0.25f, loop = true)
             }

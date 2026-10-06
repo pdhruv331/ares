@@ -34,5 +34,7 @@ class Sounds(private val ctx: Context) {
         streams[name] = pool.play(id, volume, volume, 1, if (loop) -1 else 0, 1f)
     }
     fun stop(name: String) { streams.remove(name.replace('-', '_'))?.let { pool.stop(it) } }
+    /** Pitch a playing sound (the charge hum rises with the real charge: 0.8 → 1.7). */
+    fun rate(name: String, r: Float) { streams[name.replace('-', '_')]?.let { pool.setRate(it, r.coerceIn(0.5f, 2f)) } }
     fun release() = pool.release()
 }

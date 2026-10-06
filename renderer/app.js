@@ -865,6 +865,10 @@ window.ares.onFullscreen((on) => {
   $('fullBtn').classList.toggle('active', on);
 });
 window.ares.onSummoned(() => input.focus());
+// The corner orb (orb.js): a question from its menu or a drop ("What's on my screen?", "Explain this…") takes the usual
+// path, spoken with the caption; a click on it while she speaks stops her silently, like a raised palm.
+window.ares.orb.onAsk((text) => { if (typeof text === 'string' && text.trim()) handle(text.trim(), { voice: false, addressed: true }); });
+window.ares.orb.onStop(() => stopSilently('the orb'));
 // Esc leaves fullscreen first, then hides
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;

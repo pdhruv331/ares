@@ -1,0 +1,38 @@
+<!doctype html>
+<html class="c-br">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>ARES orb</title>
+<link rel="stylesheet" href="orb.css">
+</head>
+<body>
+<div id="field" class="field">
+  <canvas id="stage" width="200" height="200"></canvas>
+  <b id="badge" class="badge" hidden></b>
+  <div id="hint" class="hint"></div>
+  <div id="caption" class="caption"></div>
+  <div id="card" class="card" hidden>
+    <div class="cd-back"></div><i class="br tl"></i><i class="br tr"></i><i class="br bl"></i><i class="br bo"></i>
+    <div class="cd-content"><div class="cd-head"><span id="cardLabel"></span><span id="cardTag"></span></div>
+      <div id="cardTitle" class="cd-title"></div><div id="cardDetail" class="cd-detail"></div><div id="cardActs" class="cd-acts"></div></div>
+    <div class="cd-life"><i></i></div>
+  </div>
+  <div id="menu" class="menu" hidden>
+    <i class="br tl"></i><i class="br tr"></i><i class="br bl"></i><i class="br bo"></i>
+    <div class="mn-head">ARES</div>
+    <div class="mn-row" data-act="open"><i>◉</i>Open ARES</div>
+    <div class="mn-row" data-act="talk"><i>◌</i>Hold to talk</div>
+    <div class="mn-row" data-act="standby"><i>◐</i>Standby</div>
+    <div class="mn-row red" data-act="stopall"><i>■</i>Stop everything</div>
+    <div class="mn-row" data-act="work"><i>▤</i>Open Work</div>
+    <div class="mn-row" data-act="mute"><i>◇</i>Mute for 1 hour</div>
+    <div class="mn-row" data-act="screen"><i>▭</i>What's on my screen?</div>
+  </div>
+  <div id="chips" class="chips" hidden></div>
+</div>
+<script src="reactor.js"></script>
+<script src="sounds.js"></script>
+<script src="orb.js"></script>
+</body>
+</html>

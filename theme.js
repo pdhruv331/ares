@@ -3,7 +3,7 @@
 //   system look   dark mode, accent + highlight colour, pointer colour, an ARES alert sound, Apple Dock and menu bar
 //                 auto-hide, Finder's desktop grid: supported settings only (System Events, CFPreferences)
 //   theme-bar.js      the ARES menu bar (SketchyBar) and the focused-window glow (JankyBorders), live-fed by ARES
-//   theme-dock.js     the ARES dock overlay, with the orb while the wallpaper brain is hidden
+//   theme-dock.js     the ARES dock overlay (the orb that sat in it is orb.js, the corner orb, now)
 //   theme-icons.js    ARES icons on the Desktop's items and chosen folders
 //   theme-notify.js   ARES's own alerts as FRIDAY panels at the top-right
 //   theme-apps.js     Terminal / VS Code / Chrome colour themes
@@ -48,6 +48,7 @@ class Theme {
    * @param {(…) => void} o.log  @param {() => object} o.readSettings  @param {(p: object) => void} o.writeSettings
    * @param {(view: string) => void} o.onOpen   open an ARES view: 'summon' | 'work' | 'status' | 'call' | 'job:<id>'
    * @param {() => boolean} o.brainVisible  is the wallpaper brain on screen right now
+   * @param {(refresh: () => void) => object[]} [o.orbMenu]  the corner orb's lines for Theme Options (orb.js)
    * @param {() => object} o.menuSections  ARES's menus as Electron menu templates: { ares, listen, voice, work, view, phone }
    * @param {string[]} o.selfIds  ARES's own bundle IDs (so the bar shows ARES's menus while ARES is in front)
    * @param {(live: boolean) => void} o.onLive  the theme's live parts came up or went away (the window hides its header)
@@ -61,7 +62,7 @@ class Theme {
       pidFile: path.join(this.dir, 'ares.pid'), offlineCommands: () => this.offlineCommands() });
     this.dock = new Dock({ dir: this.dir, helper: o.helper, log: o.log, appDir: o.appDir, onSummon: () => o.onOpen('summon'),
       onAccessibility: () => this.askAccessibility(), onFront: (id) => this.front(id),
-      readOpts: () => this.opts.dock, saveOpts: (p) => this.save({ dock: { ...this.opts.dock, ...p } }), look: () => (o.look ? o.look() : 'reactor') });
+      readOpts: () => this.opts.dock, saveOpts: (p) => this.save({ dock: { ...this.opts.dock, ...p } }) });
     this.drop = new Drop({ log: o.log, appDir: o.appDir, onAct: (a) => this.dropAct(a) }); // status + WORK, drawn by ARES
     this.popups = {}; // menuId -> [{ run }]: what each line of an open drop-down does
     this.hoverSeq = 0;
@@ -113,7 +114,6 @@ class Theme {
     await step('notifications', () => { if (this.opts.notifications) this.notify.start(); });
     await step('drop-downs', () => this.drop.start());
     await step('icons', () => this.icons.watch());
-    this.updateOrb();
     await step('dock settings', () => this.resumeDock());
     this.onLive?.(true);
   }
@@ -660,7 +660,6 @@ class Theme {
     if (msg.type === 'state') this.bar.voice(msg.state);
     else if (msg.type === 'level') this.bar.level(msg.v || 0);
     else if (msg.type === 'attention') this.bar.attention(msg.on);
-    this.dock.scene(msg);
   }
   status(s) {
     if (!s || typeof s !== 'object') return;
@@ -681,9 +680,9 @@ class Theme {
   /** Standby / power down (power.js): the bar's ◉ takes the state's colour. */
   power(mode) { if (this.live && !this.quitting) this.bar.power(mode); }
   weather(w) { const t = w?.text || ''; if (this.live) this.bar.weather(t); else this.bar.state.weather = t; }
-  /** Where the ARES window is (surface.js) and what the desktop helper sees: the orb shows only while the brain doesn't. */
-  surface(name) { this.summoned = name === 'lifted' || name === 'window'; this.updateOrb(); }
-  updateOrb() { if (this.live) this.dock.setOrb(!this.summoned && !this.brainVisible()); }
+  /** Where the ARES window is (surface.js): notifications hold back while she's up in front. (The orb that followed this
+   *  is the corner orb now, orb.js, which main.js tells directly.) */
+  surface(name) { this.summoned = name === 'lifted' || name === 'window'; }
 
   /** One of ARES's alerts, as a panel at the top-right (not while ARES itself is up in front). */
   toast(t) {
@@ -746,6 +745,8 @@ class Theme {
         { label: 'Dock: Always Visible', type: 'radio', checked: o.dock.reveal === 'always', click: dockSet({ reveal: 'always' }) },
         { label: 'Choose Dock Apps…', click: act(() => this.chooseApps()) },
         { type: 'separator' },
+        ...(this.orbMenu ? this.orbMenu(refresh) : []),
+        { type: 'separator' },
         { label: 'Use Stacks on the Desktop', type: 'checkbox', checked: o.stacks, click: act((item) => this.setStacks(item.checked)) },
         { label: 'ARES Notifications', type: 'checkbox', checked: o.notifications, click: act((item) => {
           this.save({ notifications: item.checked });
@@ -790,7 +791,7 @@ class Theme {
     this.live = true;
     if (parts.includes('bar')) this.log('theme test bar config', this.bar.writeConfig());
     if (parts.includes('art')) this.log('theme test art', await this.icons.art(), this.icons.dir);
-    if (parts.includes('dock')) { await this.dock.start(); this.updateOrb(); }
+    if (parts.includes('dock')) await this.dock.start();
     if (parts.includes('notify')) {
       this.notify.start();
       setTimeout(() => this.notify.show({ kind: 'work', label: 'JOB DONE', tag: 'WORK', value: 'Competitor report', detail: 'Three new listings this week, prices down 4%.' }), 2500);

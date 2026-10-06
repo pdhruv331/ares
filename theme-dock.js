@@ -7,7 +7,7 @@
 //  - Launch / switch: the helper's `activate` (Launch Services, which switches Spaces, then with Accessibility the app
 //    made frontmost and its window raised: `open -b` from a background app can be refused focus since macOS 14).
 //    Right-click: the app's windows (Accessibility), Hide, Quit. Quit: NSRunningApplication.terminate.
-//  - The ARES orb: theme.js decides when the wallpaper brain is hidden; the orb then fades into the dock's centre.
+//  - The ARES orb that used to sit in the dock's centre is now the corner orb (orb.js, docs/orb-prompt.md).
 // macOS doesn't send mouse moves to a click-through window of an inactive app, so (like surface.js) the pointer is
 // checked here: often near the bottom of the screen, rarely elsewhere.
 const fs = require('fs');
@@ -17,13 +17,13 @@ const { BrowserWindow, screen, Menu, shell, ipcMain } = require('electron');
 const { spawn, execFile } = require('child_process');
 const { run, parse } = require('./theme-prefs');
 
-const HEIGHT = 190;          // the window: the icons, the lift, the name above, and the orb
+const HEIGHT = 190;          // the window: the icons, the lift, and the name above
 const NEAR = 240;            // px from the bottom where the pointer is watched closely
 const HIDE_MS = 700;         // edge reveal: hide this long after the pointer leaves
 
 class Dock {
-  constructor({ dir, helper, log, appDir, readOpts, saveOpts, onSummon, onAccessibility, onFront, look }) {
-    Object.assign(this, { helper, log, appDir, readOpts, saveOpts, onSummon, onAccessibility, onFront, look });
+  constructor({ dir, helper, log, appDir, readOpts, saveOpts, onSummon, onAccessibility, onFront }) {
+    Object.assign(this, { helper, log, appDir, readOpts, saveOpts, onSummon, onAccessibility, onFront });
     this.dir = path.join(dir, 'dock');
     this.win = null;
     this.apps = [];               // [{ path, id, name }]
@@ -33,7 +33,6 @@ class Dock {
     this.hits = [];
     this.interactive = false;
     this.revealed = false;
-    this.orb = false;
     this.ready = false;
   }
 
@@ -89,8 +88,6 @@ class Dock {
     this.send({ type: 'apps', apps: this.apps.map(withIcon), folders: this.folders().map(withIcon) });
     this.send({ type: 'prefs', icons: o.icons, reveal: o.reveal });
     this.send({ type: 'running', running: [...this.running], front: this.front, badges: this.badges });
-    this.send({ type: 'scene', msg: { type: 'look', look: this.look?.() || 'reactor' } });
-    this.send({ type: 'orb', on: this.orb });
     this.send({ type: 'reveal', on: o.reveal === 'always' || this.revealed });
   }
 
@@ -222,11 +219,6 @@ class Dock {
   }
 
   // ---- From theme.js ------------------------------------------------------------------------------------------
-  setOrb(on) { if (on === this.orb) return; this.orb = on; this.log('theme orb', on ? 'shown' : 'hidden'); this.send({ type: 'orb', on }); }
-  scene(msg) {
-    if (msg.type === 'level' && !this.orb) return; // her voice only matters while the orb is showing
-    this.send({ type: 'scene', msg });
-  }
   prefs() { this.push(); }
   async reloadApps() { await this.loadApps(); this.push(); }
 }

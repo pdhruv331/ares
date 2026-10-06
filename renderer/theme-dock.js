@@ -2,7 +2,6 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const dock = $('dock'), nameEl = $('name');
-  const CYAN = [62, 230, 255], VIOLET = [167, 139, 250], AMBER = [255, 181, 71];
   let apps = [], folders = [], prefs = { icons: 'glyphs', reveal: 'edge' };
   let running = new Set(), front = '', badges = {};
   const tiles = new Map(); // id -> { el, item }
@@ -123,7 +122,6 @@
     if (dock.classList.contains('shown')) {
       for (const { el } of tiles.values()) { const r = el.getBoundingClientRect(); rects.push({ x: r.left - 7, y: r.top - 14, w: r.width + 14, h: r.height + 28 }); }
     }
-    if (dock.classList.contains('orb-on')) { const r = $('orbSlot').getBoundingClientRect(); rects.push({ x: r.left - 6, y: r.top - 22, w: r.width + 12, h: r.height + 34 }); }
     window.theme.send('theme-hits', rects.map((r) => ({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) })));
   }
   function pointer(x, y) {
@@ -144,89 +142,6 @@
     nameEl.style.left = `${r.left + r.width / 2 + 2}px`;
     nameEl.classList.add('on');
   }
-  $('orbSlot').addEventListener('click', () => window.theme.send('theme-dock-act', { type: 'summon' }));
-
-  // ---- The ARES orb: a white core, a halo that breathes with her real voice, violet + a comet while thinking ----
-  const orb = $('orb');
-  const octx = orb.getContext('2d');
-  const scene = { state: 'idle', level: 0, target: 0, attention: false, ripples: [], look: 'reactor' };
-  const mini = window.Reactor ? new Reactor.Engine() : null; // the reactor look: the Kotlin's "small" reactor (no sparks, orbs or scanner)
-  let orbOn = false, raf = 0, lastFrame = 0, t0 = performance.now();
-  function sizeOrb() { const k = window.devicePixelRatio || 1; orb.width = orb.height = 160 * k; octx.setTransform(k, 0, 0, k, 0, 0); }
-  function colour() { return scene.attention ? AMBER : scene.state === 'thinking' ? VIOLET : CYAN; }
-  function frame(now) {
-    raf = 0;
-    if (!orbOn && now - orbOffAt > 900) { octx.clearRect(0, 0, 160, 160); return; }
-    raf = requestAnimationFrame(frame);
-    const busy = scene.state !== 'idle' || scene.level > 0.02 || scene.ripples.length;
-    if (now - lastFrame < (busy ? 32 : 66)) return; // 30 fps while she's active, 15 for the slow idle breath
-    const dt = Math.min(0.1, (now - (lastFrame || now)) / 1000);
-    lastFrame = now;
-    const t = (now - t0) / 1000;
-    scene.level += (scene.target - scene.level) * Math.min(1, dt * 12);
-    const [r, g, b] = colour();
-    const cx = 80, cy = 80, lv = scene.level;
-    octx.clearRect(0, 0, 160, 160);
-    if (scene.look === 'reactor' && mini) {
-      mini.setState(scene.state);
-      mini.update(dt, { level: scene.level, attention: scene.attention });
-      mini.draw(octx, cx, cy, 34, { small: true });
-      return;
-    }
-    // Halo
-    const breath = 0.5 + 0.5 * Math.sin(t * (scene.state === 'idle' ? 1.3 : 2.6));
-    const R = 20 + breath * 2.5 + lv * 12;
-    const halo = octx.createRadialGradient(cx, cy, 4, cx, cy, R + 22);
-    halo.addColorStop(0, `rgba(${r},${g},${b},${0.55 + lv * 0.3})`);
-    halo.addColorStop(0.45, `rgba(${r},${g},${b},${0.16 + lv * 0.2})`);
-    halo.addColorStop(1, `rgba(${r},${g},${b},0)`);
-    octx.fillStyle = halo;
-    octx.beginPath(); octx.arc(cx, cy, R + 22, 0, Math.PI * 2); octx.fill();
-    // The ring, rippling with the voice
-    octx.strokeStyle = `rgba(${r},${g},${b},${0.55 + lv * 0.4})`;
-    octx.lineWidth = 1.4;
-    octx.beginPath();
-    for (let i = 0; i <= 64; i++) {
-      const a = (i / 64) * Math.PI * 2;
-      const w = lv * 3.2 * Math.sin(a * 5 + t * 7) + lv * 1.6 * Math.sin(a * 9 - t * 11);
-      const rr = R + w;
-      i ? octx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr) : octx.moveTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
-    }
-    octx.stroke();
-    // Ripples on loud moments
-    if (lv > 0.45 && (!scene.ripples.length || t - scene.ripples[scene.ripples.length - 1] > 0.35)) scene.ripples.push(t);
-    scene.ripples = scene.ripples.filter((s) => t - s < 1.1);
-    for (const s of scene.ripples) {
-      const k = (t - s) / 1.1;
-      octx.strokeStyle = `rgba(${r},${g},${b},${0.5 * (1 - k)})`;
-      octx.beginPath(); octx.arc(cx, cy, R + k * 30, 0, Math.PI * 2); octx.stroke();
-    }
-    // Thinking: a comet circling
-    if (scene.state === 'thinking') {
-      const a0 = t * 4.2;
-      for (let i = 0; i < 18; i++) {
-        const a = a0 - i * 0.07, k = 1 - i / 18;
-        octx.fillStyle = `rgba(${r},${g},${b},${0.9 * k})`;
-        octx.beginPath(); octx.arc(cx + Math.cos(a) * (R + 6), cy + Math.sin(a) * (R + 6), 2.4 * k + 0.4, 0, Math.PI * 2); octx.fill();
-      }
-    }
-    // The white core
-    const core = octx.createRadialGradient(cx, cy, 0, cx, cy, 9 + lv * 3);
-    core.addColorStop(0, 'rgba(255,255,255,1)');
-    core.addColorStop(0.5, 'rgba(240,253,255,0.95)');
-    core.addColorStop(1, `rgba(${r},${g},${b},0)`);
-    octx.fillStyle = core;
-    octx.beginPath(); octx.arc(cx, cy, 9 + lv * 3, 0, Math.PI * 2); octx.fill();
-  }
-  let orbOffAt = 0;
-  function setOrb(on) {
-    orbOn = on;
-    dock.classList.toggle('orb-on', on);
-    if (!on) orbOffAt = performance.now();
-    if (!raf) raf = requestAnimationFrame(frame);
-    setTimeout(postHits, 550);
-  }
-
   // ---- From the main process ----
   window.theme.on('theme-dock', (m) => {
     switch (m.type) {
@@ -235,19 +150,8 @@
       case 'running': running = new Set(m.running); front = m.front; badges = m.badges || {}; paintRunning(); break;
       case 'reveal': dock.classList.toggle('shown', m.on); if (!m.on) pointer(-1, -1); setTimeout(postHits, m.on ? 380 : 50); break;
       case 'pointer': pointer(m.x, m.y); break;
-      case 'orb': setOrb(m.on); break;
-      case 'scene': {
-        const s = m.msg;
-        if (s.type === 'state') scene.state = s.state;
-        else if (s.type === 'level') scene.target = Math.min(1, (s.v || 0) * 1.5);
-        else if (s.type === 'attention') scene.attention = s.on;
-        else if (s.type === 'look') scene.look = s.look === 'brain' ? 'brain' : 'reactor';
-        if (s.type === 'state' && s.state !== 'speaking' && s.state !== 'listening') scene.target = 0;
-        break;
-      }
     }
   });
-  window.addEventListener('resize', () => { sizeOrb(); centre(); postHits(); });
-  sizeOrb();
+  window.addEventListener('resize', () => { centre(); postHits(); });
   window.theme.send('theme-ready');
 })();

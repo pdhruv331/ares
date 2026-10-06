@@ -44,6 +44,7 @@ const { Voice } = require('./voice');
 const { Voicemail } = require('./voicemail');
 const { Wallpaper } = require('./wallpaper');
 const { Theme } = require('./theme');
+const { Orb } = require('./orb');
 const { Control } = require('./control');
 const { Autonomy, PROJECTS_DIR } = require('./autonomy');
 const { ClaudeUsage } = require('./claude-usage');
@@ -99,6 +100,7 @@ let surface;   // where the ARES window lives: the live desktop, lifted above th
 let autonomy;  // projects, goals, routines, the kill switch (autonomy.js)
 let control;   // full Mac control (control.js): files, windows, screen, UI automation, system, send to phone
 let theme;     // the ARES OS theme (theme.js): the menu bar, window glow, dock, icons, notifications and system look
+let orb;       // the corner orb (orb.js): the small reactor in the corner while the desktop is covered (docs/orb-prompt.md)
 let speech;    // her voice (voice.js): Katherine on ElevenLabs, the local Kokoro backup, budget mode, phrase cache, credit watch
 
 /** A message for the window's dashboard (renderer/dash.js). */
@@ -147,7 +149,7 @@ function createWindow({ show }) {
   win.webContents.on('will-navigate', (e) => e.preventDefault());
   surface = new Surface({ win, log, opts: () => ({ enabled: wallpaper?.opts.enabled ?? readSettings().wallpaper?.enabled !== false, summon: readSettings().summon || 'lift',
     blend: Boolean(theme?.live) }), // the ARES theme: she's part of the screen, not an app window in front of it
-    onChange: (name) => { wallpaper?.mainSurface(name, win); theme?.surface(name); win.webContents.send('ui-prefs', uiPrefs()); setTimeout(() => dashboard?.setVisible(win.isVisible()), 50); } });
+    onChange: (name) => { wallpaper?.mainSurface(name, win); theme?.surface(name); orb?.surface(name); win.webContents.send('ui-prefs', uiPrefs()); setTimeout(() => dashboard?.setVisible(win.isVisible()), 50); } });
   win.once('ready-to-show', () => {
     if (app.isHidden?.()) app.show(); // (launched hidden, e.g. `open -j`: the windows would never appear otherwise; show() doesn't focus)
     if (surface.desktopOn) surface.desktop(); else if (show) win.show();
@@ -169,7 +171,7 @@ function createWindow({ show }) {
 
 // Dismiss: back to being the desktop (or hidden, with the wallpaper off). surface.js also takes a fullscreen window
 // out of its Space first, or macOS leaves a black screen behind.
-function hideWindow() { surface.hide(); }
+function hideWindow() { if (orb?.portalOpen) orb.portal(false, 'dismiss'); else surface.hide(); }
 
 // ARES has something to say or heard her name: with the live desktop on she answers right there on the desktop
 // (nothing jumps over the user's apps); otherwise the window comes up as before. ⌥Space / the menu still summon.
@@ -194,7 +196,8 @@ function toggleWindow() {
   if (surface.summoned && win.isFocused()) {
     hideWindow();
   } else {
-    showWindow();
+    if (orb?.on && !surface.summoned) orb.portal(true, 'hotkey'); // the orb is showing: the same portal as a click on it
+    else showWindow();
     win.webContents.send('summoned');
     listener.listen(6000, true); // keyboard = you're at the Mac, so no voice check
   }
@@ -513,6 +516,15 @@ function brainVisible() {
   return Boolean(w && w.onScreen && (w.centre ?? w.covered) < 0.6 && w.covered < 0.985);
 }
 
+/** Is a full-screen app (or another Space) in front on the main display? (The desktop helper says the ARES desktop
+ *  window is off screen then.) Unknown without the wallpaper: false. */
+function fullscreenNow() {
+  if (!wallpaper?.opts.enabled) return false;
+  const m = wallpaper.main, d = wallpaper.desk;
+  const w = m?.wid ? d?.windows?.[m.wid] : null;
+  return Boolean(w && !w.onScreen && !d.locked && !d.asleep);
+}
+
 /** ARES as the desktop: the live wallpaper, its options, and the lock-screen picture. */
 function wallpaperMenu() {
   if (!wallpaper) return [];
@@ -748,9 +760,9 @@ ipcMain.on('hands-act', (_e, what) => {
 ipcMain.handle('test-hands', (_e, clip, opts) => { if (!app.isPackaged) vision?.replay(clip, opts || {}); return vision?.state || null; });
 // The conversation's timing, for judging speech heard without the wake word (addressed.js)
 const talk = { lastReplyAt: 0, askedQuestion: false, fromWake: false };
-ipcMain.on('reply-done', (_e, asked) => { talk.lastReplyAt = Date.now(); talk.askedQuestion = Boolean(asked); if (power?.mode === 'spindown') power.lineSaid(); });
+ipcMain.on('reply-done', (_e, asked) => { talk.lastReplyAt = Date.now(); talk.askedQuestion = Boolean(asked); orb?.turnDone(); if (power?.mode === 'spindown') power.lineSaid(); });
 ipcMain.on('listener-awake', (_e, on) => setAwake(on));
-ipcMain.on('scene', (_e, msg) => { wallpaper?.scene(msg); theme?.scene(msg); });
+ipcMain.on('scene', (_e, msg) => { if (msg?.type === 'caption') return orb?.scene(msg); wallpaper?.scene(msg); theme?.scene(msg); orb?.scene(msg); });
 ipcMain.on('theme-status', (_e, s) => theme?.status(s));
 ipcMain.on('wp-ready', (e) => wallpaper?.onReady(e.sender));
 
@@ -776,6 +788,7 @@ function createListener() {
       win.webContents.send('summoned');
     }
     if (evt.type === 'recording') return; // enrollment audio stays in the main process
+    if (evt.type === 'command' || evt.type === 'timeout') orb?.listenerEvent(evt); // a hold on the corner orb
     if (evt.type === 'played' || evt.type === 'stopped') return onPlayback(evt);
     if (evt.type === 'barge') return onBarge(evt);
     if (evt.type === 'command') return onCommand(evt);
@@ -809,12 +822,14 @@ async function onCommand(evt) {
     if (check.score != null && check.score >= voiceId.threshold - 0.15 && (evt.text || '').trim().split(/\s+/).length >= 2) theme?.flash('NOT MATCHED');
     if (voiceId.drifting) refreshTray();
     win?.webContents.send('listener-event', { type: 'ignored' }); // the screen stops "listening…" for it
+    orb?.listenerEvent({ type: 'ignored' });
     return log('voice-id', { ignored: true, score: check.score });
   }
   if (!addressed && !harmless) {
     const j = judgeAddressed(evt.text, talk);
     if (j.verdict !== 'yes') {
       win?.webContents.send('listener-event', { type: 'ignored' }); // not for her: the screen goes back to standby
+      orb?.listenerEvent({ type: 'ignored' });
       return log('overheard', { words: (evt.text || '').split(/\s+/).filter(Boolean).length, verdict: j.verdict, why: j.why });
     }
     log('addressed', { why: j.why });
@@ -1348,6 +1363,10 @@ ipcMain.on('tts-stream', async (e, id, text, native) => {
   const send = (...args) => { if (!e.sender.isDestroyed()) e.sender.send(...args); };
   // Native playback: audio goes to the listener (echo cancellation + barge-in), not the window
   const toListener = native && listener.canPlay;
+  if (orb?.speechMuted) { // muted from the corner orb: nothing is said; the caption still reads at her pace
+    setTimeout(() => send('tts-played', id, null), Math.min(12_000, Math.max(600, text.length / 15.5 * 1000)));
+    return;
+  }
   speaking.set(id, text); // for the echo check (whichever way it plays)
   if (toListener) listener.clip(id);
   if (native && !toListener) return send('tts-native-off', id); // the window will play it itself
@@ -1512,12 +1531,14 @@ async function askBrain(said, prompt, onDelta, source = 'mac', images = [], veri
     onDelta?.(delta);
   }, { onStart: () => bridge?.userSaid(said, source, verified), images, said });
   log('timing brain', { firstTextMs: first, doneMs: Date.now() - t0, ok: result.ok, source, model: result.model, why: result.why });
+  if (source === 'mac' && orb?.turnActive && result.ok && (result.text || '').length > 320) orb.portal(true, 'long answer'); // asked from the orb: a long result needs the screen
   toDash({ type: 'health', key: 'brain', ok: result.ok, reason: result.ok ? '' : /log in/i.test(result.error) ? 'Claude login expired' : /limit/i.test(result.error) ? 'Claude usage limit' : 'Claude error' });
   if (!/^\s*\(ignore\)/i.test(result.text || '')) { remember('user', said, source); remember('ares', result.text, source); }
   return result;
 }
 ipcMain.handle('brain-ask', (e, text) => {
   const said = text.replace(/^(\(ARES note:[\s\S]*?\)\n\n)+/, '');
+  text = (orb?.takeContext() || '') + text; // a file dropped on the corner orb ("ask about it")
   return askBrain(said, text, (delta) => { if (!e.sender.isDestroyed()) e.sender.send('brain-delta', delta); }, 'mac', [], macVerified(said));
 });
 ipcMain.on('brain-reset', () => resetBrain());
@@ -1529,6 +1550,7 @@ ipcMain.on('surface-hits', (_e, h) => surface.setHits(h || {}));
 ipcMain.handle('surface-state', () => ({ name: surface.name, blend: surface.blend, panel: surface.name === 'lifted' ? surface.panel : null, ...(wallpaper?.mainState() || {}) }));
 // Development only: inject what the listener heard (a test can't share the mic with the installed ARES)
 ipcMain.on('test-hear', (_e, evt) => { if (!app.isPackaged) listener.emit('event', evt); });
+ipcMain.handle('test-orb', (_e, what, arg) => (app.isPackaged ? null : orb?.test(what, arg || {})));
 ipcMain.handle('test-desk', (_e, patch) => {
   if (app.isPackaged) return null;
   if (patch?.mic) desk.setMic(patch.mic);
@@ -1590,6 +1612,7 @@ async function startWork() {
     win?.webContents.send('job-change', job);
     wallpaper?.jobs(jobs.list());
     theme?.jobs(jobs.list());
+    orb?.refresh();
     phone?.broadcast({ type: 'job', job });
     // Answered (on the Mac, by voice or from the phone): the "needs your OK" notification is out of date
     if (lastStatus.get(job.id) === 'approval' && job.status !== 'approval') clearPhoneNotes([`job-${job.id}-ok`]);
@@ -1604,7 +1627,7 @@ async function startWork() {
     if (busy && workBlocker == null) workBlocker = powerSaveBlocker.start('prevent-app-suspension');
     if (!busy && workBlocker != null) { powerSaveBlocker.stop(workBlocker); workBlocker = null; }
   });
-  jobs.on('finished', (job) => notifyJob(job, 'done'));
+  jobs.on('finished', (job) => { notifyJob(job, 'done'); orb?.jobFinished(job); });
   // "Send to Mac" from the phone while away: it opens as soon as they're back
   powerMonitor.on('unlock-screen', () => setTimeout(macPresent, 1500));
   powerMonitor.on('user-did-become-active', () => setTimeout(macPresent, 1500));
@@ -2102,8 +2125,9 @@ function createCalls() {
     }
   });
   c.on('change', () => phone?.broadcast({ type: 'calls' }));
-  c.on('live', () => { toDash({ type: 'call', call: liveCall() }); theme?.call(liveCall()); });
+  c.on('live', () => { toDash({ type: 'call', call: liveCall() }); theme?.call(liveCall()); orb?.refresh(); });
   c.on('inbound', ({ call, title, body, line, callback, pushed }) => {
+    orb?.callEvent({ kind: 'inbound', name: call?.name || '', line });
     const here = atMac();
     log('call inbound', { id: call.id, urgent: call.urgent, spam: call.spam, here, pushed });
     if (!call.spam && line) toDash({ type: 'inbox', id: `call-${call.id}`, label: call.urgent ? 'URGENT CALL' : 'MESSAGE', value: title || 'Missed call', detail: line });
@@ -2125,6 +2149,7 @@ function createCalls() {
   voicemail = new Voicemail({ dir: path.join(app.getPath('userData'), 'calls'), log, number: () => process.env.ARES_LINE_NUMBER || c.ownNumber || '',
     transcribe: (audio, type) => transcribe(audio, type), contactByNumber: (n) => contacts?.byNumber(n)?.name || '' });
   voicemail.on('voicemail', ({ from, title, body, line, name }) => {
+    orb?.callEvent({ kind: 'voicemail', name, line });
     toDash({ type: 'inbox', id: `vm-${Date.now()}`, label: 'VOICEMAIL', value: title, detail: body });
     pushToPhones({ title, body, tag: `vm-${from || name}`, buttons: buttons(from) }).catch(() => {});
     if (atMac()) tell(line);
@@ -2164,6 +2189,9 @@ function toolActivity(name) {
   return own[tool] || (server === 'ares' ? `${tool.replace(/_/g, ' ')}…` : 'working on it…');
 }
 claude.onTool((name) => toDash({ type: 'activity', text: toolActivity(name) }));
+// Asked from the corner orb: a tool that puts something on screen (a panel, a job, a search result) opens the portal
+const SCREEN_TOOLS = /calendar_show|panel_preview|panel_keep|start_job|start_project|find_files|list_windows|tasks_list|search|show_|open_url|read_file|job_result|list_jobs/;
+claude.onTool((name) => { if (orb?.turnActive && SCREEN_TOOLS.test(name)) orb.portal(true, `tool ${name.replace(/^mcp__.+?__/, '')}`); });
 
 /** The phone call happening right now (one ARES placed), for the dashboard's CALL panel. */
 function liveCall() {
@@ -2255,10 +2283,11 @@ app.whenReady().then(async () => {
   wakeLines = new WakeLines(path.join(app.getPath('userData'), 'ignition', 'wake-lines.json'));
   ignition.step('memory', 'start');
   claudeUsage = new ClaudeUsage({ file: path.join(app.getPath('userData'), 'claude-usage.json'), log });
-  claudeUsage.on('change', () => toDash({ type: 'claude', lines: claudeUsage.statusLines() }));
+  claudeUsage.on('change', () => { toDash({ type: 'claude', lines: claudeUsage.statusLines() }); orb?.refresh(); });
   // 80% / 95% of a window: a line on screen (not spoken), the ticker, and the phone if they're away from the Mac
   claudeUsage.on('warn', (w) => {
     notice(w.line);
+    orb?.usageWarn(w);
     toDash({ type: 'activity', text: `claude ${w.label} limit: ${w.pct}% used` });
     if (!atMac()) pushToPhones({ title: `Claude ${w.label} limit: ${w.pct}%`, body: w.line, tag: `claude-${w.window}` }).catch?.(() => {});
   });
@@ -2384,7 +2413,7 @@ app.whenReady().then(async () => {
     push: (n) => pushToPhones(n), notice: (line) => notice(line), phoneUrl: () => phoneUrl, cli: claude.CLI,
     power: (action, why) => powerAct(action, why), powerMode: () => power?.mode || 'online' });
   autonomy.on('change', () => { const v = autonomy.view(); win?.webContents.send('autonomy-change', v); phone?.broadcast({ type: 'autonomy', state: v }); refreshTray(); });
-  autonomy.on('paused', ({ why, paused }) => { theme?.toast({ kind: 'needs', label: 'PAUSED', tag: 'AUTONOMY', value: 'Everything on hold', detail: paused.join(', ') || why, urgent: true }); pushToPhones({ title: 'ARES: everything paused', body: paused.length ? paused.join(', ') : `Kill switch (${why}).`, tag: 'autonomy-paused', buttons: [{ title: 'Resume all', api: '/api/autonomy/resume', body: {} }] }).catch(() => {}); });
+  autonomy.on('paused', ({ why, paused }) => { orb?.refresh(); theme?.toast({ kind: 'needs', label: 'PAUSED', tag: 'AUTONOMY', value: 'Everything on hold', detail: paused.join(', ') || why, urgent: true }); pushToPhones({ title: 'ARES: everything paused', body: paused.length ? paused.join(', ') : `Kill switch (${why}).`, tag: 'autonomy-paused', buttons: [{ title: 'Resume all', api: '/api/autonomy/resume', body: {} }] }).catch(() => {}); });
   claudeUsage.on('warn', (w) => autonomy.usage(w.pct));
   claudeUsage.on('change', () => { if (claudeUsage.reserve(readSettings().claudeReserve || {}).ok) autonomy.usageOk(); });
   powerMonitor.on('unlock-screen', () => autonomy.event('unlock'));
@@ -2444,6 +2473,7 @@ app.whenReady().then(async () => {
   powerMonitor.on('shutdown', () => { if (power) power.quitAllowed = true; }); // the Mac is going down: a quit may happen
   power.on('change', (c) => {
     win?.webContents.send('power', { type: 'mode', ...c });
+    orb?.setContext({ power: c.mode });
     wallpaper?.scene({ type: 'power', mode: c.mode === 'dormant' ? 'offline' : c.mode, status: c.status }); // (the backdrop's controller knows offline, not dormant)
     wallpaper?.setPower(c.mode, c.status);
     theme?.power(c.mode);
@@ -2461,12 +2491,30 @@ app.whenReady().then(async () => {
   theme = new Theme({
     log, readSettings, writeSettings, supportDir: app.getPath('userData'), appDir: __dirname, onOpen: openView, brainVisible, look,
     menuSections, onMenuAction: () => refreshTray(), selfIds: ['com.dhruv.ares', 'com.github.Electron'],
+    orbMenu: (refresh) => orb?.menu(refresh) || [],
     onLive: () => { if (win && !win.isDestroyed()) win.webContents.send('ui-prefs', uiPrefs()); }, // never while quitting
     systemStats, dashAct, jobAnswer: (id, yes) => jobs.answer(id, yes), // the WORK drop-down's Approve / Decline (a click: the owner)
     helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(__dirname, 'native', 'build', 'ares-theme'),
   });
-  wallpaper.on('desk', () => theme.updateOrb());
   theme.jobs(jobs.list());
+  // The corner orb: the small reactor in a corner while her live one can't be seen (docs/orb-prompt.md)
+  orb = new Orb({
+    appDir: __dirname, log, readSettings, writeSettings,
+    helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(__dirname, 'native', 'build', 'ares-theme'),
+    deps: { // (getters: some of these come up after the orb does)
+      get listener() { return listener; }, get power() { return power; }, get autonomy() { return autonomy; }, get jobs() { return jobs; }, get control() { return control; },
+      get memory() { return memory; }, get tasks() { return tasks; }, get usage() { return claudeUsage; }, get sessions() { return claudeCtl?.sessions; },
+    },
+    hooks: {
+      summon: () => showWindow(), dismiss: () => surface.hide(), sendWindow: (ch, m) => { if (win && !win.isDestroyed()) win.webContents.send(ch, m); },
+      openView, stopSpeaking: () => { stopSpeaking(); win?.webContents.send('orb-stop'); }, ask: (text) => win?.webContents.send('orb-ask', text),
+      silentNow, liveCall, ownIds: ['com.dhruv.ares', 'com.github.Electron'],
+    },
+  });
+  orb.start();
+  const orbContext = () => orb?.setContext({ summoned: surface.summoned, brain: brainVisible(), fullscreen: fullscreenNow(), power: power.mode });
+  wallpaper.on('desk', orbContext);
+  orbContext();
   // The reactor's readouts: live HOST / CLAUDE / BATTERY values for the window and the wallpaper backdrop
   readouts = new Readouts({
     log, readSettings, powerMonitor, usage: () => claudeUsage?.snapshot?.() || null, jobs: () => jobs.list(),

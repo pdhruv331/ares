@@ -1,0 +1,98 @@
+/* The corner orb (orb.js): a ≈30 pt mini reactor in a corner of the screen, its caption, quick menu, cards and drop chips.
+   Everything is positioned off the orb's centre (--ox, --oy, set by orb.js from the corner). */
+:root { --c: 62, 230, 255; --violet: 167, 139, 250; --amber: 255, 181, 71; --green: 74, 222, 128; --red: 248, 113, 113;
+  --mono: "SF Mono", ui-monospace, Menlo, monospace; --ox: 0px; --oy: 0px; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; user-select: none; font-family: var(--mono); }
+.field { position: absolute; inset: 0; opacity: 0; transition: opacity 0.45s ease; }
+.field.on { opacity: 1; }
+.field.caret { opacity: 0.15; transition-duration: 0.3s; }
+
+#stage { position: absolute; left: calc(var(--ox) - 100px); top: calc(var(--oy) - 100px); width: 200px; height: 200px; }
+
+/* The amber count: approvals, a Claude session waiting, a failed job */
+.badge { position: absolute; left: calc(var(--ox) + 10px); top: calc(var(--oy) - 24px); min-width: 15px; height: 14px; padding: 0 4px; border-radius: 7px;
+  font-size: 9px; font-weight: 700; line-height: 14px; text-align: center; color: #1a0f00; background: rgb(var(--amber));
+  box-shadow: 0 0 8px rgba(var(--amber), 0.8); pointer-events: none; }
+
+/* "listening… release to send", "drop to hand it to ARES": spaced capitals just above the orb */
+.hint { position: absolute; left: var(--ox); top: calc(var(--oy) - 36px); transform: translateX(-50%); white-space: nowrap; pointer-events: none;
+  font-size: 9px; letter-spacing: 0.32em; color: #effcff; text-shadow: 0 0 10px rgba(var(--c), 0.9); opacity: 0; transition: opacity 0.18s; }
+.hint.on { opacity: 1; }
+.hint.flash { animation: hint-flash 1.4s ease-out forwards; }
+@keyframes hint-flash { 0% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }
+html.c-tr .hint, html.c-tl .hint { top: calc(var(--oy) + 28px); }
+html.c-bl .hint, html.c-tl .hint { left: calc(var(--ox) - 6px); transform: none; }
+html.c-br .hint, html.c-tr .hint { left: auto; right: calc(100% - var(--ox) - 6px); transform: none; }
+
+/* Her current line while the desktop is covered: one line, words lit in time with her voice (renderer/comms.js's sync) */
+.caption { position: absolute; max-width: 380px; padding: 6px 10px 6px 11px; border-radius: 3px; white-space: nowrap; pointer-events: none;
+  background: rgba(2, 8, 14, 0.8); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  font-size: 12px; line-height: 16px; letter-spacing: 0.03em; color: rgba(207, 239, 255, 0.45);
+  opacity: 0; transform: translateY(4px); transition: opacity 0.22s ease, transform 0.22s ease; }
+.caption.on { opacity: 1; transform: none; }
+.caption span.lit { color: var(--cyan, rgb(var(--c))); text-shadow: 0 0 8px rgba(var(--c), 0.35); }
+.caption span.now { color: #effcff; text-shadow: 0 0 10px rgba(var(--c), 0.8); }
+.caption::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 1px;
+  background: linear-gradient(90deg, rgba(var(--c), 0.6), transparent); }
+html.c-br .caption, html.c-tr .caption { right: calc(100% - var(--ox) - 18px); }
+html.c-bl .caption, html.c-tl .caption { left: calc(var(--ox) - 18px); }
+html.c-br .caption, html.c-bl .caption { bottom: calc(100% - var(--oy) + 24px); }
+html.c-tr .caption, html.c-tl .caption { top: calc(var(--oy) + 24px); }
+html.c-br .caption::after, html.c-tr .caption::after { background: linear-gradient(90deg, transparent, rgba(var(--c), 0.6)); }
+
+/* A card above the orb: a confirmation ("ALL WORK PAUSED"), a result (title + two lines + OPEN ›), a request (APPROVE / REVIEW) */
+.card { --k: var(--c); position: absolute; width: 272px; cursor: default; transform-origin: 100% 100%; }
+html.c-br .card, html.c-tr .card { right: calc(100% - var(--ox) - 18px); }
+html.c-bl .card, html.c-tl .card { left: calc(var(--ox) - 18px); transform-origin: 0 100%; }
+html.c-br .card, html.c-bl .card { bottom: calc(100% - var(--oy) + 30px); }
+html.c-tr .card, html.c-tl .card { top: calc(var(--oy) + 30px); transform-origin: 100% 0; }
+.card.with-caption { bottom: calc(100% - var(--oy) + 62px); }
+.cd-back { position: absolute; inset: 0; border-radius: 3px; background: radial-gradient(ellipse at 30% 0%, rgba(var(--k), 0.12), transparent 70%), rgba(2, 8, 14, 0.84);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+.br { position: absolute; width: 9px; height: 9px; border: 0 solid rgba(var(--k, var(--c)), 0.9); filter: drop-shadow(0 0 3px rgba(var(--k, var(--c)), 0.8)); pointer-events: none; }
+.br.tl { left: 0; top: 0; border-left-width: 1.4px; border-top-width: 1.4px; }
+.br.tr { right: 0; top: 0; border-right-width: 1.4px; border-top-width: 1.4px; }
+.br.bl { left: 0; bottom: 0; border-left-width: 1.4px; border-bottom-width: 1.4px; }
+.br.bo { right: 0; bottom: 0; border-right-width: 1.4px; border-bottom-width: 1.4px; }
+.cd-content { position: relative; padding: 9px 12px 9px 13px; }
+.cd-head { display: flex; justify-content: space-between; gap: 8px; font-size: 8px; letter-spacing: 0.3em; color: rgba(var(--k), 0.85); white-space: nowrap; }
+.cd-title { margin-top: 4px; font-size: 12.5px; line-height: 16px; letter-spacing: 0.03em; color: #effcff; text-shadow: 0 0 10px rgba(var(--k), 0.4);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cd-detail { margin-top: 3px; font-size: 9.5px; line-height: 13px; letter-spacing: 0.05em; color: rgba(207, 239, 255, 0.62);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.cd-detail:empty { display: none; }
+.cd-acts { display: flex; gap: 14px; margin-top: 7px; }
+.cd-acts:empty { display: none; }
+.cd-acts button { all: unset; cursor: pointer; font: 700 9px var(--mono); letter-spacing: 0.28em; color: rgb(var(--k)); text-shadow: 0 0 8px rgba(var(--k), 0.6); padding: 2px 0; }
+.cd-acts button:hover { color: #fff; }
+.cd-acts button.red { color: rgb(var(--red)); text-shadow: 0 0 8px rgba(var(--red), 0.6); }
+.cd-life { position: absolute; left: 13px; right: 13px; bottom: 3px; height: 1px; background: rgba(var(--k), 0.12); }
+.cd-life i { display: block; height: 100%; width: 100%; background: rgb(var(--k)); box-shadow: 0 0 4px rgb(var(--k)); transform-origin: left; }
+
+/* The quick menu (right-click): FRIDAY rows inside EDITH brackets, up and away from the orb */
+.menu { position: absolute; width: 196px; padding: 8px 0 7px; background: rgba(2, 8, 14, 0.88); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 3px; }
+html.c-br .menu, html.c-tr .menu { right: calc(100% - var(--ox) - 18px); }
+html.c-bl .menu, html.c-tl .menu { left: calc(var(--ox) - 18px); }
+html.c-br .menu, html.c-bl .menu { bottom: calc(100% - var(--oy) + 30px); }
+html.c-tr .menu, html.c-tl .menu { top: calc(var(--oy) + 30px); }
+.mn-head { padding: 0 14px 6px; font-size: 8px; letter-spacing: 0.4em; color: rgba(var(--c), 0.7); }
+.mn-row { display: flex; align-items: center; gap: 10px; padding: 5px 14px; font-size: 10.5px; letter-spacing: 0.12em; color: #d7f3fb; cursor: pointer; }
+.mn-row i { width: 12px; font-style: normal; text-align: center; color: rgba(var(--c), 0.8); font-size: 10px; }
+.mn-row:hover { background: rgba(var(--c), 0.1); color: #fff; }
+.mn-row.red { color: rgba(var(--red), 0.95); } .mn-row.red i { color: rgb(var(--red)); }
+.mn-row.red:hover { background: rgba(var(--red), 0.1); }
+
+/* Drop chips: four actions fanned out above and away from the orb */
+.chips { position: absolute; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+html.c-br .chips, html.c-tr .chips { right: calc(100% - var(--ox) - 14px); }
+html.c-bl .chips, html.c-tl .chips { left: calc(var(--ox) - 14px); align-items: flex-start; }
+html.c-br .chips, html.c-bl .chips { bottom: calc(100% - var(--oy) + 34px); }
+html.c-tr .chips, html.c-tl .chips { top: calc(var(--oy) + 34px); }
+.chip { position: relative; padding: 6px 12px 6px 11px; font-size: 9.5px; letter-spacing: 0.28em; color: #effcff; cursor: pointer; white-space: nowrap;
+  background: rgba(2, 8, 14, 0.86); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-radius: 2px;
+  box-shadow: inset 0 0 0 1px rgba(var(--c), 0.35); transform: translate(18px, 8px) scale(0.9); opacity: 0; transition: transform 0.28s cubic-bezier(.3,.7,.4,1), opacity 0.22s, box-shadow 0.15s; }
+html.c-bl .chip, html.c-tl .chip { transform: translate(-18px, 8px) scale(0.9); }
+.chips.on .chip { transform: none; opacity: 1; }
+.chip:hover { box-shadow: inset 0 0 0 1px rgba(var(--c), 0.95), 0 0 10px rgba(var(--c), 0.35); color: #fff; }
+.chip .nm { font-size: 8px; letter-spacing: 0.1em; color: rgba(207, 239, 255, 0.5); display: block; margin-top: 2px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }

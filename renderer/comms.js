@@ -85,10 +85,13 @@ const Comms = (() => {
    *  her audio (t = how much has actually played; start/end = where speech begins/ends in the clip). */
   function sentence(text) {
     text = clean(text);
-    const l = { text, words: weigh(text), seg: -1, idx: -1, clock: null, done: false, cut: false };
+    const l = { text, words: weigh(text), seg: -1, idx: -1, done: false, cut: false };
+    // The clock is mirrored to the corner orb the moment the voice code attaches one (see mirror)
+    let clockFn = null;
+    Object.defineProperty(l, 'clock', { get: () => clockFn, set: (fn) => { clockFn = fn; if (line === l && fn) mirror(l, Math.max(0, l.idx)); }, enumerable: true });
     l.segs = segment(l.words);
     l.start = () => show(l);
-    l.finish = () => { if (line === l && !l.cut) { l.done = true; paint(l, l.words.length); } };
+    l.finish = () => { if (line === l && !l.cut) { l.done = true; paint(l, l.words.length); mirror(l, l.words.length, true); } };
     /** Rate-based clock from now (no clip timing). */
     l.estimate = (rate = RATE.eleven, delay = 0.15) => {
       const t0 = performance.now() / 1000 + delay;
@@ -112,7 +115,23 @@ const Comms = (() => {
     aresEl.classList.remove('cut', 'notice');
     aresEl.classList.add('on');
     paint(l, 0, true);
+    mirror(l, 0);
     if (!raf) raf = requestAnimationFrame(tick);
+    // Covered (as the desktop under the apps) this page gets no frames: a timer keeps the orb's copy in step instead
+    clearInterval(mirrorTimer);
+    mirrorTimer = setInterval(() => { const cur = line; if (!cur || cur.done || cur.cut) return clearInterval(mirrorTimer); const n = litCount(cur); if (n != null) mirror(cur, n); }, 250);
+  }
+  let mirrorTimer = null;
+  /** How many words her voice has reached, from the line's clock or word boundaries (null: no timing yet). */
+  function litCount(l) {
+    if (l.boundary != null && !l.clock) return l.boundary;
+    if (!l.clock) return null;
+    const c = l.clock();
+    if (!c) return null;
+    const k = (c.t - c.start) / Math.max(0.2, c.end - c.start);
+    let n = 0;
+    for (const w of l.words) if (k >= w.start - 0.01) n++;
+    return n;
   }
   function tick(now) {
     raf = null;
@@ -120,16 +139,8 @@ const Comms = (() => {
     if (!l || l.done || l.cut) return;
     raf = requestAnimationFrame(tick);
     if (!gate(now)) return;
-    let n;
-    if (l.boundary != null && !l.clock) n = l.boundary;
-    else if (l.clock) {
-      const c = l.clock();
-      if (!c) return;
-      const k = (c.t - c.start) / Math.max(0.2, c.end - c.start);
-      n = 0;
-      for (const w of l.words) if (k >= w.start - 0.01) n++;
-    } else return;
-    paint(l, n);
+    const n = litCount(l);
+    if (n != null) paint(l, n);
   }
   /** Draw the segment holding word n: words before n lit, word n-1 the one being spoken. */
   function paint(l, n, force = false) {
@@ -153,7 +164,27 @@ const Comms = (() => {
       const i = Number(s.dataset.i);
       s.className = i < n - 1 ? 'lit' : i === n - 1 ? 'now' : '';
     }
+    mirror(l, n);
   }
+  // The corner orb (orb.js) shows the same line above itself while the desktop is covered. A covered window gets no
+  // animation frames, so the orb is given the whole schedule once per sentence (every segment's words, each word's
+  // start as a fraction of the sentence, and the clock's position now) and runs the same sync itself; the lit count
+  // is sent too whenever this page does get a frame, so the two never drift apart.
+  let mirrored = null;
+  function mirror(l, n, done = false, hold = null) {
+    const fresh = mirrored !== l;
+    mirrored = l;
+    const msg = { type: 'caption', n, done };
+    if (hold) msg.hold = hold;
+    if (fresh) {
+      msg.segs = l.segs.map((seg) => seg.map((i) => l.words[i].w));
+      msg.starts = l.segs.map((seg) => seg.map((i) => Math.round(l.words[i].start * 1000) / 1000));
+      msg.total = l.words.length;
+    }
+    if (l.clock) { const c = l.clock(); if (c) msg.clock = { t: c.t, start: c.start, end: c.end }; }
+    window.ares.scene?.(msg);
+  }
+  const mirrorOff = () => { clearInterval(mirrorTimer); if (mirrored) { mirrored = null; window.ares.scene?.({ type: 'caption', off: true }); } };
   /** She was talked over: the line stops where her voice stopped. */
   function cut() {
     const l = line;
@@ -164,12 +195,13 @@ const Comms = (() => {
     if (!aresEl.children.length) { aresEl.classList.remove('on'); return; }
     aresEl.lastChild.className = 'lit';
     aresEl.classList.add('cut');
+    mirror(l, n, true, 1400);
     end(1400);
   }
   /** Her reply is over: fade the line after a moment. */
   function end(after = HOLD_AFTER) {
     clearTimeout(endTimer);
-    endTimer = setTimeout(() => { aresEl.classList.remove('on'); line = null; }, after);
+    endTimer = setTimeout(() => { aresEl.classList.remove('on'); line = null; mirrorOff(); }, after);
   }
 
   /** A line she shows without saying (pairing codes, tips, warnings): held long enough to read. */
@@ -182,7 +214,7 @@ const Comms = (() => {
     paint(l, l.words.length, true);
     aresEl.classList.add('notice');
     clearTimeout(endTimer);
-    endTimer = setTimeout(() => { aresEl.classList.remove('on', 'notice'); line = null; }, hold ?? Math.min(16000, Math.max(4500, l.text.length * 70)));
+    endTimer = setTimeout(() => { aresEl.classList.remove('on', 'notice'); line = null; mirrorOff(); }, hold ?? Math.min(16000, Math.max(4500, l.text.length * 70)));
   }
   const clearNotice = () => aresEl.classList.remove('notice');
 

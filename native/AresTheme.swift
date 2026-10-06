@@ -30,6 +30,13 @@
 //   ares-theme appearance-changed       Tells running apps the accent/highlight colours changed
 //   ares-theme focus                    {"focus":true|false|null}: is a Focus on (null = macOS won't say, no Full Disk Access)
 //   ares-theme ax                       {"trusted":true|false}: Accessibility permission (for the Dock badges)
+//   ares-theme orb-watch                Long-running, for the corner orb (docs/orb-prompt.md). JSON lines when something changes:
+//                                       {"drag":true,"files":true,"text":false} while a drag is in progress (the mouse held and the
+//                                       drag pasteboard changed since), {"drag":false} when it ends; with "caret on" from stdin,
+//                                       {"caret":[x,y,w,h]} (screen px, top-left origin) for the focused text field's caret or
+//                                       selection, {"caret":null} when there's none. Polled gently (8 Hz / 4 Hz).
+//   ares-theme refocus <bundleID>       Bring that app back to the front (after ARES sinks)
+//   ares-theme front                    {"front":"<bundleID>"}: the frontmost app
 //   ares-theme terminal-profile <out.terminal> <json>   A Terminal profile from {"name","bg","fg","bold","cursor","selection","ansi":[16]}
 //                                       (colours as "#rrggbb"; Terminal stores them as archived NSColor)
 //   ares-theme pref-get <domain> <key>   {"exists":bool,"plist":"<base64 XML plist of the value>"}: the user's setting, exactly
@@ -362,6 +369,71 @@ case "pointer":
 
 case "ax":
   emit(["trusted": AXIsProcessTrusted()])
+
+case "front":
+  emit(["front": NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""])
+
+case "refocus":
+  guard args.count >= 3 else { fail("usage: ares-theme refocus <bundleID>") }
+  let ok = runningApp(args[2])?.activate(options: []) ?? false
+  emit(["ok": ok])
+
+case "orb-watch":
+  _ = NSApplication.shared
+  let dragPB = NSPasteboard(name: .drag)
+  var upCount = dragPB.changeCount   // the drag pasteboard's count the last time no button was held
+  var dragging = false
+  var caretOn = false
+  var lastCaret = "unset"
+  var tick = 0
+  DispatchQueue.global().async {
+    while let line = readLine() {
+      let on = line.trimmingCharacters(in: .whitespaces) == "caret on"
+      DispatchQueue.main.async { caretOn = on; if !on { lastCaret = "unset" } }
+    }
+    exit(0) // ARES went away
+  }
+  /// The caret (or selection) of the focused text element, system-wide, as a screen rect; nil when nothing has one.
+  func caretRect() -> CGRect? {
+    guard AXIsProcessTrusted() else { return nil }
+    let sys = AXUIElementCreateSystemWide()
+    guard let f = axValue(sys, kAXFocusedUIElementAttribute) else { return nil }
+    let el = f as! AXUIElement
+    guard let rangeV = axValue(el, kAXSelectedTextRangeAttribute) else { return nil }
+    var bounds: CFTypeRef?
+    guard AXUIElementCopyParameterizedAttributeValue(el, kAXBoundsForRangeParameterizedAttribute as CFString, rangeV, &bounds) == .success,
+          let b = bounds else { return nil }
+    var rect = CGRect.zero
+    guard AXValueGetValue(b as! AXValue, .cgRect, &rect) else { return nil }
+    if rect.width > 4000 || rect.height > 4000 || rect.height <= 0 { return nil }
+    if rect.width == 0 && rect.height == 0 { return nil }
+    return rect
+  }
+  Timer.scheduledTimer(withTimeInterval: 0.125, repeats: true) { _ in
+    tick += 1
+    let held = (NSEvent.pressedMouseButtons & 1) != 0
+    if !held { upCount = dragPB.changeCount }
+    let now = held && dragPB.changeCount != upCount
+    if now != dragging {
+      dragging = now
+      if now {
+        let types = dragPB.types ?? []
+        let files = types.contains(where: { $0.rawValue.contains("file-url") || $0 == .fileURL || $0.rawValue == "NSFilenamesPboardType" })
+        let text = types.contains(where: { $0 == .string || $0 == .URL || $0.rawValue.contains("url") || $0.rawValue.contains("text") })
+        emit(["drag": true, "files": files, "text": text && !files])
+      } else { emit(["drag": false]) }
+    }
+    if caretOn && tick % 2 == 0 {
+      let r = caretRect()
+      let key = r.map { "\(Int($0.minX)),\(Int($0.minY)),\(Int($0.width)),\(Int($0.height))" } ?? "none"
+      if key != lastCaret {
+        lastCaret = key
+        if let r { emit(["caret": [Int(r.minX), Int(r.minY), Int(r.width), Int(r.height)]]) } else { emit(["caret": NSNull()]) }
+      }
+    }
+  }
+  emit(["ok": true, "trusted": AXIsProcessTrusted()])
+  RunLoop.main.run()
 
 case "terminal-profile":
   guard args.count >= 4, let data = args[3].data(using: .utf8),
