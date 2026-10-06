@@ -38,7 +38,8 @@ HARD RULES
 - Hold the live reactor's CORE (the centre, ~0.35 of its radius) for ~1.2 s → STANDBY; hold again (or ⌥Space, or "wake up") → online, instantly (no cold start). A counter-clockwise ring drains while holding; "HOLD FOR STANDBY" under the core on hover. Never triggered by a click or by orbs thrown into the reactor.
 - Standby = listening off (wake word + desk mode paused), the scene dims to a cool blue (#6096FF-ish): rings/coils dark, almost no motion, the core breathing slowly; job orbs keep circling dimmed; callouts and panels hidden; rendering at a very low rate (or a still with only the core breathing). The ghost log notes the change.
 - Standby text block (on a cleared band, with real spacing, as in the mockup): "ARES · STANDBY" (small, letter-spaced, soft glow), a short thin divider under it, then a clear gap, then "LISTENING OFF / PHONE LINK ACTIVE / N JOBS RUNNING" with a small green "link alive" dot; nothing crowded.
-- STANDBY → POWER DOWN on the Mac (she isn't listening in standby, so voice won't do): below that block, a small pill "⏻ HOLD TO POWER DOWN"; hold ~1.5 s (it fills amber) → the spin-down from blue to the cold gold still. Holding the core in standby still WAKES her. ◉ → Quit also works.
+- The standby text block is centred as ONE group (title, divider, status line incl. its green dot measured together), on the reactor's vertical axis.
+- STANDBY → POWER DOWN on the Mac (she isn't listening in standby, so voice won't do): the POWER NOTCH (agreed): a small ⏻ socket on the reactor's vertical axis, BELOW the tick ring and ABOVE the standby text (with a short hairline linking it to the ring), only shown in standby. Hover: it glows amber + "HOLD TO POWER DOWN" beside it. Hold ~1.5 s: a ring fills around the notch and the reactor's ticks light amber outward from the bottom until they meet at the top → the spin-down from blue to the cold gold still. Release early = cancel. Holding the core in standby still WAKES her. ◉ → Quit also works.
 - Everything else keeps running: the phone link, jobs, projects, routines, Claude hooks → pushes, call/voicemail pushes. The transition uses the spin-down (below) but stops at standby's levels.
 
 4c. POWER DOWN (a real quit): the SPIN-DOWN animation (agreed)
@@ -53,6 +54,26 @@ HARD RULES
 - The phone's orb colour and header follow the Mac's state: cyan ONLINE, blue STANDBY ("N jobs running · reachable"), gold OFFLINE, and "Mac asleep · can't wake" when the Mac can't be reached. A toast confirms each change ("Mac ARES → standby").
 - Online ⇄ standby and power down go over the existing authenticated phone channel. WAKE FROM OFF: the ignition helper keeps ONE small OUTBOUND authenticated connection to the existing ARES relay (no open ports, no other commands accepted, signed by the paired phone) and launches ARES on a valid wake; then the normal charge-to-wake plays on the Mac and the phone shows progress. This replaces the "no network" rule in section 2 for this one purpose only.
 - The Mac must be awake for a wake-from-off: add a setting "Keep the Mac awake on power while ARES is off" (default off; same power assertion as Stay Reachable, power adapter only). If the Mac is asleep/lid closed, the phone says so plainly.
+
+4e. SOUND (Mac) AND HAPTICS (phone) FOR EVERY STAGE
+- Sounds are short, subtle, local files (no network), designed to fit the reactor (synthesised or licensed-free; no copyrighted samples), at a gentle level that follows the system volume; quiet hours / Focus → silent (visuals only). A ◉ setting: Power sounds On/Off.
+  - Notch/core hover: a soft tick. Hold begins: a rising tone that tracks the hold. Commit: a muted clunk.
+  - Charge-to-wake: a hum rising with the real charge %, a tiny "inhale" (near-silence) at the held breath, a bright bloom chime on wake, then her spoken line.
+  - Standby: two soft falling notes + a gentle whir down. Wake from standby: a short rising chime.
+  - Power down (spin-down): a clunk, a long turbine wind-down matching the rings' deceleration, a soft cold thud at the end.
+  - Error (a step failed): a low two-note "nope".
+- Phone haptics (Android VibrationEffect / predefined effects; respect the system haptics setting):
+  - Holding the orb: light ticks at each 1/8 of the ring, getting firmer near the end; commit = a heavy thunk.
+  - Wake completes (the Mac's bloom): a double tap. Standby committed: a soft single thunk.
+  - Slide to power down: a detent tick at each step of the track, a heavy thunk at the end; letting go = a light tick as it springs back.
+  - Can't reach the Mac / error: an error buzz.
+- The phone also plays quieter versions of the sounds while the app is in front (respecting silent mode).
+
+4f. PHONE STATES AND EXTRAS (as rendered)
+- "Mac asleep": the orb goes grey and still, the header says MAC · ASLEEP; holding the orb gives the error buzz and "Mac asleep · can't wake / Open the lid or plug it in".
+- Scheduled standby / wake (by voice: "stand by at midnight, wake me at 7:30"; stored as a routine): a chip under the header ("☾ standby 00:00 · wake 07:30"); 5 minutes before, a notification "Standing by in 5 min · N jobs keep running" with SKIP TONIGHT / STANDBY NOW.
+- Auto standby on the Mac (settings, each with a toggle): when the screen locks, after N idle minutes, at a night hour, or on low battery; wake when I'm back (unlock/desk-mode presence). Always noted in the ghost log; never auto power down.
+- The ◉ in the ARES menu bar shows the state colour (cyan / blue / gold) with Wake · Standby · Power down in its drop-down; ⌥⇧Space toggles standby. The lock-screen still matches the state (blue standby still vs the gold offline still).
 
 5. PERFORMANCE
 - The helper idles at ~0% CPU (static window; animate only on hover/hold/charge). The charge animation runs at 60 fps for its few seconds only. Measure and report idle CPU/memory of the helper.
