@@ -64,7 +64,7 @@
         onMode(m);
         break;
       case 'say':
-        if (m.line) { note('ares', m.line); speakSafely(m.line, 8000); }
+        if (m.line) { note('ares', m.line); speakSafely(m.line, 8000).then(() => window.ares.power.act('said', 'window')); } // (said: the spin-down may close the ears)
         break;
       case 'prefs':
         applyPrefs(m.prefs);

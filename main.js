@@ -2519,6 +2519,7 @@ ipcMain.handle('power-act', (_e, what, why = 'window') => {
   if (what === 'toggle') return power.toggle(why);
   if (what === 'powerdown') return Boolean(power.powerDown(why));
   if (what === 'online') { power.setOnline(why); return true; }
+  if (what === 'said') { power.lineSaid(); return true; }
   if (what === 'silent') return silentNow();
   return false;
 });

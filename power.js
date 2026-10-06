@@ -132,6 +132,7 @@ class Power extends EventEmitter {
     this.log('power down', { why, running: running.length, unsaved: this.unsaved?.() || 0 });
     this.audit?.record({ kind: 'power', what: 'power down', why, tier: 1, detail: running.length ? `${running.length} jobs paused` : '' });
     this.mode = 'spindown';
+    this.saidDone = false; this.onSaid = null;
     this.emit('say', { line });
     this.emit('change', { mode: 'spindown', status: this.status(), why, line });
     const t0 = Date.now();
@@ -151,6 +152,8 @@ class Power extends EventEmitter {
       // 3. phone notified
       step('phone', 'start');
       try { this.phone?.({ type: 'power', mode: 'spindown', status: this.status(), why, note: 'phone told' }); step('phone', 'ok', this.linkAlive() ? 'told' : 'not connected'); } catch (err) { step('phone', 'fail', err.message); }
+      // Her line plays through the listener's speaker (echo-cancelled): let her finish it before the ears close, within a cap
+      await this.waitSaid(7000);
       // 4. ears closed, 5. voice off
       step('ears', 'start'); try { this.closeEars?.(); step('ears', 'ok', 'closed'); } catch (err) { step('ears', 'fail', err.message); }
       step('voice', 'start'); try { this.voiceOff?.(); step('voice', 'ok', 'off'); } catch (err) { step('voice', 'fail', err.message); }
@@ -168,6 +171,9 @@ class Power extends EventEmitter {
     })().catch((err) => { this.log('power down failed', err.message); this.quitting = false; });
     return line;
   }
+  /** The window finished speaking the power-down line (renderer/power.js) → the ears and the voice may stop. */
+  lineSaid() { this.saidDone = true; this.onSaid?.(); }
+  waitSaid(ms) { if (this.saidDone) return Promise.resolve(); return new Promise((r) => { this.onSaid = r; setTimeout(r, ms); }); }
   /** ◉ → Quit ARES Completely: the spin-down, then the process ends and the ignition helper takes the reactor over. */
   quitFully(why = 'menu') { this.log('quit fully', { why, mode: this.mode }); return this.powerDown(why, { fully: true }); }
 
