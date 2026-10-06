@@ -278,7 +278,8 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   orb swells as the pointer nears; the focused field's caret rect (`caret on`) so the orb fades to 15% within 40 pt. Needs
   Accessibility: the dev binary isn't trusted, so the caret fade only works in the installed app. `ares-theme front` / `refocus <id>`.
 - Click = the portal: `orb.portal(true)` tells the window where the circle grows from (`portal` IPC → renderer/surface.js clip-path
-  reveal with a bright edge, 0.6 s) then `showWindow()`; closing runs it back, sinks after 560 ms and refocuses the previous app.
+  reveal with a bright edge, 0.6 s) then `showWindow(null, { solid: true })` (a SOLID lift: glass kept and every click taken even with
+  the theme on, `surface.solid`; the blended lift would show her see-through over the apps); closing runs it back, sinks after 560 ms and refocuses the previous app.
   `hideWindow()` and ⌥Space go through the orb while its portal is open; a sink from elsewhere (Esc, a click on another app) resets it.
 - Hold = push-to-talk: `listener.listen(30000, false)` (Voice ID still applies), release sends the listener `finish` (new command in
   AresListener.swift). The orb's turn lasts until `reply-done`; a tool in SCREEN_TOOLS (main.js) or an answer > 320 chars opens the
