@@ -239,8 +239,9 @@ final class Ignition: NSObject, NSApplicationDelegate {
     if aresPid() == nil {
       let cfg = config()
       if let app = cfg["app"] as? String, !app.isEmpty {
-        // -g: don't activate (no Space switch, nothing comes to the front); -j: launch hidden (no Dock bounce). ARES shows its desktop itself.
-        let t = Process(); t.executableURL = URL(fileURLWithPath: "/usr/bin/open"); t.arguments = ["-g", "-j", "-a", app]; try? t.run()
+        // -g: don't activate (no Space switch, nothing comes to the front). Never -j: a hidden launch keeps every window of ARES
+        // hidden until the app is unhidden (seen 2026-10-06: the handover went to a window nobody could see).
+        let t = Process(); t.executableURL = URL(fileURLWithPath: "/usr/bin/open"); t.arguments = ["-g", "-a", app]; try? t.run()
         launchedAt = Date()
       } else { log("no app to launch in config.json (development): waiting for ARES to be started by hand") }
     }

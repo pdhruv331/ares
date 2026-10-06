@@ -148,7 +148,10 @@ function createWindow({ show }) {
   surface = new Surface({ win, log, opts: () => ({ enabled: wallpaper?.opts.enabled ?? readSettings().wallpaper?.enabled !== false, summon: readSettings().summon || 'lift',
     blend: Boolean(theme?.live) }), // the ARES theme: she's part of the screen, not an app window in front of it
     onChange: (name) => { wallpaper?.mainSurface(name, win); theme?.surface(name); win.webContents.send('ui-prefs', uiPrefs()); setTimeout(() => dashboard?.setVisible(win.isVisible()), 50); } });
-  win.once('ready-to-show', () => { if (surface.desktopOn) surface.desktop(); else if (show) win.show(); });
+  win.once('ready-to-show', () => {
+    if (app.isHidden?.()) app.show(); // (launched hidden, e.g. `open -j`: the windows would never appear otherwise; show() doesn't focus)
+    if (surface.desktopOn) surface.desktop(); else if (show) win.show();
+  });
 
   // Closing the window hides it; the assistant keeps running in the menu bar.
   win.on('close', (e) => {
