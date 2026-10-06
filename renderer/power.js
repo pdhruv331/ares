@@ -45,11 +45,11 @@
         break;
       case 'ready':
         wake = m.line || null;
-        if (helperDriven) break; // the helper plays the wake; this page comes in live at the handover
+        if (helperDriven && root.classList.contains('power-wait')) break; // the helper plays the wake; this page comes in live at the handover
         P.ready();
         break;
       case 'handover':
-        if (!helperDriven) break; // this page played the charge itself: 'online' arrives from the controller
+        if (!helperDriven || !root.classList.contains('power-wait')) break; // this page played the charge itself: 'online' arrives from the controller
         // the helper reached its bloom: play the wake here too (the rings spring open, the shockwave) while the page fades in
         P.set('wake', { force: true });
         root.classList.remove('power-wait'); root.classList.add('power-handover');
@@ -75,7 +75,7 @@
     else if (m.mode === 'online') { if (P.mode !== 'online' && P.mode !== 'fromstandby' && P.mode !== 'wake') P.set('online'); quiet(false); }
     else if (m.mode === 'spindown') { P.set('spindown'); quiet(true); Sounds.play('clunk'); setTimeout(() => Sounds.play('winddown'), 250); }
     else if (m.mode === 'dormant') { if (P.mode !== 'offline' && P.mode !== 'spindown') P.set('offline', { force: true }); quiet(true); modeClass('offline'); }
-    else if (m.mode === 'charging') { ghost.clear(); P.set('charging', { force: true }); P.charge = 0; P.readyAt = false; quiet(true); modeClass('charging'); ghost.line('igniting', 1500); }
+    else if (m.mode === 'charging') { helperDriven = false; root.classList.remove('power-wait'); ghost.clear(); P.set('charging', { force: true }); P.charge = 0; P.readyAt = false; quiet(true); modeClass('charging'); ghost.line('igniting', 1500); } // (a wake from dormancy: this page plays the charge)
   }
 
   // ---- The controller's events (scene.js dispatches them each frame) -------------------------------------------------------------
