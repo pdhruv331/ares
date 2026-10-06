@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en" class="look-reactor">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mockup: wake callouts · standby → power down</title>
+  <style>
+    /* Mockups with the real drawing code (renderer/reactor.js + ignite.js):
+       1. WAKE: the callouts draw themselves in after the bloom (dot → diagonal → tick → label typed → value), staggered
+       2. STANDBY → AWAKE: the same draw-in after the rising chime
+       3. STANDBY → POWER DOWN: hold the notch (ticks light amber from the bottom, meeting at the top), then a 0.55 s flare
+          (rings spin up, brighten amber-white, coils all light) and the turbine wind-down into the cold gold still */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; background: #03070d; font-family: -apple-system, system-ui, sans-serif; }
+    canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+    #sheet { z-index: 1; } #hud { z-index: 2; }
+    #ui { position: absolute; top: 14px; left: 14px; z-index: 5; display: flex; gap: 8px; }
+    #ui button { font: 11px "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .08em; color: #cfefff; background: rgba(62,230,255,.08); border: 1px solid rgba(62,230,255,.35); border-radius: 4px; padding: 6px 10px; cursor: pointer; }
+    #ui button:hover { background: rgba(62,230,255,.18); }
+    #cap { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 5; color: rgba(207,239,255,.5); font: 11px "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .1em; white-space: nowrap; }
+    .ghost { position: absolute; left: 28px; bottom: 36px; z-index: 6; display: flex; flex-direction: column; gap: 4px; }
+    .ghost-row { font: 400 10px/1.4 "SF Mono", ui-monospace, Menlo, monospace; letter-spacing: .08em; color: rgba(207,239,255,.45); white-space: pre; transition: opacity .7s; }
+    .ghost-row.fade { opacity: 0; }
+  </style>
+</head>
+<body>
+  <canvas id="sheet"></canvas><canvas id="hud"></canvas>
+  <div id="ui"><button data-run="wake">1 · WAKE → CALLOUTS</button><button data-run="standby-awake">2 · STANDBY → AWAKE</button><button data-run="standby-off">3 · STANDBY → POWER DOWN</button></div>
+  <div id="ghost" class="ghost"></div>
+  <div id="cap">MOCKUP</div>
+<script src="../../renderer/reactor.js"></script>
+<script src="../../renderer/ignite.js"></script>
+<script>
+(() => {
+  const { Engine, Backdrop, COLORS, rgba } = Reactor;
+  const sheet = document.getElementById('sheet'), hud = document.getElementById('hud');
+  const sctx = sheet.getContext('2d'), ctx = hud.getContext('2d');
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  let W, H, cx, cy, r;
+  const engine = new Engine(), back = new Backdrop(), P = new Ignite.Controller(engine);
+  const ghost = Ignite.ghost(document.getElementById('ghost'));
+  const cap = document.getElementById('cap');
+  const say = (t) => { cap.textContent = `MOCKUP · ${t}`; };
+  function resize() {
+    W = innerWidth; H = innerHeight;
+    for (const c of [sheet, hud]) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); c.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0); }
+    cx = W / 2; cy = H / 2 + H * 0.03; r = Math.min(H * 0.26, W * 0.22);
+    back.resize(W, H, dpr, 1);
+  }
+  const CALLOUTS = [['JOBS', -118, 'NONE RUNNING'], ['HOST', -62, 'MAC · ONLINE'], ['CLAUDE', 142, '5H 22% · WEEK 45%'], ['BATTERY', 38, '75% · ON BATTERY']];
+  function drawCallouts(g) { // the window's callouts (scene.js), with the same reveal
+    if (P.mode !== 'online' && P.mode !== 'tostandby' && P.mode !== 'fromstandby') return;
+    ctx.save(); ctx.font = '8.5px "SF Mono", ui-monospace, Menlo, monospace'; ctx.letterSpacing = '0.14em'; ctx.lineWidth = 1; ctx.textBaseline = 'alphabetic';
+    CALLOUTS.forEach(([id, deg, val], i) => {
+      const a = deg * Math.PI / 180, right = Math.cos(a) > 0;
+      const ax = g.cx + Math.cos(a) * g.r * 1.14, ay = g.cy + Math.sin(a) * g.r * 1.14, ex = g.cx + Math.cos(a) * g.r * 1.9, ey = g.cy + Math.sin(a) * g.r * 1.9, tx = ex + (right ? 40 : -40);
+      const rv = Ignite.calloutReveal(P.calloutK, i), k = P.fade;
+      if (rv.dot <= 0) return;
+      const col = engine.hue;
+      ctx.strokeStyle = rgba(col, 0.42 * k); ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ax + (ex - ax) * rv.diag, ay + (ey - ay) * rv.diag); if (rv.tick > 0) ctx.lineTo(ex + (tx - ex) * rv.tick, ey); ctx.stroke();
+      ctx.fillStyle = rgba(col, 0.9 * k * rv.dot); ctx.beginPath(); ctx.arc(ax, ay, 2.5 * (0.6 + 0.4 * rv.dot), 0, Math.PI * 2); ctx.fill();
+      if (rv.label <= 0) return;
+      ctx.textAlign = right ? 'left' : 'right'; const x = right ? ex + 2 : ex - 2;
+      ctx.fillStyle = rgba(col, 0.88 * k); ctx.fillText(id.slice(0, Math.ceil(id.length * rv.label)), x, ey - 5);
+      if (rv.value > 0) { ctx.fillStyle = rgba(col, 0.55 * k * rv.value); ctx.fillText(val, x, ey + 11); }
+    });
+    ctx.restore();
+  }
+  // ---- scenes ---------------------------------------------------------------------------------------------------------
+  let timers = [];
+  const after = (ms, fn) => timers.push(setTimeout(fn, ms));
+  function reset() { for (const t of timers) clearTimeout(t); timers = []; ghost.clear(); }
+  const status = { listening: false, link: true, jobs: 0 };
+  const run = {
+    wake() { // the end of a charge: breath → bloom → online, then the callouts draw in
+      reset(); P.set('charging', { force: true }); engine.hue = [...Ignite.GOLD]; P.charge = 1; P.shown = 0.9; P.readyAt = true;
+      say('the charge completes: held breath, bloom, then the callouts draw themselves in');
+    },
+    'standby-awake'() {
+      reset(); P.set('standby', { force: true, status }); engine.hue = [...Ignite.BLUE]; P.title = 1; say('standby · the core is held…');
+      after(1200, () => { P.hold = { kind: 'wakeup', k: 0, dur: 0.7 }; });
+      after(1200 + 760, () => { P.hold = null; P.set('fromstandby'); say('wake from standby: the rising chime, then the same callout draw-in'); });
+    },
+    'standby-off'() {
+      reset(); P.set('standby', { force: true, status }); engine.hue = [...Ignite.BLUE]; P.title = 1; say('standby · hover the notch: HOLD TO POWER DOWN');
+      after(900, () => { P.wantNotchHover = 1; });
+      after(1700, () => { P.hold = { kind: 'power', k: 0, dur: 1.5 }; say('holding: the ring fills, the ticks light amber from the bottom, meeting at the top'); });
+      after(1700 + 1520, () => { P.hold = null; P.wantNotchHover = 0; P.set('spindown'); say('commit: a 0.55 s flare (rings spin up amber-white, coils light), then the turbine wind-down to the cold still'); ghost.step({ name: 'jobs', status: 'ok', detail: 'none running' }); });
+      after(1700 + 2300, () => ghost.step({ name: 'memory', status: 'ok', detail: '3 turns saved' }));
+      after(1700 + 3000, () => ghost.step({ name: 'phone', status: 'ok', detail: 'told' }));
+      after(1700 + 3600, () => ghost.step({ name: 'ears', status: 'ok', detail: 'closed' }));
+      after(1700 + 4100, () => ghost.step({ name: 'voice', status: 'ok', detail: 'off' }));
+      after(1700 + 6100, () => ghost.line('reactor cold', 3000));
+    },
+  };
+  document.getElementById('ui').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) run[b.dataset.run](); });
+  let last = performance.now();
+  function frame(now) {
+    requestAnimationFrame(frame);
+    const real = Math.min(1, (now - last) / 1000); last = now;
+    const g = { cx, cy, r };
+    for (let left = real; left > 0; left -= 0.05) { P.update(Math.min(0.05, left)); engine.setState('idle'); engine.update(Math.min(0.05, left), {}); }
+    for (const ev of P.events.splice(0)) { if (ev === 'wake') back.ripples.push({ t0: back.t, k: 1.7 }); if (ev === 'online') { P.wakeLine = 'Late night, sir. Clear out there.'; P.lineShown = 0; } }
+    const sh = P.sheet(g); back.setOpts(sh.opts);
+    back.draw(ctx, { staticCtx: sctx, cx, cy, r, hue: P.mode === 'online' ? engine.hue : sh.hue, dt: real, motion: P.mode !== 'offline', ink: true });
+    P.drawUnder(ctx, g); engine.draw(ctx, cx, cy, P.radius(r)); drawCallouts(g); P.drawOver(ctx, g);
+  }
+  addEventListener('resize', resize); resize(); requestAnimationFrame(frame);
+  window.M = { P, engine, run };
+  run.wake();
+})();
+</script>
+</body>
+</html>

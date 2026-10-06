@@ -302,9 +302,9 @@ const Scene = (() => {
     ctx.letterSpacing = '0.14em';
     ctx.lineWidth = 1;
     ctx.textBaseline = 'alphabetic';
-    for (const c of CALLOUTS) {
+    CALLOUTS.forEach((c, i) => {
       const geo = calloutGeo.get(c.id);
-      if (!geo) continue;
+      if (!geo) return;
       const d = readouts[c.id] || {};
       const f = calloutFade.get(c.id) || { v: 1, to: 1 };
       f.v += (f.to - f.v) * Math.min(1, dt / 0.15);
@@ -312,20 +312,26 @@ const Scene = (() => {
       const hot = hoverCallout === c.id || openCallout === c.id;
       const col = d.amber ? COLORS.amber : engine.hue;
       const k = (geo.bottom ? bottomDim : 1) * f.v * (hot ? 1.35 : 1) * (power ? power.fade : 1);
+      // After a wake the callouts draw themselves in: the dot, the diagonal, the tick, the label typed, the value last
+      const rv = power && window.Ignite ? Ignite.calloutReveal(power.calloutK, i) : { dot: 1, diag: 1, tick: 1, label: 1, value: 1 };
+      if (rv.dot <= 0) return;
       ctx.strokeStyle = rgba(col, 0.42 * k);
-      ctx.beginPath(); ctx.moveTo(geo.ax, geo.ay); ctx.lineTo(geo.ex, geo.ey); ctx.lineTo(geo.tx, geo.ey); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(geo.ax, geo.ay); ctx.lineTo(geo.ax + (geo.ex - geo.ax) * rv.diag, geo.ay + (geo.ey - geo.ay) * rv.diag);
+      if (rv.tick > 0) ctx.lineTo(geo.ex + (geo.tx - geo.ex) * rv.tick, geo.ey);
+      ctx.stroke();
       // The anchor dot (pulsing while its card is open)
       const pulse = openCallout === c.id ? 1 + 0.6 * (0.5 + 0.5 * Math.sin(engine.t * 6)) : 1;
-      ctx.fillStyle = rgba(col, 0.9 * k);
-      ctx.beginPath(); ctx.arc(geo.ax, geo.ay, 2.5 * pulse, 0, TAU); ctx.fill();
+      ctx.fillStyle = rgba(col, 0.9 * k * rv.dot);
+      ctx.beginPath(); ctx.arc(geo.ax, geo.ay, 2.5 * pulse * (0.6 + 0.4 * rv.dot), 0, TAU); ctx.fill();
       if (openCallout === c.id) { ctx.strokeStyle = rgba(col, 0.35 * k); ctx.beginPath(); ctx.arc(geo.ax, geo.ay, 6 + 3 * (pulse - 1), 0, TAU); ctx.stroke(); }
+      if (rv.label <= 0) return;
       ctx.textAlign = geo.align;
       const x = geo.right ? geo.ex + 2 : geo.ex - 2;
+      const name = c.id.toUpperCase() + (hot ? '  ›' : '');
       ctx.fillStyle = rgba(col, 0.88 * k);
-      ctx.fillText(c.id.toUpperCase() + (hot ? '  ›' : ''), x, geo.ey - 5);
-      ctx.fillStyle = rgba(col, 0.55 * k);
-      ctx.fillText(String(d.value || '—'), x, geo.ey + 11);
-    }
+      ctx.fillText(name.slice(0, Math.ceil(name.length * rv.label)), x, geo.ey - 5);
+      if (rv.value > 0) { ctx.fillStyle = rgba(col, 0.55 * k * rv.value); ctx.fillText(String(d.value || '—'), x, geo.ey + 11); }
+    });
     ctx.restore();
   }
   /** The callout under a point (client coordinates). */

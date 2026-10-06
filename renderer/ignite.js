@@ -173,6 +173,8 @@
       this.hueDrain = null;
       this.hintText = '';
       this.clipR = 0;            // > 0: this page paints only a disc of clipR·r around the reactor (the helper): effects stay inside it
+      this.calloutK = 0;         // the callouts drawing themselves in after a wake (0..1 over ~1.8 s; scene.js reads it)
+      this.fromStandby = false;  // a spin-down that began in standby flares first (there's little left to wind down otherwise)
     }
     get S_() { return this.S; }
 
@@ -185,9 +187,9 @@
       if (mode === 'offline') { e.cold = 1; e.forceHue = GOLD; e.hue = [...GOLD]; e.pace = 0; e.scanOn = 0; e.coilsLit = -1; e.hum = 0; e.sparks.length = 0; this.title = extra.fadeTitle ? 0 : 1; this.charge = 0; this.shown = 0; this.steps = []; this.failed = false; this.streaks.length = 0; }
       if (mode === 'charging') { e.forceHue = GOLD; e.coilsLit = 0; e.scanOn = 0; this.charge = extra.charge || 0; }
       if (mode === 'standby') { e.forceHue = BLUE; e.scanOn = 0; e.coilsLit = -1; e.hum = 0; }
-      if (mode === 'online') { e.forceHue = null; e.cold = 0; e.pace = 1; e.scanOn = 1; e.coilsLit = -1; e.hum = 0; e.rate = 1; this.title = 0; this.streaks.length = 0; }
+      if (mode === 'online') { e.forceHue = null; e.cold = 0; e.pace = 1; e.scanOn = 1; e.coilsLit = -1; e.hum = 0; e.rate = 1; e.amberSweep = 0; this.title = 0; this.streaks.length = 0; this.calloutK = 0; }
       if (mode === 'wake') { e.burst(40, 2.2); this.bloom = 1; this.shock = 0; this.open = 1; e.scanOn = 0; e.coilsLit = -1; e.hum = 0; }
-      if (mode === 'spindown') { e.rate = 1; this.flickered = false; e.coilsLit = -1; }
+      if (mode === 'spindown') { e.rate = 1; this.flickered = false; e.coilsLit = -1; this.fromStandby = this.from.cold > 0.4; }
       if (extra.status) this.status = extra.status;
       if (extra.line != null) { this.wakeLine = extra.line; this.lineShown = 0; }
     }
@@ -299,6 +301,7 @@
       }
       if (m === 'online') {
         e.cold = 0; e.pace = 1; e.forceHue = null; e.hum = 0;
+        this.calloutK = Math.min(1, this.calloutK + dt / 1.8);
         if (this.hold?.kind === 'standby') { e.cold = this.hold.k * 0.35; e.pace = 1 - this.hold.k * 0.6; } // dims a little as the ring drains
         if (this.wakeLine && this.lineShown < this.wakeLine.length) this.lineShown = Math.min(this.wakeLine.length, this.lineShown + dt * 38);
         this.title = Math.max(0, this.title - dt * 2);
@@ -318,8 +321,8 @@
         this.title = Math.min(1, this.title + dt / TIMING.titleFade);
         if (this.hold?.kind === 'wakeup') { e.cold = 0.6 - this.hold.k * 0.4; e.pace = 0.15 + this.hold.k; }
         if (this.hold?.kind === 'power') { // the ticks light amber outward from the bottom until they meet at the top
-          e.forceHue = mix(BLUE, AMBER, this.hold.k * 0.6); e.hum = this.hold.k * 0.4;
-        } else e.hum = 0;
+          e.amberSweep = this.hold.k; e.forceHue = mix(BLUE, AMBER, this.hold.k * 0.25); e.hum = this.hold.k * 0.4;
+        } else { e.hum = 0; e.amberSweep = Math.max(0, e.amberSweep - dt * 3); }
         return;
       }
       if (m === 'fromstandby') {
@@ -330,7 +333,20 @@
         return;
       }
       if (m === 'spindown') { // everything winds down like a turbine, on its own curves
-        const k = clamp(this.t / TIMING.spindown, 0, 1);
+        // From standby there is little to wind down: a 0.55 s FLARE first (the amber ticks complete, the rings spin up and brighten
+        // amber-white, the coils all light), then the same turbine wind-down from those levels
+        const FLARE = 0.55;
+        if (this.fromStandby && this.t < FLARE) {
+          const f = ease.out(clamp(this.t / FLARE, 0, 1));
+          e.amberSweep = 1; e.pace = 0.15 + 1.5 * f; e.cold = 0.6 - 0.45 * f; e.coilsLit = Math.round(10 * f);
+          e.forceHue = mix(BLUE, mix(AMBER, WHITE, 0.35), f); e.hum = 0.5 * f;
+          this.from = { cold: e.cold, hue: [...e.hue], pace: e.pace };
+          this.title = 1 - f; // STANDBY fades out
+          return;
+        }
+        if (this.fromStandby) e.amberSweep = Math.max(0, e.amberSweep - dt * 1.2);
+        const k = clamp((this.t - (this.fromStandby ? FLARE : 0)) / TIMING.spindown, 0, 1);
+        e.hum = Math.max(0, (this.fromStandby ? 0.5 : 0) * (1 - k * 3));
         e.pace = this.from.pace * Math.exp(-k * 4.2);                                         // rings decelerate
         const hueK = k < 0.32 ? ease.inOut(k / 0.32) : 1;                                  // cyan → white
         const goldK = k > 0.3 ? ease.inOut(clamp((k - 0.3) / 0.5, 0, 1)) : 0;              // → gold
@@ -447,7 +463,8 @@
       }
       // The title block
       if (this.title > 0.01) {
-        if (m === 'offline' || m === 'spindown' || m === 'charging') titleBlock(ctx, { cx, y: lay.titleY, S, hue: GOLD, alpha: this.title, kind: 'offline' });
+        if (m === 'spindown' && this.fromStandby && this.t < 0.55) titleBlock(ctx, { cx, y: lay.titleY, S, hue: BLUE, alpha: this.title, kind: 'standby', status: this.status }); // STANDBY fading out in the flare
+        else if (m === 'offline' || m === 'spindown' || m === 'charging') titleBlock(ctx, { cx, y: lay.titleY, S, hue: GOLD, alpha: this.title, kind: 'offline' });
         else if (m === 'standby' || m === 'tostandby' || m === 'fromstandby') titleBlock(ctx, { cx, y: lay.titleY, S, hue: BLUE, alpha: this.title, kind: 'standby', status: this.status });
       }
       if (m === 'standby' || m === 'tostandby') drawNotch(ctx, lay.notch, { hover: this.notchHover, hold: this.hold?.kind === 'power' ? this.hold.k : 0, S, alpha: m === 'standby' ? 1 : clamp(this.t / TIMING.standbyIn, 0, 1) });
@@ -496,5 +513,14 @@
     };
   }
 
-  return { Controller, titleBlock, drawNotch, hint, layout, ghost, TIMING, GOLD, BLUE, CYAN, AMBER };
+  /**
+   * The callouts drawing themselves in after a wake: for callout i (0..3) at overall progress k (0..1), how far along each part is.
+   * Staggered 0.18 s apart over ~1.8 s: the anchor dot pops, the diagonal draws out, then the horizontal tick, the label types in,
+   * the value fades in last. Each is 0..1; scene.js and the mockups share this.
+   */
+  function calloutReveal(k, i) {
+    const kk = clamp((k * 1.8 - i * 0.18) / 1.0, 0, 1);
+    return { dot: clamp(kk * 4, 0, 1), diag: ease.out(clamp(kk * 2.2, 0, 1)), tick: ease.out(clamp(kk * 2.2 - 0.7, 0, 1)), label: clamp(kk * 2.4 - 1.0, 0, 1), value: clamp(kk * 2.5 - 1.5, 0, 1) };
+  }
+  return { Controller, titleBlock, drawNotch, hint, layout, ghost, calloutReveal, TIMING, GOLD, BLUE, CYAN, AMBER };
 });

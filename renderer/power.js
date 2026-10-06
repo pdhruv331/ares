@@ -22,17 +22,22 @@
   const modeClass = (m) => { for (const c of [...root.classList]) if (c.startsWith('power-') && !['power-quiet', 'power-wait', 'power-handover'].includes(c)) root.classList.remove(c); root.classList.add(`power-${m}`); };
   const applyPrefs = (p) => { prefs = { ...prefs, ...p }; Sounds.enabled = prefs.sounds !== false; };
 
+  // ---- Spoken lines: always back to idle, even if her voice never comes back (the listener plays it and may be restarting) ------
+  async function speakSafely(text, maxMs = 15_000) {
+    window.ares.pauseListening();
+    try { await Promise.race([Voice.speak(text), new Promise((r) => setTimeout(r, maxMs))]); } catch {}
+    if (state === 'speaking') setState('idle');
+    window.ares.resumeListening();
+  }
   // ---- The wake line: typed by the controller, spoken here ----------------------------------------------------------------------
   async function sayWake() {
     if (!wake) return;
     const line = wake; wake = null;
     P.wakeLine = line.text; P.lineShown = 0; P.t = 0;
     note('ares', line.text);
+    if (state === 'speaking') setState('idle'); // (a goodnight line that never settled)
     if (!line.spoken || document.visibilityState !== 'visible') return; // text only: quiet hours, a Focus, "shown only", or hidden at login
-    window.ares.pauseListening();
-    try { await Voice.speak(line.spoken); } catch {}
-    setState('idle');
-    window.ares.resumeListening();
+    await speakSafely(line.spoken);
   }
 
   // ---- Messages from the main process ---------------------------------------------------------------------------------------------
@@ -59,7 +64,7 @@
         onMode(m);
         break;
       case 'say':
-        if (m.line) { note('ares', m.line); window.ares.pauseListening(); Voice.speak(m.line).catch(() => {}); }
+        if (m.line) { note('ares', m.line); speakSafely(m.line, 8000); }
         break;
       case 'prefs':
         applyPrefs(m.prefs);
@@ -71,11 +76,11 @@
     modeClass(m.mode);
     if (m.mode === 'tostandby') { P.set('tostandby', { status }); quiet(true); Sounds.play('standby-down'); ghost.line(`standby · ${m.why || 'user'}`, 2500); }
     else if (m.mode === 'standby') { if (P.mode !== 'standby') P.set('standby', { status }); else P.status = status; quiet(true); }
-    else if (m.mode === 'fromstandby') { P.set('fromstandby', { status }); Sounds.play('wake-chime'); ghost.line('awake', 1500); }
+    else if (m.mode === 'fromstandby') { if (state === 'speaking') setState('idle'); P.set('fromstandby', { status }); Sounds.play('wake-chime'); ghost.line('awake', 1500); }
     else if (m.mode === 'online') { if (P.mode !== 'online' && P.mode !== 'fromstandby' && P.mode !== 'wake') P.set('online'); quiet(false); }
     else if (m.mode === 'spindown') { P.set('spindown'); quiet(true); Sounds.play('clunk'); setTimeout(() => Sounds.play('winddown'), 250); }
     else if (m.mode === 'dormant') { if (P.mode !== 'offline' && P.mode !== 'spindown') P.set('offline', { force: true }); quiet(true); modeClass('offline'); }
-    else if (m.mode === 'charging') { helperDriven = false; root.classList.remove('power-wait'); ghost.clear(); P.set('charging', { force: true }); P.charge = 0; P.readyAt = false; quiet(true); modeClass('charging'); ghost.line('igniting', 1500); } // (a wake from dormancy: this page plays the charge)
+    else if (m.mode === 'charging') { if (state === 'speaking') setState('idle'); helperDriven = false; root.classList.remove('power-wait'); ghost.clear(); P.set('charging', { force: true }); P.charge = 0; P.readyAt = false; quiet(true); modeClass('charging'); ghost.line('igniting', 1500); } // (a wake from dormancy: this page plays the charge)
   }
 
   // ---- The controller's events (scene.js dispatches them each frame) -------------------------------------------------------------

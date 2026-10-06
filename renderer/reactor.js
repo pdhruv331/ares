@@ -90,6 +90,7 @@
       this.coilsLit = -1;  // charge-to-wake: how many coils are lit (0..10); -1 = the normal chase
       this.scanOn = 1;     // the scanner's visibility (0..1)
       this.rate = 1;       // how fast hue changes follow (1 normal; a spin-down drains slowly)
+      this.amberSweep = 0; // the power hold: ticks lit amber outward from the bottom until they meet at the top (0..1)
       let s = seed;
       this.rnd = () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
     }
@@ -158,7 +159,9 @@
         const behind = ((this.scan - deg) % 360 + 360) % 360; // how far past this tick the scanner is
         const lit = small ? 0 : clamp(1 - behind / 70, 0, 1) * this.scanOn * warm;
         const inner = (i % 9 === 0 ? r * 0.9 : r * 0.945) + humA * (i % 2 ? 1 : -1);
-        ctx.strokeStyle = rgba(c, lerp(0.36, (45 + lit * 190) / 255 * lit0));
+        const fromBottom = Math.abs(((deg - 90) % 360 + 540) % 360 - 180); // 0 at the bottom tick, 180 at the top
+        const amber = this.amberSweep > 0 && fromBottom <= this.amberSweep * 180;
+        ctx.strokeStyle = amber ? rgba(COLORS.amber, 0.95) : rgba(c, lerp(0.36, (45 + lit * 190) / 255 * lit0));
         ctx.beginPath();
         ctx.moveTo(Math.cos(a) * inner, Math.sin(a) * inner);
         ctx.lineTo(Math.cos(a) * (r + humA * (i % 2 ? -1 : 1)), Math.sin(a) * (r + humA * (i % 2 ? -1 : 1)));

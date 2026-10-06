@@ -42,6 +42,7 @@ class WakeListener extends EventEmitter {
     if (process.env.ARES_END_SILENCE_MS) args.push('--end-silence', process.env.ARES_END_SILENCE_MS);
     if (process.env.ARES_ECHO_CANCEL === '0') args.push('--no-aec');
     this.child = spawn(this.bin, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    this.child.stdin.on('error', (err) => { if (err.code !== 'EPIPE') this.emit('stderr', `stdin: ${err.message}`); });
     let buf = '';
     this.child.stdout.on('data', (chunk) => {
       buf += chunk;
@@ -81,7 +82,9 @@ class WakeListener extends EventEmitter {
   }
 
   send(cmd) {
-    this.child?.stdin.write(cmd + '\n');
+    const stdin = this.child?.stdin;
+    if (!stdin || stdin.destroyed || !stdin.writable) return; // (stopped or gone: a write would raise EPIPE and take the main process with it)
+    try { stdin.write(cmd + '\n', (err) => { if (err && err.code !== 'EPIPE') this.emit('stderr', `stdin: ${err.message}`); }); } catch {}
   }
 
   /** Mute the mic entirely (the orange dot goes away). minutes = null means until unmuted. */
