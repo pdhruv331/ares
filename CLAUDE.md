@@ -233,6 +233,35 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
 - Lessons (2026-10-06): `open -j` keeps every window of ARES hidden (never use it); `loadFileURL` throws on a file URL with a query
   (the helper injects geometry as a user script); a `.prohibited` activation policy forbids windows; macOS can report a new desktop
   picture while still showing the old one (wallpaper.js reads it back and retries; keep the previous still file until then).
+
+## Power from the phone and the relay (docs/ignition-prompt.md part B: 4d, 4e, 4f; built 2026-10-06)
+
+- What the phone wakes through (decided with part A's dormancy): DORMANT = the phone server stays up COLD (`phone.setCold`: only
+  `/api/power`, status, events, me, app answer; the rest say 503 "powered down"), so the orb hold wakes her over the normal paired
+  channel. FULLY QUIT = the ignition helper polls the relay (`/helper/poll`, every 20 s, signed with the Mac's secret from
+  `<support>/ignition/relay.json`, 0600) and ignites on a wake the phone posted (`/wake`, signed with that phone's own WAKE KEY, which
+  the Mac registers with its push token: `phoneDevices[].wake`, id = hash[0:16]). MAC ASLEEP = nothing answers and the helper's
+  heartbeat at the relay is stale (> 6 min; written at most every 4 min: KV's free tier allows 1000 writes a day) → "Mac asleep · can't
+  wake". The relay is used for nothing else; ARES itself never talks to it for power.
+- Mac: `phone.js` powerRoute → main.js `powerAct` (standby | wake | powerdown | toggle | skip) and `powerView` (mode, status, schedule,
+  steps while charging); `hello` carries `power` and `relay {url,id,key}`; power changes broadcast as `{type:'power', …powerView}`,
+  charge steps as `power-step`. `power.keepAwakeOff` ("Keep the Mac Awake on Power While ARES Is Off", default off) is what
+  `applyReachable` honours while dormant and what the helper's IOPM assertion follows (config.json). Power routines: autonomy.js
+  `schedule.kind === 'power'` with `action` standby|wake (tool `create_routine` with `action`; one per action, a new time replaces),
+  ticked even while dormant, 5-minute notice (`standby-soon`, buttons `/api/power/skip` and `/api/power/standby`), `skipPower`,
+  `powerSchedule()` for the phone chip. Tests: `node scripts/test-autonomy.js` (power routines), `node scripts/test-relay.mjs` (the
+  Worker with a fake KV). Deploy the Worker with `cd relay && npx wrangler@4 deploy` (done 2026-10-06).
+- Android: `PowerStore` (the Mac's mode, reach, helper-alive from the relay, schedule, relay info), `ReactorView.power` (STANDBY blue
+  winding down, OFFLINE gold, ASLEEP grey and still, CHARGING siphon + segmented ring + bloom, SPINDOWN) and `holdK`, `HoldDetector`
+  (~0.8 s, ticks each eighth, heavy at the commit; a tap = talk/hush), `RelayClient` (HMAC with the wake key), the header's power
+  icon → `dialog_power.xml` + `SlideView`, `Haptics`, `Sounds` (the same WAVs copied into res/raw by Gradle, quieter, in front only),
+  the schedule chip. Notification `api` buttons may call `/api/power/*`.
+- Testing without the phone: the emulator `ares-test` (`~/Library/Android/sdk/emulator/emulator -avd ares-test -no-window`), a DEBUG
+  build (`./gradlew assembleDebug`: plain HTTP to 10.0.2.2 allowed), pair with curl against the harness (`ARES_TEST_PAIR_CODE`) and
+  write the token into `shared_prefs/ares.xml` with `adb shell run-as com.dhruv.ares`; `adb shell input swipe x y x y 1000` is a hold.
+  Screens are 1344×2992: scale screenshot coordinates. Starting a swipe at the left edge is the system back gesture.
+- Not yet tested on the real Mac: wake from a full quit through the relay (needs the installed ARES quit) and the notices on the phone.
+
 - Testing: a cold start replays in the window on reload (`node scripts/harness.mjs reload`; start the dev instance with
   `--disable-backgrounding-occluded-windows --disable-renderer-backgrounding` or the charge crawls when covered); `window.ares.power.act('standby'|'wake'|'powerdown')`
   from the harness; `ARES_TEST_STILL` renders the offline and standby stills; the helper's page can be opened over HTTP from
