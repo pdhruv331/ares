@@ -146,6 +146,7 @@ class AresService : Service() {
                     when (m.optString("type")) {
                         "hello" -> {
                             backoff = 2_000L; online("online"); Updater.offer(this, m.optJSONObject("app"))
+                            PowerStore.fromHello(this, m)
                             // Firebase (for pushes with the Mac off): the Mac hands over the app config; the token goes back
                             Push.configure(this, m.optJSONObject("firebase"), resend = !m.optBoolean("fcm"))
                             thread { runCatching { JobStore.replaceAll(this, client.jobs()) } }
@@ -160,6 +161,9 @@ class AresService : Service() {
                         "clear" -> m.optJSONArray("tags")?.let { t -> main.post { for (i in 0 until t.length()) nm.cancel(t.getString(i).hashCode()) } }
                         "show-job" -> JobStore.show(m.optString("id"))
                         "calls" -> CallStore.changed()
+                        // Power (docs/ignition-prompt.md §4d): the Mac's standby / wake / power down, and the charge's steps
+                        "power" -> { PowerStore.fromPower(this, m); main.post { refresh() } }
+                        "power-step" -> PowerStore.step(m)
                     }
                 }
             } catch (e: NotPairedException) {
@@ -190,6 +194,7 @@ class AresService : Service() {
 
     private fun online(s: String) {
         Ares.setStatus(this, s)
+        PowerStore.setReach(this, s == "online")
         main.post { refresh() }
     }
 
@@ -214,6 +219,8 @@ class AresService : Service() {
     private fun status(): Notification {
         val text = when {
             asking != null -> "Thinking about \"${asking!!.take(60)}\"…"
+            Ares.status(this) == "online" && PowerStore.mode == PowerStore.Mode.STANDBY -> "Standing by · ${JobStore.summary() ?: "nothing running"}"
+            Ares.status(this) == "online" && PowerStore.mode == PowerStore.Mode.OFFLINE -> "Powered down · hold the orb to wake"
             Ares.status(this) == "online" -> JobStore.summary() ?: "Connected to your Mac"
             else -> "Can't reach your Mac. Retrying (is Tailscale on?)"
         }
@@ -248,11 +255,12 @@ class AresService : Service() {
 
     /** A notification button that acts through the Mac's job API. Only a problem (or Send to Mac's answer) is shown. */
     private fun callApi(api: String, body: String) {
-        if (!api.startsWith("/api/jobs/") && !api.startsWith("/api/claude/")) return
+        if (!api.startsWith("/api/jobs/") && !api.startsWith("/api/claude/") && !api.startsWith("/api/power/")) return
         thread(name = "ares-job-api") {
-            val r = runCatching { client.post(api, JSONObject(body)) }.getOrElse { JSONObject().put("error", "Couldn't reach your Mac.") }
+            val r = runCatching { if (api.startsWith("/api/power/")) client.powerAct(api.removePrefix("/api/power/")) else client.post(api, JSONObject(body)) }.getOrElse { JSONObject().put("error", "Couldn't reach your Mac.") }
             val line = when {
-                !r.optBoolean("ok") -> r.optString("error").ifBlank { "That didn't work." }
+                !r.optBoolean("ok") -> r.optString("error").ifBlank { r.optString("message").ifBlank { "That didn't work." } }
+                api.startsWith("/api/power/") -> r.optString("message").ifBlank { null }
                 api.endsWith("/send-to-mac") -> if (r.optBoolean("now")) "It's open on your Mac now." else "It'll open on your Mac when you're back at it."
                 else -> null
             }

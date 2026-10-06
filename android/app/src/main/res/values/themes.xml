@@ -22,6 +22,15 @@
         <item name="android:windowSoftInputMode">adjustResize</item>
     </style>
 
+    <!-- The power-down bottom sheet (MainActivity.showPowerSheet) -->
+    <style name="Theme.Ares.Sheet" parent="android:Theme.Material.Dialog.NoActionBar">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:backgroundDimAmount">0.55</item>
+        <item name="android:windowAnimationStyle">@android:style/Animation.InputMethod</item>
+        <item name="android:windowIsFloating">true</item>
+    </style>
+
     <style name="AresButton">
         <item name="android:background">@drawable/bg_button</item>
         <item name="android:textColor">@color/cyan</item>

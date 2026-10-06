@@ -30,8 +30,13 @@
 
             <LinearLayout android:layout_width="match_parent" android:layout_height="44dp" android:gravity="center_vertical" android:orientation="horizontal">
                 <FrameLayout android:layout_width="8dp" android:layout_height="8dp" android:background="@drawable/dot" android:layout_marginEnd="10dp"/>
-                <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:singleLine="true"
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:singleLine="true"
                     android:text="A.R.E.S" android:textColor="@color/cyan" android:textStyle="bold" android:textSize="13sp" android:letterSpacing="0.3"/>
+                <!-- Power down the Mac's ARES (a bottom sheet with a slider); hidden while she's off -->
+                <TextView android:id="@+id/powerBtn" android:layout_width="30dp" android:layout_height="30dp" android:layout_marginStart="8dp" android:gravity="center"
+                    android:text="⏻" android:textColor="@color/gold" android:textSize="13sp" android:background="?android:attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Power down the Mac's ARES" android:visibility="gone"/>
+                <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1"/>
                 <TextView android:id="@+id/workBtn" android:layout_width="wrap_content" android:layout_height="28dp" android:layout_marginEnd="10dp"
                     android:background="@drawable/bg_chip" android:gravity="center" android:paddingStart="9dp" android:paddingEnd="9dp"
                     android:text="WORK" android:textColor="@color/cyan" android:textSize="9sp" android:letterSpacing="0.15" android:contentDescription="Work: your background jobs"/>
@@ -43,6 +48,10 @@
 
             <TextView android:id="@+id/setup" android:layout_width="match_parent" android:layout_height="wrap_content" android:visibility="gone"
                 android:background="@drawable/bg_setup" android:padding="10dp" android:textColor="@color/purple" android:textSize="12sp"/>
+            <!-- Scheduled standby / wake (a power routine on the Mac) -->
+            <TextView android:id="@+id/schedChip" android:layout_width="wrap_content" android:layout_height="26dp" android:layout_gravity="center_horizontal" android:visibility="gone"
+                android:background="@drawable/bg_chip_blue" android:gravity="center" android:paddingStart="10dp" android:paddingEnd="10dp"
+                android:textColor="@color/blue" android:textSize="9sp" android:letterSpacing="0.12" android:fontFamily="monospace"/>
 
             <!-- The stage: the reactor (or the 3D brain), one line of caption at its foot -->
             <FrameLayout android:id="@+id/stage" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
@@ -57,7 +66,7 @@
             </FrameLayout>
 
             <TextView android:id="@+id/stateText" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:layout_marginBottom="8dp"
-                android:gravity="center" android:textColor="@color/cyan" android:textSize="9sp" android:letterSpacing="0.5" android:alpha="0.85"/>
+                android:gravity="center" android:textColor="@color/cyan" android:textSize="9sp" android:letterSpacing="0.3" android:alpha="0.85" android:maxLines="2" android:lineSpacingMultiplier="1.3"/>
 
             <!-- Typing, behind the keyboard button -->
             <LinearLayout android:id="@+id/inputRow" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="8dp" android:visibility="gone">

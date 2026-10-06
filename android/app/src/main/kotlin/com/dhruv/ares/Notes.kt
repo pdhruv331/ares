@@ -104,7 +104,7 @@ object Notes {
                 // Reply: typed on the notification, sent to ARES as "<reply prefix><what you typed>"
                 reply.isNotBlank() -> b.addAction(Notification.Action.Builder(null, title, AresService.replyIntent(c, reply, id))
                     .addRemoteInput(AresService.replyInput()).setAllowGeneratedReplies(false).build())
-                api.startsWith("/api/jobs/") || api.startsWith("/api/claude/") -> b.addAction(Notification.Action.Builder(null, title, AresService.apiIntent(c, api, btn.optJSONObject("body")?.toString() ?: "{}", id)).build())
+                api.startsWith("/api/jobs/") || api.startsWith("/api/claude/") || api.startsWith("/api/power/") -> b.addAction(Notification.Action.Builder(null, title, AresService.apiIntent(c, api, btn.optJSONObject("body")?.toString() ?: "{}", id)).build())
                 url.isNotBlank() && safe(url) -> b.addAction(Notification.Action.Builder(null, title,
                     activity(c, Intent(if (url.startsWith("tel:")) Intent.ACTION_DIAL else Intent.ACTION_VIEW, Uri.parse(url)))).build())
                 ask.isNotBlank() -> b.addAction(Notification.Action.Builder(null, title, AresService.askIntent(c, ask, id)).build())

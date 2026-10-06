@@ -20,7 +20,13 @@ import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
+import android.app.Dialog
+import android.graphics.Color
+import android.view.Gravity
+import android.view.ViewGroup
 import kotlin.concurrent.thread
+import kotlin.math.abs
 import kotlin.math.max
 
 class MainActivity : Activity(), Session.Ui {
@@ -47,6 +53,14 @@ class MainActivity : Activity(), Session.Ui {
     private var lastState = State.IDLE
     private val fadeCaption = Runnable { caption.animate().alpha(0f).setDuration(600).start(); schematic.dimBottom = false }
     private val jobsChanged = { showJobs() }
+    // Power from the phone (docs/ignition-prompt.md §4d-4f): the Mac's state mirrored on the orb, the orb hold, the ⏻ sheet
+    private lateinit var powerBtn: TextView
+    private lateinit var schedChip: TextView
+    private lateinit var sounds: Sounds
+    private var lastPower: PowerStore.Mode? = null
+    private var powerSheet: Dialog? = null
+    private var asked = false // this phone asked for the last change: toast it
+    private val powerChanged = { showPower() }
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -66,7 +80,15 @@ class MainActivity : Activity(), Session.Ui {
         // drawn within a few seconds (no WebGL, a script problem), the reactor takes over.
         fallback = findViewById(R.id.reactorFallback)
         fallback.levelSource = { session.level }
-        fallback.setOnClickListener { session.hush() }
+        PowerStore.load(this)
+        sounds = Sounds(this)
+        // Tap the orb = talk (or hush her); hold it ~0.8 s = standby / wake, a ring filling around it meanwhile
+        val hold = HoldDetector(this, onTap = { tapOrb() }, onHold = { holdOrb() }, onRing = { k, done -> fallback.holdK = if (done) 0f else k })
+        fallback.setOnTouchListener { _, e -> hold.onTouch(e); true }
+        powerBtn = findViewById(R.id.powerBtn)
+        powerBtn.setOnClickListener { showPowerSheet() }
+        schedChip = findViewById(R.id.schedChip)
+        schedChip.setOnClickListener { scheduleMenu(it) }
         val fallBack = Runnable { if (!reactor.ready) { fallback.visibility = View.VISIBLE; reactor.visibility = View.INVISIBLE } }
         if (Ares.prefs(this).getBoolean("brain3d", false)) {
             reactor.postDelayed(fallBack, 6000)
@@ -112,6 +134,8 @@ class MainActivity : Activity(), Session.Ui {
         input.setOnEditorActionListener { _, id, _ -> if (id == EditorInfo.IME_ACTION_SEND) { send(); true } else false }
         reactor.onTap = { session.hush() }
         reactor.onOrb = { id -> startActivity(WorkActivity.intent(this, id)) }
+        val brainHold = HoldDetector(this, onTap = {}, onHold = { holdOrb() }, onRing = { _, _ -> })
+        reactor.setOnTouchListener { _, e -> brainHold.onTouch(e); false } // the brain keeps its own taps
         findViewById<View>(R.id.menu).setOnClickListener(::showMenu)
         workBtn = findViewById(R.id.workBtn)
         workBtn.setOnClickListener { startActivity(WorkActivity.intent(this)) }
@@ -165,11 +189,16 @@ class MainActivity : Activity(), Session.Ui {
         showJobs()
         pollStatus()
         refreshSetup()
+        sounds.inFront = true
+        PowerStore.listen(powerChanged)
+        probeRelay()
         if (log.childCount == 0) loadHistory()
     }
 
     override fun onPause() {
         session.setHandsFree(false, "left") // listening from behind another screen is unreliable; tap or ask again when back
+        sounds.inFront = false
+        PowerStore.unlisten(powerChanged)
         statusPoll?.interrupt()
         reactor.onPause() // no drawing while you're elsewhere
         JobStore.unlisten(jobsChanged)
@@ -189,7 +218,162 @@ class MainActivity : Activity(), Session.Ui {
 
     override fun onDestroy() {
         session.release()
+        sounds.release()
         super.onDestroy()
+    }
+
+    // ---- Power (docs/ignition-prompt.md §4d, §4e, §4f) --------------------------------------------------------------
+
+    /** The Mac's power state on the screen: the orb's colour and motion, the header, the ⏻ button, the hint, the chip. */
+    private fun showPower() {
+        val mode = PowerStore.mode
+        fallback.power = when (mode) {
+            PowerStore.Mode.ONLINE, PowerStore.Mode.UNKNOWN -> ReactorView.Power.ONLINE
+            PowerStore.Mode.STANDBY -> ReactorView.Power.STANDBY
+            PowerStore.Mode.OFFLINE, PowerStore.Mode.QUIT, PowerStore.Mode.UNREACHABLE -> ReactorView.Power.OFFLINE
+            PowerStore.Mode.CHARGING -> ReactorView.Power.CHARGING
+            PowerStore.Mode.SPINDOWN -> ReactorView.Power.SPINDOWN
+            PowerStore.Mode.ASLEEP -> ReactorView.Power.ASLEEP
+        }
+        fallback.chargeK = PowerStore.chargeK
+        fallback.holdColor = Color.parseColor(if (PowerStore.canStandby) "#6096FF" else "#3EE6FF")
+        reactor.state = if (mode == PowerStore.Mode.ONLINE) session.state else State.OFFLINE // (the 3D brain only knows on/off)
+        val colour = when (mode) {
+            PowerStore.Mode.ONLINE -> R.color.cyan; PowerStore.Mode.STANDBY -> R.color.blue; PowerStore.Mode.ASLEEP -> R.color.grey
+            PowerStore.Mode.UNKNOWN -> R.color.muted; else -> R.color.gold
+        }
+        status.text = PowerStore.header()
+        status.setTextColor(getColor(colour))
+        powerBtn.visibility = if (PowerStore.off || mode == PowerStore.Mode.UNKNOWN || mode == PowerStore.Mode.SPINDOWN) View.GONE else View.VISIBLE
+        val sch = PowerStore.schedule
+        schedChip.visibility = if (sch == null || !PowerStore.reach) View.GONE else View.VISIBLE
+        if (sch != null) schedChip.text = listOfNotNull(sch.standby?.let { "☾ standby $it" }, sch.wake?.let { "☀ wake $it" }).joinToString(" · ") + if (sch.skipped) " · skipped tonight" else ""
+        state(session.state) // the hint under the orb
+        // Sounds and haptics for the change itself
+        val was = lastPower
+        lastPower = mode
+        if (was != null && was != mode) {
+            when {
+                mode == PowerStore.Mode.STANDBY -> { sounds.play("standby-down"); Haptics.soft(this) }
+                mode == PowerStore.Mode.ONLINE && was == PowerStore.Mode.CHARGING -> { sounds.play("bloom"); Haptics.double(this) }
+                mode == PowerStore.Mode.ONLINE && was == PowerStore.Mode.STANDBY -> { sounds.play("wake-chime"); Haptics.double(this) }
+                mode == PowerStore.Mode.SPINDOWN -> { sounds.play("clunk"); sounds.play("winddown", 0.3f) }
+                mode == PowerStore.Mode.OFFLINE && was == PowerStore.Mode.SPINDOWN -> sounds.play("thud")
+                mode == PowerStore.Mode.CHARGING -> sounds.play("charge-hum", 0.25f, loop = true)
+            }
+            if (was == PowerStore.Mode.CHARGING) sounds.stop("charge-hum")
+            if (asked && mode in setOf(PowerStore.Mode.ONLINE, PowerStore.Mode.STANDBY, PowerStore.Mode.OFFLINE)) {
+                asked = false
+                Toast.makeText(this, "Mac ARES → ${PowerStore.header().lowercase()}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /** A tap on the orb: stop her talking, send what you're saying, or start listening. */
+    private fun tapOrb() {
+        when {
+            session.state == State.SPEAKING -> session.hush()
+            session.listening -> session.stopListening()
+            PowerStore.mode == PowerStore.Mode.ONLINE -> if (needMic()) session.startListening()
+            else -> { Haptics.tick(this); showCaption(PowerStore.hint().replace('\n', ' '), 3000) }
+        }
+    }
+
+    /** The orb held to the end: online → standby, standby / powered down → wake, quit → wake through the relay. */
+    private fun holdOrb() {
+        val mode = PowerStore.mode
+        when {
+            mode == PowerStore.Mode.ONLINE -> powerAct("standby")
+            mode == PowerStore.Mode.STANDBY || mode == PowerStore.Mode.OFFLINE -> powerAct("wake")
+            mode == PowerStore.Mode.QUIT -> wakeThroughRelay()
+            mode == PowerStore.Mode.ASLEEP -> { Haptics.error(this); sounds.play("nope"); showCaption("Mac asleep · can't wake. Open the lid or plug it in.", 4000) }
+            mode == PowerStore.Mode.UNREACHABLE -> { Haptics.error(this); sounds.play("nope"); showCaption("I can't reach the Mac. Is Tailscale on?", 4000); probeRelay() }
+            else -> Haptics.tick(this)
+        }
+    }
+
+    /** Standby / wake / power down over the paired channel (works while she's dormant too). */
+    private fun powerAct(action: String) {
+        asked = true
+        thread(name = "ares-power") {
+            val r = runCatching { AresClient(this).powerAct(action) }
+            runOnUiThread {
+                val ok = r.getOrNull()?.optBoolean("ok") == true
+                if (!ok) { asked = false; Haptics.error(this); sounds.play("nope"); showCaption(r.getOrNull()?.optString("message")?.ifBlank { null } ?: "I couldn't reach the Mac, sir.", 4000) }
+                else r.getOrNull()?.let { PowerStore.fromPower(this, it) }
+            }
+        }
+    }
+
+    /** ARES is fully quit but the Mac is awake (the ignition helper polls the relay): a signed wake, then wait for her to come up. */
+    private fun wakeThroughRelay() {
+        val relay = PowerStore.relay ?: return
+        asked = true
+        PowerStore.markIgniting(true)
+        thread(name = "ares-relay-wake") {
+            val a = runCatching { RelayClient(relay).wake() }.getOrElse { RelayClient.Answer(false, null, false, false, "I couldn't reach the relay.") }
+            if (!a.ok || !a.awake) {
+                runOnUiThread {
+                    PowerStore.markIgniting(false); asked = false
+                    if (a.ok) PowerStore.setHelper(false)
+                    Haptics.error(this); sounds.play("nope")
+                    showCaption(a.error ?: "Mac asleep · can't wake. Open the lid or plug it in.", 5000)
+                }
+                return@thread
+            }
+            runOnUiThread { showCaption("Igniting…", 3000) }
+            AresService.restart(this) // the live line reconnects as soon as she's up
+            val until = System.currentTimeMillis() + 100_000
+            while (System.currentTimeMillis() < until && PowerStore.igniting) {
+                runCatching { AresClient(this).power() }.onSuccess { PowerStore.setReach(this, true); PowerStore.fromPower(this, it) }
+                if (PowerStore.reach) return@thread
+                Thread.sleep(3000)
+            }
+            if (PowerStore.igniting) runOnUiThread { PowerStore.markIgniting(false); asked = false; PowerStore.setHelper(null); Haptics.error(this); showCaption("The Mac didn't answer, sir. Is it asleep?", 5000) }
+        }
+    }
+
+    /** The Mac can't be reached: ask the relay whether the ignition helper is polling (ARES quit, Mac awake) or not (asleep). */
+    private fun probeRelay() {
+        val relay = PowerStore.relay ?: return
+        if (PowerStore.reach || PowerStore.igniting) return
+        thread(name = "ares-relay-status") {
+            val a = runCatching { RelayClient(relay).status() }.getOrNull() ?: return@thread
+            if (!PowerStore.reach) PowerStore.setHelper(a.helperAgeSec != null && a.helperAgeSec < 360)
+        }
+    }
+
+    /** ⏻: the bottom sheet with SLIDE TO POWER DOWN. */
+    private fun showPowerSheet() {
+        powerSheet?.dismiss()
+        val d = Dialog(this, R.style.Theme_Ares_Sheet)
+        d.setContentView(R.layout.dialog_power)
+        d.window?.apply { setGravity(Gravity.BOTTOM); setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); setBackgroundDrawableResource(android.R.color.transparent) }
+        val jobs = JobStore.working
+        d.findViewById<TextView>(R.id.sheetSub).text = "${if (jobs > 0) "$jobs job${if (jobs == 1) "" else "s"} pause" else "Jobs pause"} · phone access stops"
+        val slide = d.findViewById<SlideView>(R.id.slide)
+        slide.onDetent = { Haptics.tick(this) }
+        slide.onSpringBack = { Haptics.tick(this) }
+        slide.onComplete = {
+            Haptics.heavy(this); sounds.play("clunk")
+            d.dismiss()
+            powerAct("powerdown")
+        }
+        d.findViewById<View>(R.id.sheetCancel).setOnClickListener { d.dismiss() }
+        d.setOnDismissListener { powerSheet = null }
+        powerSheet = d
+        d.show()
+    }
+
+    /** The schedule chip: skip tonight's standby. */
+    private fun scheduleMenu(anchor: View) {
+        val sch = PowerStore.schedule ?: return
+        val menu = PopupMenu(this, anchor)
+        if (sch.standby != null && !sch.skipped) menu.menu.add(0, 1, 0, "Skip tonight's standby")
+        if (PowerStore.canStandby) menu.menu.add(0, 2, 1, "Standby now")
+        menu.menu.add(0, 3, 2, "Change: tell ARES, e.g. \"stand by at midnight\"").isEnabled = false
+        menu.setOnMenuItemClickListener { when (it.itemId) { 1 -> powerAct("skip"); 2 -> powerAct("standby") }; true }
+        menu.show()
     }
 
     // ---- Talking ------------------------------------------------------------------------------------
@@ -210,7 +394,8 @@ class MainActivity : Activity(), Session.Ui {
         if (s == State.IDLE && lastState == State.SPEAKING) caption.postDelayed(fadeCaption, 1200)
         if (s == State.THINKING) { caption.removeCallbacks(fadeCaption); caption.postDelayed(fadeCaption, 2500) }
         lastState = s
-        stateText.text = when (s) { State.LISTENING -> "LISTENING"; State.THINKING -> "THINKING"; State.SPEAKING -> "SPEAKING"; State.OFFLINE -> "OFFLINE"; else -> "" }
+        stateText.text = when (s) { State.LISTENING -> "LISTENING"; State.THINKING -> "THINKING"; State.SPEAKING -> "SPEAKING"; else -> PowerStore.hint().lowercase() }
+        stateText.setTextColor(getColor(when (PowerStore.mode) { PowerStore.Mode.ONLINE, PowerStore.Mode.UNKNOWN -> R.color.cyan; PowerStore.Mode.STANDBY -> R.color.blue; PowerStore.Mode.ASLEEP -> R.color.grey; else -> R.color.gold }))
         val hf = if (session.handsFree) "HF · " else ""
         talk.text = if (s == State.LISTENING) "◉   ${hf}TAP TO SEND" else if (session.handsFree) "◉   ${hf}TAP TO TALK" else "◉   TAP TO TALK"
         talk.isActivated = s == State.LISTENING || session.handsFree
@@ -320,8 +505,8 @@ class MainActivity : Activity(), Session.Ui {
     private fun scrollDown() = scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
 
     private fun setStatus(s: String) {
-        status.text = when (s) { "online" -> "CONNECTED"; "offline" -> "OFFLINE"; else -> "NOT PAIRED" }
-        status.isActivated = s == "online"
+        if (s == "unpaired") { status.text = "NOT PAIRED"; status.setTextColor(getColor(R.color.amber)) }
+        else if (::powerBtn.isInitialized) showPower() // the header reads the Mac's power state
         if (::schematic.isInitialized) showReadouts()
     }
 
@@ -502,4 +687,41 @@ class MainActivity : Activity(), Session.Ui {
     private fun askBattery() {
         startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
     }
+}
+
+/**
+ * The orb hold (docs/ignition-prompt.md §4d, §4e): a ring fills over ~0.8 s with a light tick at each eighth (firmer near the end)
+ * and a heavy thunk at the commit; letting go early cancels; a short press with no movement is a tap.
+ */
+class HoldDetector(private val ctx: android.content.Context, private val onTap: () -> Unit, private val onHold: () -> Unit, private val onRing: (Float, Boolean) -> Unit) {
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private var downAt = 0L
+    private var x0 = 0f; private var y0 = 0f
+    private var active = false
+    private var eighth = 0
+    private val slop = ctx.resources.displayMetrics.density * 24f
+    private val holdMs = 800L
+    private val tick = object : Runnable {
+        override fun run() {
+            if (!active) return
+            val k = ((System.currentTimeMillis() - downAt - 120) / (holdMs - 120).toFloat()).coerceIn(0f, 1f)
+            onRing(k, false)
+            val e = (k * 8).toInt()
+            if (e != eighth) { eighth = e; if (e in 1..5) Haptics.tick(ctx) else if (e in 6..7) Haptics.click(ctx) }
+            if (k >= 1f) { active = false; onRing(1f, true); Haptics.heavy(ctx); onHold(); return }
+            main.postDelayed(this, 16)
+        }
+    }
+    fun onTouch(e: MotionEvent) {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { downAt = System.currentTimeMillis(); x0 = e.x; y0 = e.y; active = true; eighth = 0; main.postDelayed(tick, 120) }
+            MotionEvent.ACTION_MOVE -> if (active && (abs(e.x - x0) > slop || abs(e.y - y0) > slop)) cancel()
+            MotionEvent.ACTION_UP -> {
+                val held = System.currentTimeMillis() - downAt
+                if (active) { cancel(); if (held < 350) onTap() }
+            }
+            MotionEvent.ACTION_CANCEL -> cancel()
+        }
+    }
+    private fun cancel() { if (!active) return; active = false; main.removeCallbacks(tick); onRing(0f, true) }
 }

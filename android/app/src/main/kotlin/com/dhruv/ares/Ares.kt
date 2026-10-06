@@ -206,6 +206,11 @@ class AresClient(private val ctx: Context) {
 
     fun cancelCall(id: String): JSONObject = postJson("/api/calls/cancel", JSONObject().put("id", id))
 
+    /** The Mac's power state (docs/ignition-prompt.md §4d): { mode, status: { jobs, link }, schedule }. Answers while she's dormant too. */
+    fun power(): JSONObject = open("/api/power").check().json()
+    /** standby | wake | powerdown | toggle | skip. The Mac's answer carries the new state. */
+    fun powerAct(action: String): JSONObject = postJson("/api/power/$action", JSONObject(), readTimeout = 20_000)
+
     /** The latest Android build on the Mac, or null. */
     fun appInfo(): JSONObject? = open("/api/app").check().json().optJSONObject("app")
 

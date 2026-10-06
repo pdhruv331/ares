@@ -9,4 +9,8 @@
     <color name="text">#CFEFFF</color>
     <color name="text_user">#8FB3C1</color>
     <color name="muted">#5D8797</color>
+    <!-- Power states (docs/ignition-prompt.md): standby blue, cold gold, asleep grey -->
+    <color name="blue">#6096FF</color>
+    <color name="gold">#FAC458</color>
+    <color name="grey">#6B7A86</color>
 </resources>
