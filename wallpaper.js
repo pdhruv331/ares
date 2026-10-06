@@ -18,7 +18,7 @@ const os = require('os');
 
 const COVERED = 0.985; // this much hidden by app windows = nothing worth drawing
 const STILL_EVERY_MS = 60 * 60_000; // with "warmer in the evening" on: re-render at most hourly when the tint changes
-const STILL_VERSION = 3; // bump when the still's drawing changes (docs/ignition-prompt.md §1): a still in use is re-rendered once at start
+const STILL_VERSION = 4; // 4: re-rendered at the remembered spot (a still made before the reactor moved showed its title twice under the helper) // bump when the still's drawing changes (docs/ignition-prompt.md §1): a still in use is re-rendered once at start
 
 class Wallpaper extends EventEmitter {
   /**
@@ -183,6 +183,9 @@ class Wallpaper extends EventEmitter {
     const old = spots[d.id];
     if (old && old.cx === spot.cx && old.cy === spot.cy && old.r === spot.r) return;
     this.debounce('spot', () => { this.save({ spots: { ...(this.readSettings().wallpaper?.spots || {}), [d.id]: spot } }); this.emit('geometry'); }, 800);
+    // The still must sit where the helper will draw (it paints its disc over the still's reactor, but the title band only over its own):
+    // re-render once the reactor has settled somewhere new
+    if (this.opts.lockStill) this.debounce('spot-still', () => this.renderStills(), 15_000);
   }
   /** Where the reactor sits on a display (its own CSS px): the remembered spot, else the window's default placement. */
   geometryFor(display) {
