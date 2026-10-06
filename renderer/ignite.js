@@ -175,6 +175,9 @@
       this.clipR = 0;            // > 0: this page paints only a disc of clipR·r around the reactor (the helper): effects stay inside it
       this.calloutK = 0;         // the callouts drawing themselves in after a wake (0..1 over ~1.8 s; scene.js reads it)
       this.fromStandby = false;  // a spin-down that began in standby flares first (there's little left to wind down otherwise)
+      this.hoverAngle = 0;       // where the pointer is, from the centre
+      this.embers = [];          // drifting up out of a hovered core: { x, y, vx, vy, life, s } in units of r
+      this.GLOW = 0.8;           // the hover glow's strength (the user's 80)
     }
     get S_() { return this.S; }
 
@@ -215,6 +218,7 @@
       const overNotch = this.mode === 'standby' && Math.hypot(x - lay.notch.x, y - lay.notch.y) < lay.notch.r + 6;
       if (kind === 'move') {
         this.wantHover = overCore ? 1 : 0;
+        this.hoverAngle = Math.atan2(y - g.cy, x - g.cx);
         this.wantNotchHover = overNotch ? 1 : 0;
         if (this.hold && !(this.hold.kind === 'power' ? overNotch : overCore)) this.cancelHold();
         return overCore ? 'core' : overNotch ? 'notch' : null;
@@ -242,8 +246,14 @@
       dt = clamp(dt, 0, 0.1);
       const e = this.engine, m = this.mode;
       this.t += dt;
-      this.hover += ((this.wantHover || 0) - this.hover) * Math.min(1, dt * 6);
+      this.hover += ((this.wantHover || 0) - this.hover) * Math.min(1, dt * ((this.wantHover || 0) ? 5 : 2.5));
       this.notchHover += ((this.wantNotchHover || 0) - this.notchHover) * Math.min(1, dt * 6);
+      // The hover glow (every resting state: the cold reactor, standby, online): the engine swells the core and warms the near ticks;
+      // embers drift up out of the core while the pointer stays
+      const resting = m === 'offline' || m === 'standby' || m === 'online';
+      e.hover = resting ? this.hover : 0; e.hoverAngle = this.hoverAngle; e.glowK = this.GLOW;
+      if (resting && this.hover > 0.3) { this.spawn2 = (this.spawn2 || 0) + dt * this.hover * this.GLOW * 11; while (this.spawn2 >= 1) { this.spawn2 -= 1; const a = this.rnd() * TAU; this.embers.push({ x: Math.cos(a) * 0.2, y: Math.sin(a) * 0.2, vx: (this.rnd() - 0.5) * 0.25, vy: -(0.15 + this.rnd() * 0.35), life: 1, s: 0.004 + this.rnd() * 0.006 }); } }
+      for (let i = this.embers.length - 1; i >= 0; i--) { const em = this.embers[i]; em.life -= dt * 0.8; if (em.life <= 0) { this.embers.splice(i, 1); continue; } em.x += em.vx * dt; em.y += em.vy * dt; em.vy -= 0.1 * dt; }
       if (this.hold) {
         this.hold.k = Math.min(1, this.hold.k + dt / this.hold.dur);
         if (this.hold.k >= 1 && !this.hold.fired) { this.hold.fired = true; this.events.push('commit:' + this.hold.kind); }
@@ -251,9 +261,10 @@
       if (m === 'offline') {
         e.cold = 1; e.pace = 0; e.forceHue = GOLD; e.hue = mix(e.hue, GOLD, Math.min(1, dt * 3));
         this.title = Math.min(1, this.title + dt / TIMING.titleFade);
-        // hover: the core warms slightly; holding: the core brightens with the hold
+        // hover: the core warms and the rings stir; holding: the core brightens with the hold
         const k = this.hover * 0.12 + (this.hold?.kind === 'wake' ? this.hold.k * 0.25 : 0);
         e.cold = 1 - k;
+        e.pace = this.hover * 0.6 * this.GLOW;
         return;
       }
       if (m === 'charging') {
@@ -319,7 +330,7 @@
         return;
       }
       if (m === 'standby') {
-        e.forceHue = BLUE; e.cold = 0.6; e.pace = 0.15; e.scanOn = 0;
+        e.forceHue = BLUE; e.cold = 0.6 - this.hover * 0.1; e.pace = 0.15 + this.hover * 0.5 * this.GLOW; e.scanOn = 0;
         this.title = Math.min(1, this.title + dt / TIMING.titleFade);
         if (this.hold?.kind === 'wakeup') { e.cold = 0.6 - this.hold.k * 0.4; e.pace = 0.15 + this.hold.k; }
         if (this.hold?.kind === 'power') { // the ticks light amber outward from the bottom until they meet at the top
@@ -412,6 +423,12 @@
         glow(ctx, mix(GOLD, WHITE, c * 0.6), cx, cy, r * Math.min(1.2 + c * 0.9, reach * 0.55), 0.1 + c * 0.22);
       }
       if (m === 'wake' && this.bloom > 0) glow(ctx, mix(WHITE, CYAN, 0.3), cx, cy, r * Math.min(1.6 + (1 - this.bloom) * 1.6, reach * 0.55), this.bloom * 0.9);
+      if ((m === 'offline' || m === 'standby' || m === 'online') && this.hover > 0.01) { // the hover halo: a wide faint lift of the whole disc
+        const hv = this.hover * this.GLOW;
+        const halo = ctx.createRadialGradient(cx, cy, r * 0.3, cx, cy, r * Math.min(1.6 + hv, reach));
+        halo.addColorStop(0, rgba(this.engine.hue, 0.22 * hv * 1.4)); halo.addColorStop(1, rgba(this.engine.hue, 0));
+        ctx.fillStyle = halo; ctx.fillRect(cx - r * 2.6, cy - r * 2.6, r * 5.2, r * 5.2);
+      }
       // The still's soft glow is part of the floor: it stays through the charge (nothing dims below the still)
       if (m === 'offline' || m === 'charging' || m === 'breath') glow(ctx, GOLD, cx, cy, r * 1.5, 0.08);
       else if (m === 'spindown') glow(ctx, GOLD, cx, cy, r * 1.5, 0.08 * this.title);
@@ -451,6 +468,10 @@
       if (m === 'wake' && this.shock > 0 && this.shock < 1) { // the shockwave's leading edge over the reactor
         ctx.strokeStyle = rgba(mix(CYAN, WHITE, 0.5), (1 - this.shock) * 0.5); ctx.lineWidth = Math.max(1.5, 6 * S * (1 - this.shock));
         ctx.beginPath(); ctx.arc(cx, cy, r * (0.5 + this.shock * 3.2), 0, TAU); ctx.stroke();
+      }
+      // Embers out of a hovered core
+      if (this.embers.length) {
+        for (const em of this.embers) { ctx.fillStyle = rgba(mix(e.hue, WHITE, 0.4 * em.life), em.life * 0.9); ctx.beginPath(); ctx.arc(cx + em.x * r, cy + em.y * r, Math.max(0.6, em.s * r * (0.5 + em.life * 0.5)), 0, TAU); ctx.fill(); }
       }
       // The hold rings: wake / wake-up fill clockwise around the core; standby drains counter-clockwise
       if (this.hold && this.hold.kind !== 'power') {

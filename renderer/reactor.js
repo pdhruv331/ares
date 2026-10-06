@@ -91,6 +91,9 @@
       this.scanOn = 1;     // the scanner's visibility (0..1)
       this.rate = 1;       // how fast hue changes follow (1 normal; a spin-down drains slowly)
       this.amberSweep = 0; // the power hold: ticks lit amber outward from the bottom until they meet at the top (0..1)
+      this.hover = 0;      // the pointer over the core (0..1): the core swells and whitens, its glow grows, the near ticks brighten
+      this.hoverAngle = 0; // where the pointer is, from the centre (rad)
+      this.glowK = 0.8;    // how far the hover glow goes (the user's 80, 2026-10-06)
       let s = seed;
       this.rnd = () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
     }
@@ -161,7 +164,9 @@
         const inner = (i % 9 === 0 ? r * 0.9 : r * 0.945) + humA * (i % 2 ? 1 : -1);
         const fromBottom = Math.abs(((deg - 90) % 360 + 540) % 360 - 180); // 0 at the bottom tick, 180 at the top
         const amber = this.amberSweep > 0 && fromBottom <= this.amberSweep * 180;
-        ctx.strokeStyle = amber ? rgba(COLORS.amber, 0.95) : rgba(c, lerp(0.36, (45 + lit * 190) / 255 * lit0));
+        let prox = 0; // the ticks nearest the pointer warm up while the core is hovered
+        if (this.hover > 0.01) { const da = Math.abs(((a - this.hoverAngle + Math.PI) % TAU + TAU) % TAU - Math.PI); prox = Math.max(0, 1 - da / 0.9) * this.hover; }
+        ctx.strokeStyle = amber ? rgba(COLORS.amber, 0.95) : rgba(prox ? mix(c, COLORS.white, prox * 0.5) : c, Math.min(1, lerp(0.36, (45 + lit * 190) / 255 * lit0) + prox * 0.55 + this.hover * 0.08));
         ctx.beginPath();
         ctx.moveTo(Math.cos(a) * inner, Math.sin(a) * inner);
         ctx.lineTo(Math.cos(a) * (r + humA * (i % 2 ? -1 : 1)), Math.sin(a) * (r + humA * (i % 2 ? -1 : 1)));
@@ -218,13 +223,14 @@
       // Core: breathes at rest, swells with the voice, flickers while thinking; a soft glow around it
       const breathe = (Math.sin(t * 1.4) + 1) * 0.025 * Math.max(0.3, Math.min(1, this.pace));
       const flicker = this.state === 'thinking' && !dim ? (Math.sin(t * 23) * 0.5 + Math.sin(t * 37) * 0.5) * 0.02 : 0;
-      const core = r * (0.24 + breathe + level * 0.13 + energy * 0.03 + flicker + this.pulse * 0.04 + this.flash * 0.06) * lerp(0.8, 1);
-      glow(ctx, c, 0, 0, core * 1.9, lerp(0.22, (70 + energy * 90 + level * 120) / 255 + this.pulse * 0.3 + this.flash * 0.4) * lit0 * alpha);
+      const hv = this.hover * this.glowK;
+      const core = r * (0.24 + breathe + level * 0.13 + energy * 0.03 + flicker + this.pulse * 0.04 + this.flash * 0.06) * lerp(0.8, 1) * (1 + hv * 0.72);
+      glow(ctx, c, 0, 0, core * 1.9 * (1 + hv), (lerp(0.22, (70 + energy * 90 + level * 120) / 255 + this.pulse * 0.3 + this.flash * 0.4) + hv * 0.68) * lit0 * alpha);
       const g = ctx.createRadialGradient(0, 0, 0, 0, 0, core);
-      g.addColorStop(0, rgba(mix(c, COLORS.white, lerp(0.35, 1)), 1));
+      g.addColorStop(0, rgba(mix(c, COLORS.white, Math.min(1, lerp(0.35, 1) + this.hover * 0.45)), 1));
       g.addColorStop(0.42, rgba(c, 1));
       g.addColorStop(1, rgba(c, 0));
-      ctx.globalAlpha = (dim ? 150 / 255 : 1) * alpha * lerp(0.42, 1);
+      ctx.globalAlpha = (dim ? 150 / 255 : 1) * alpha * Math.min(1, lerp(0.42, 1) + this.hover * 0.5 * (1 - warm));
       ctx.fillStyle = g;
       ctx.beginPath(); ctx.arc(0, 0, core, 0, TAU); ctx.fill();
       ctx.globalAlpha = alpha;
