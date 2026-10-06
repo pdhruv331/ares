@@ -230,6 +230,11 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
 - Transitions live in ignite.js's Controller: the amber tick sweep follows the charge (and the notch hold), a 0.55 s flare precedes a
   spin-down from standby, the callouts draw in after every wake (`calloutK` → `Ignite.calloutReveal`, used by scene.js). Mockups with
   the real code: `docs/mockups/ignition-opening.html` and `ignition-transitions.html` (serve the repo over HTTP and open them).
+- The ears open AFTER the wake (2026-10-06): starting or stopping the listener's microphone engine (voice processing) reconfigures the
+  output device and stutters whatever is playing. A cold start and a wake from dormancy set `earsPending` and `openEars()` runs on the
+  window's 'online' (fallback 9 s); standby mutes the ears 1.6 s in and un-mutes 1.2 s after the chime (power.js `earsTimer`); a listener
+  spawned muted gets `--muted` (engine off until unmute). A spin-down re-renders the OFFLINE still (a quit from standby left the standby
+  still under the helper's cold reactor) and the full quit waits for that render.
 - Lessons (2026-10-06): `open -j` keeps every window of ARES hidden (never use it); `loadFileURL` throws on a file URL with a query
   (the helper injects geometry as a user script); a `.prohibited` activation policy forbids windows; macOS can report a new desktop
   picture while still showing the old one (wallpaper.js reads it back and retries; keep the previous still file until then).

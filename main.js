@@ -472,7 +472,13 @@ async function wakeServices() {
   wallpaper?.setPower('charging', power.status());
   setTimeout(() => { ignition.step('scene', 'ok', 'live'); finishWake(); }, 1400);
 }
-let earsPending = false; // a wake from dormancy: the listener starts when the power goes online (after the sounds)
+let earsPending = false; // a cold start or a wake from dormancy: the listener starts once the wake is over (after the sounds)
+function openEars(why) {
+  if (!earsPending) return;
+  earsPending = false;
+  log('ears open', { why });
+  setTimeout(() => { if (power?.mode !== 'dormant' && power?.mode !== 'spindown') listener.start(); }, 400); // (after the bloom's tail)
+}
 /** Quiet hours for Claude alerts, or a macOS Focus on: the wake line is shown but not spoken, the power sounds stay silent. */
 async function silentNow() {
   if (claudeQuietNow()) return true;
@@ -2496,13 +2502,13 @@ app.whenReady().then(async () => {
     saveMemory: () => consolidateMemory('quit'), unsaved: () => unsavedTurns().length,
     phone: (msg) => phone?.broadcast(msg), closeEars: () => listener.stop(), voiceOff: () => speech.stop(),
     batteryPct: () => readouts?.battery?.pct,
-    quit: () => { app.isQuitting = true; memorySavedOnQuit = true; app.quit(); },
+    quit: () => { app.isQuitting = true; memorySavedOnQuit = true; Promise.race([wallpaper?.rendering || null, new Promise((r) => setTimeout(r, 5000))]).then(() => app.quit()); }, // (a still being rendered for the quit finishes first)
     services: { sleep: sleepServices, wake: wakeServices },
   });
   powerMonitor.on('shutdown', () => { if (power) power.quitAllowed = true; }); // the Mac is going down: a quit may happen
   power.on('change', (c) => {
     win?.webContents.send('power', { type: 'mode', ...c });
-    if (c.mode === 'online' && earsPending) { earsPending = false; setTimeout(() => { if (power.mode === 'online') listener.start(); }, 400); } // the ears, after the bloom
+    if (c.mode === 'online') openEars('online');
     if (c.mode === 'dormant') earsPending = false;
     orb?.setContext({ power: c.mode });
     wallpaper?.scene({ type: 'power', mode: c.mode === 'dormant' ? 'offline' : c.mode, status: c.status }); // (the backdrop's controller knows offline, not dormant)
@@ -2568,11 +2574,15 @@ app.whenReady().then(async () => {
   // First run with the wallpaper on: ask (once) about the ARES lock-screen picture
   if (wallpaper.opts.enabled && !wallpaper.opts.lockAsked && (app.isPackaged || process.env.ARES_ASK_LOCK)) setTimeout(() => wallpaper.setLockStill(true).then(refreshTray), 8000);
   win.webContents.once('did-finish-load', () => {
-    listener.start(); checkIntegrations(); startRemote();
+    // The ears open after the wake (openEars, from the window's 'online'; a fallback timer if the window never says so): starting the
+    // microphone engine reconfigures the output device and would stutter the charge hum and the bloom
+    earsPending = true;
+    setTimeout(() => openEars('fallback'), 9000);
+    checkIntegrations(); startRemote();
     ignition.step('link', 'start');
     startPhone(); calls.start().catch((err) => log('calls start failed', err.message));
     ignition.step('link', 'ok', `phone :${PHONE_PORT}${relay?.ready ? ' · relay' : ''}`);
-    setTimeout(() => ignition.step('ears', listener.ready ? 'ok' : listener.child ? 'ok' : 'fail', listener.ready ? 'wake word' : listener.child ? 'starting' : 'listener missing'), 1200);
+    setTimeout(() => ignition.step('ears', listener.available ? 'ok' : 'fail', listener.available ? 'wake word · after the wake' : 'listener missing'), 1200);
     // The scene is up: the start-up is complete; the wake line is composed from what happened while she was off
     setTimeout(() => { ignition.step('scene', 'ok', 'live'); finishWake(); }, 1500);
     voicemail.start();
@@ -2597,7 +2607,7 @@ ipcMain.handle('power-act', (_e, what, why = 'window') => {
   if (what === 'wake') return power.wake(why); // (from standby or from dormancy)
   if (what === 'toggle') return power.toggle(why);
   if (what === 'powerdown') return Boolean(power.powerDown(why));
-  if (what === 'online') { power.setOnline(why); return true; }
+  if (what === 'online') { power.setOnline(why); openEars('window online'); return true; }
   if (what === 'said') { power.lineSaid(); return true; }
   if (what === 'silent') return silentNow();
   return false;

@@ -205,7 +205,8 @@ class Wallpaper extends EventEmitter {
     const was = this.power.mode;
     this.power = { mode, status: status || null };
     const stillKind = (m) => (m === 'standby' || m === 'tostandby' ? 'standby' : 'offline');
-    if (this.opts.lockStill && stillKind(was) !== stillKind(mode) && ['standby', 'online', 'offline'].includes(mode)) this.renderStills();
+    // (spindown too: a power down or a full quit from standby would otherwise leave the standby still under the helper's cold reactor)
+    if (this.opts.lockStill && stillKind(was) !== stillKind(mode) && ['standby', 'online', 'offline', 'spindown'].includes(mode)) this.renderStills();
   }
   /** A cold start with the helper drawing the charge: keep the backdrop windows hidden until the handover, then show them. */
   reveal(on) {
