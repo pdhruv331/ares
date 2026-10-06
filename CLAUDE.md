@@ -179,3 +179,24 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
 - Testing: `node scripts/test-panels.js` (solver invariants + fakes for EventKit, the Tasks API and every custom source; no helper,
   no Claude, no network). Visual: `node scripts/harness.mjs start|reload|eval|shot` drives a dev instance over CDP (start it
   yourself with `--disable-backgrounding-occluded-windows` etc. when it's covered, and `Surface.hold({paused:false})`).
+
+## Reactor look (docs/reactor-prompt.md)
+
+- `renderer/reactor.js` is the ONE drawing engine (pure canvas: `Reactor.Engine` = the arc reactor, `Reactor.Backdrop` = the dot-matrix
+  schematic sheet + ripples); `renderer/scene.js` runs it on every page (window, wallpaper backdrop, saver, lock still): the
+  look switch (`Scene.setLook`, settings `look`, ◉ menu "Look: Reactor / Brain", default reactor), job orbs in orbit (click,
+  grab → throw, into the reactor = put away / cancel → `orb-absorbed`), the callout lines/labels, and the `window.JobOrbs` proxy
+  (reactor orbs, or brain3d's `JobOrbs3D` in the brain look). `renderer/callouts.js` (window only) = the cards, live values and
+  actions; `renderer/overlap.js` = the translucency rule (covered things fade to 20%); `readouts.js` (main) = HOST/CLAUDE/BATTERY
+  values pushed to the window (`readouts` IPC) and the backdrop (`wp-scene {type:'readouts'}`), and the tier-2 actions.
+- The brain look's scripts (stars.js, neural.js, brain3d.mjs) keep running but draw nothing while `window.SCENE_LOOK === 'reactor'`;
+  neural.js's `HUD` is still the one state/level/pulse API every page talks to (`HUD.live()` carries pulse/attention/offline).
+- Geometry: radius = min(26% of the stage height, 22% of its width), centre 3% below the middle; the flow obstacle is 1.5× that
+  (dash.js `brain()`). Two backdrop canvases: `#sheet` (the dots and schematic, rendered once per colour/geometry) and `#matrix`
+  (sweep + ripples, 1×, ≤ 30 fps). Never call `resize()` per frame: reallocating a display-sized canvas every frame cost 30% CPU.
+- Under the live desktop the backdrop window draws only the sheet, centred on the window's reactor (the `spot` scene message
+  carries `cx, cy, r` in screen px); the window draws the reactor, orbs and callouts (`#matrix`/`#sheet` hidden there).
+- Testing: `node scripts/harness.mjs eval` (and `ARES_HARNESS_PAGE=wallpaper.html` for the backdrop page); `Surface.hold({paused:false})` /
+  `ARESWall.hold({paused:false})` to draw while covered; `JobOrbs.sync([...fake jobs])`, `Callouts.open('claude')`,
+  `Scene.orbs.throw(id, vx, vy)`, `Scene.orbs.fadeOf(id)`, `Overlap.tick()`. Measured 2026-10-05 (window + backdrop, held at full
+  rate): reactor 8% CPU on power / 7% on battery vs the brain's 23% / 11%.

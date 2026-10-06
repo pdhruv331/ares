@@ -375,7 +375,8 @@ const HUD = (() => {
   const gate = Perf.gate();
   function frame(t) {
     requestAnimationFrame(frame);
-    if (!gate(t) || window.SCENE_HIDE_BRAIN) return;
+    if (!gate(t)) return;
+    if (window.SCENE_HIDE_BRAIN && window.SCENE_LOOK !== 'reactor') return; // (the reactor look still needs the level and halo values ticking: the sheet's ripples)
     try { draw(t); } catch (e) { console.error('HUD frame failed', e); }
   }
   requestAnimationFrame(frame);

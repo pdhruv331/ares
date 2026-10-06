@@ -570,6 +570,7 @@ const Scene = (() => {
       window.dispatchEvent(new CustomEvent('scene-look', { detail: look }));
     },
     get engine() { return engine; },
+    get backdrop() { return backdrop; },
     get reduceMotion() { return reduceMotion; },
     /** The reactor in the #hud canvas's own coordinates. */
     geometry,
