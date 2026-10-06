@@ -46,7 +46,8 @@ class Wallpaper extends EventEmitter {
   get opts() {
     const w = this.readSettings().wallpaper || {};
     return { enabled: w.enabled !== false, displays: w.displays || 'all', clock: Boolean(w.clock), lockStill: Boolean(w.lockStill),
-      lockAsked: Boolean(w.lockAsked), evening: Boolean(w.evening), original: w.original || null };
+      lockAsked: Boolean(w.lockAsked), evening: Boolean(w.evening), original: w.original || null,
+      caption: ['offline', 'standby', 'none'].includes(w.stillCaption) ? w.stillCaption : 'offline' }; // what the still says under the reactor
   }
   save(patch) { this.writeSettings({ wallpaper: { ...(this.readSettings().wallpaper || {}), ...patch } }); }
 
@@ -360,7 +361,7 @@ class Wallpaper extends EventEmitter {
       require('electron').ipcMain.on('wp-still', onStill);
       const timer = setTimeout(() => { this.log('lock still timed out'); done(null); }, 30_000);
       const look = this.readSettings().look === 'brain' ? 'brain' : 'reactor';
-      win.loadFile(path.join(this.appDir, 'renderer', 'wallpaper.html'), { query: { mode: 'still', look, ...(evening ? { tint: 'evening' } : {}) } });
+      win.loadFile(path.join(this.appDir, 'renderer', 'wallpaper.html'), { query: { mode: 'still', look, caption: this.opts.caption, ...(evening ? { tint: 'evening' } : {}) } });
     });
   }
 
@@ -389,6 +390,7 @@ class Wallpaper extends EventEmitter {
     else this.scheduleStill();
   }
   setEvening(on) { this.save({ evening: on }); if (this.opts.lockStill) this.renderStills(); }
+  setCaption(which) { this.save({ stillCaption: which }); if (this.opts.lockStill) this.renderStills(); }
 
   // ---- Switches --------------------------------------------------------------------------------------------
   /** The tray's "ARES as Wallpaper". Off = the normal desktop straight away, and the desktop picture restored. */

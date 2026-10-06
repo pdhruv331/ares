@@ -387,6 +387,11 @@ function wallpaperMenu() {
       { type: 'separator' },
       { label: 'ARES Lock Screen Picture', type: 'checkbox', checked: o.lockStill, click: act((item) => wallpaper.setLockStill(item.checked)) },
       { label: 'Warmer in the Evening', type: 'checkbox', checked: o.evening, enabled: o.lockStill, click: act((item) => wallpaper.setEvening(item.checked)) },
+      { label: 'Lock Picture Says', enabled: o.lockStill, submenu: [
+        { label: 'ARES · OFFLINE (amber, cold reactor)', type: 'radio', checked: o.caption === 'offline', click: act(() => wallpaper.setCaption('offline')) },
+        { label: 'ARES · STANDING BY', type: 'radio', checked: o.caption === 'standby', click: act(() => wallpaper.setCaption('standby')) },
+        { label: 'Nothing', type: 'radio', checked: o.caption === 'none', click: act(() => wallpaper.setCaption('none')) },
+      ] },
       { label: 'Re-render Lock Screen Picture', enabled: o.lockStill, click: act(() => wallpaper.renderStills()) },
     ] },
     { label: 'Restore My Original Wallpaper', enabled: Boolean(o.original), click: act(() => wallpaper.restoreOriginal()) },

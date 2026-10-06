@@ -135,7 +135,9 @@
   }
 
   // ---- The lock-screen still: one picture of the scene at this display's native resolution, no text --------
-  async function renderStill(tint) {
+  async function renderStill(tint, caption) {
+    // "offline": the reactor cold and amber, as it runs with no brain; "standby": at rest, in cyan; else no caption
+    if (caption === 'offline') HUD.offline?.(true);
     await new Promise((r) => (window.JobOrbs ? r() : addEventListener('orbs-ready', r, { once: true })));
     await new Promise((r) => setTimeout(r, 2600)); // past the boot animation, a few neurons alight
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -155,6 +157,25 @@
       ctx.drawImage(document.getElementById('matrix'), 0, 0, W, H);
       ctx.drawImage(document.getElementById('hud'), cr.left * dpr, cr.top * dpr, cr.width * dpr, cr.height * dpr);
       ctx.filter = 'none';
+      if (caption === 'offline' || caption === 'standby') { // a spaced line under the reactor, flanked by two short rules
+        const sc = Scene.screen();
+        const col = caption === 'offline' ? '255, 181, 71' : '62, 230, 255';
+        const x = sc.x * dpr, y = (sc.y + sc.r * 1.5) * dpr; // under the 90° mark, well above where the lock screen puts its field
+        ctx.font = `${Math.round(12 * dpr)}px "SF Mono", ui-monospace, Menlo, monospace`;
+        ctx.letterSpacing = `${Math.round(5 * dpr)}px`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        const text = caption === 'offline' ? 'ARES · OFFLINE' : 'ARES · STANDING BY';
+        const tw = ctx.measureText(text).width;
+        ctx.fillStyle = `rgba(${col}, 0.85)`;
+        ctx.shadowColor = `rgba(${col}, 0.6)`; ctx.shadowBlur = 10 * dpr;
+        ctx.fillText(text, x, y);
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = `rgba(${col}, 0.45)`; ctx.lineWidth = dpr;
+        for (const dir of [-1, 1]) { ctx.beginPath(); ctx.moveTo(x + dir * (tw / 2 + 18 * dpr), y); ctx.lineTo(x + dir * (tw / 2 + 78 * dpr), y); ctx.stroke(); }
+        ctx.fillStyle = `rgba(${col}, 0.4)`;
+        ctx.font = `${Math.round(9 * dpr)}px "SF Mono", ui-monospace, Menlo, monospace`; ctx.letterSpacing = `${Math.round(3 * dpr)}px`;
+        ctx.fillText(caption === 'offline' ? 'REACTOR COLD · SYSTEMS DOWN' : 'LOCKED · SAY HEY ARES WHEN YOU\'RE BACK', x, y + 22 * dpr);
+      }
       return out.toDataURL('image/png');
     }
     const glow = ctx.createRadialGradient((cr.left + cr.width / 2) * dpr, (cr.top + cr.height / 2) * dpr, 0, (cr.left + cr.width / 2) * dpr, (cr.top + cr.height / 2) * dpr, Math.min(W, H) * 0.42);
@@ -174,7 +195,7 @@
   let held = false; // measuring: a forced mode the main process doesn't override
   window.ARESWall = { setMode, scene, jobs(list) { jobs = list || []; syncJobs(); }, prefs, hold(m) { held = Boolean(m); if (m) setMode(m); } };
   if (MODE === 'still') {
-    renderStill(q.get('tint') === 'evening').then((png) => bridge?.stillDone(png), (err) => bridge?.stillDone(null, String(err)));
+    renderStill(q.get('tint') === 'evening', q.get('caption') || '').then((png) => bridge?.stillDone(png), (err) => bridge?.stillDone(null, String(err)));
   } else if (bridge) {
     bridge.onScene(scene);
     bridge.onMode((m) => { if (!held) setMode(m); });
