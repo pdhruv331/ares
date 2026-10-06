@@ -267,6 +267,7 @@
         e.cold = 1 - ease.out(c) * 0.75;        // only brightens from the floor
         e.pace = 0.15 + c * c * 1.6;            // rings spin up
         e.coilsLit = Math.floor(c * 10 + 1e-6);
+        e.amberSweep = c; // the ticks light amber from the bottom, both ways up, with the charge: they meet at the top at 100%
         e.hum = c * 0.9;
         e.flash = Math.max(e.flash, c * 0.4 * (0.5 + 0.5 * Math.sin(this.t * (6 + c * 18)))); // flickers faster
         // streaks pulled out of the dot matrix, spiralling into the core
@@ -282,7 +283,7 @@
       }
       if (m === 'breath') { // the core pulls in
         const k = this.t / TIMING.breath;
-        e.flash = -1.6 * Math.sin(Math.min(1, k) * Math.PI); e.hum = 0; e.pace = 0.4; e.coilsLit = 10;
+        e.flash = -1.6 * Math.sin(Math.min(1, k) * Math.PI); e.hum = 0; e.pace = 0.4; e.coilsLit = 10; e.amberSweep = 1;
         this.streaks.length = 0;
         if (k >= 1) { this.set('wake'); this.events.push('wake'); }
         return;
@@ -293,6 +294,7 @@
         e.cold = Math.max(0, 0.25 * (1 - ease.out(clamp(k * 2, 0, 1))));
         e.pace = 1 + 1.5 * (1 - k);
         e.scanOn = clamp(k * 2 - 0.5, 0, 1);
+        e.amberSweep = Math.max(0, 1 - k * 2.5); // the amber lets go as the rings turn cyan
         this.bloom = Math.max(0, 1 - k * 1.6);
         this.shock = ease.out(clamp(k, 0, 1));
         this.open = Math.exp(-k * 4) * Math.sin(k * 11); // the rings spring open with a slight overshoot
