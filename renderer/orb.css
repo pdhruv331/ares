@@ -71,7 +71,7 @@ html.c-tr .card, html.c-tl .card { top: calc(var(--oy) + 30px); transform-origin
 .cd-life i { display: block; height: 100%; width: 100%; background: rgb(var(--k)); box-shadow: 0 0 4px rgb(var(--k)); transform-origin: left; }
 
 /* The quick menu (right-click): FRIDAY rows inside EDITH brackets, up and away from the orb */
-.menu { position: absolute; width: 196px; padding: 8px 0 7px; background: rgba(2, 8, 14, 0.88); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 3px; }
+.menu { position: absolute; width: 222px; padding: 8px 0 7px; background: rgba(2, 8, 14, 0.88); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-radius: 3px; }
 html.c-br .menu, html.c-tr .menu { right: calc(100% - var(--ox) - 18px); }
 html.c-bl .menu, html.c-tl .menu { left: calc(var(--ox) - 18px); }
 html.c-br .menu, html.c-bl .menu { bottom: calc(100% - var(--oy) + 30px); }

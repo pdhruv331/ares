@@ -589,6 +589,10 @@ class Orb {
       case 'context': this.setContext(arg); return this.visible;
       case 'portal': return this.portal(Boolean(arg.open), 'test');
       case 'reload': this.ready = false; this.win?.webContents.reload(); return true;
+      case 'metrics': { // CPU of the orb's renderer vs the rest (Electron's own metrics, since the last call)
+        const pid = this.win?.webContents.getOSProcessId();
+        return require('electron').app.getAppMetrics().map((m) => ({ pid: m.pid, type: m.type, cpu: Math.round(m.cpu.percentCPUUsage * 10) / 10, orb: m.pid === pid }));
+      }
       case 'refresh': this.refresh(); return this.needs;
     }
   }

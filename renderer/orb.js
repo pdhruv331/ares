@@ -182,7 +182,7 @@
   stage.addEventListener('pointerleave', () => { S.hover = false; kick(); });
 
   // ---- The quick menu ----
-  function openMenu() { hideChips(); menu.hidden = false; postHits(); kick(); window.orb.send({ type: 'open', what: 'menu' }); }
+  function openMenu() { hideChips(); hideCard(true); menu.hidden = false; postHits(); kick(); window.orb.send({ type: 'open', what: 'menu' }); }
   function closeMenu() { if (menu.hidden) return; menu.hidden = true; postHits(); window.orb.send({ type: 'closed', what: 'menu' }); }
   menu.addEventListener('click', (e) => {
     const act = e.target.closest('[data-act]')?.dataset.act;

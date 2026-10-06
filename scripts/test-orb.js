@@ -186,11 +186,12 @@ app.whenReady().then(async () => {
   orb.callEvent({ kind: 'inbound', name: 'Sam', line: 'Sam called about Friday.' });
   check('incoming call: green signal + card', last('signals').call?.name === 'Sam' && last('card')?.card.label === 'INCOMING CALL');
   orb.callNote = null;
-  usage.pct = 85; orb.usageWarn({ window: 'five_hour', label: '5-hour', pct: 85, resetsAt: Date.now() + 3600e3 });
+  const resetsAt = Date.now() + 3600e3; // (one window: the same reset time each time)
+  usage.pct = 85; orb.usageWarn({ window: 'five_hour', label: '5-hour', pct: 85, resetsAt });
   check('usage 85%: amber tint + a one-time card with the reset time', last('signals').usage.pct === 85 && last('card')?.card.label === 'CLAUDE 85%' && /Resets/.test(last('card').card.detail));
-  sent.length = 0; orb.usageWarn({ window: 'five_hour', label: '5-hour', pct: 85, resetsAt: Date.now() + 3600e3 });
+  sent.length = 0; orb.usageWarn({ window: 'five_hour', label: '5-hour', pct: 85, resetsAt });
   check('…only once', !sent.some((m) => m.type === 'card'));
-  usage.pct = 96; orb.usageWarn({ window: 'five_hour', label: '5-hour', pct: 96, resetsAt: Date.now() + 3600e3 });
+  usage.pct = 96; orb.usageWarn({ window: 'five_hour', label: '5-hour', pct: 96, resetsAt });
   check('usage 96%: a stronger card', last('signals').usage.pct === 96 && last('card')?.card.label === 'CLAUDE 96%');
   usage.pct = 10; orb.refresh();
 

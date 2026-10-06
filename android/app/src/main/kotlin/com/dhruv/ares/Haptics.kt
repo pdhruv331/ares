@@ -1,9 +1,9 @@
 package com.dhruv.ares
 
 import android.content.Context
+import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.VibratorManager
-import android.provider.Settings
 
 /**
  * The phone's haptics for the power gestures (docs/ignition-prompt.md §4e); quiet when the system's haptic feedback is off.
@@ -11,11 +11,14 @@ import android.provider.Settings
  * ticks for the streams pulled into the core, thickening with the real charge, then the bloom's double thunk); STANDBY and POWER DOWN
  * are "turbine" (pulses riding the rings as they wind down: closer at first, stretching out, a thud at the end).
  * Android has no strength control beyond amplitude, so a firmer tick is a longer one with a higher amplitude.
+ * The ticks carry USAGE_TOUCH (they follow the system's touch-feedback setting); the transitions USAGE_MEDIA (they play like the sound
+ * does). No reading of Settings.System.HAPTIC_FEEDBACK_ENABLED: Samsung keeps its own keys, and that check silenced everything.
  */
 object Haptics {
     private fun vib(c: Context) = c.getSystemService(VibratorManager::class.java)?.defaultVibrator
-    private fun allowed(c: Context) = Settings.System.getInt(c.contentResolver, Settings.System.HAPTIC_FEEDBACK_ENABLED, 1) != 0
-    private fun play(c: Context, e: VibrationEffect) { if (allowed(c)) runCatching { vib(c)?.vibrate(e) } }
+    private val touch = VibrationAttributes.createForUsage(VibrationAttributes.USAGE_TOUCH)
+    private val media = VibrationAttributes.createForUsage(VibrationAttributes.USAGE_MEDIA)
+    private fun play(c: Context, e: VibrationEffect, attrs: VibrationAttributes = touch) { runCatching { vib(c)?.takeIf { it.hasVibrator() }?.vibrate(e, attrs) } }
 
     /** A light tick (each eighth of the hold ring, a slider detent, the spring-back). */
     fun tick(c: Context) = play(c, VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
@@ -28,7 +31,7 @@ object Haptics {
     /** Standby committed on the Mac: one soft thunk. */
     fun soft(c: Context) = play(c, VibrationEffect.createOneShot(28, 120))
     /** Can't reach the Mac, or an error. */
-    fun error(c: Context) = play(c, VibrationEffect.createWaveform(longArrayOf(0, 60, 50, 60, 50, 120), intArrayOf(0, 200, 0, 200, 0, 255), -1))
+    fun error(c: Context) = play(c, VibrationEffect.createWaveform(longArrayOf(0, 60, 50, 60, 50, 120), intArrayOf(0, 200, 0, 200, 0, 255), -1), media)
 
     /** Pulses as (start ms, length ms) → one waveform; amplitude follows the length (10 ms ≈ 90, 85 ms = 255). */
     fun pattern(c: Context, pulses: List<Pair<Long, Int>>) {
@@ -41,7 +44,7 @@ object Haptics {
             timings += ms.toLong(); amps += (90 + (ms - 10) * 2.2f).toInt().coerceIn(60, 255)
             last = at + ms
         }
-        play(c, VibrationEffect.createWaveform(timings.toLongArray(), amps.toIntArray(), -1))
+        play(c, VibrationEffect.createWaveform(timings.toLongArray(), amps.toIntArray(), -1), media)
     }
     private fun lerp(a: Float, b: Float, k: Float) = a + (b - a) * k.coerceIn(0f, 1f)
 
