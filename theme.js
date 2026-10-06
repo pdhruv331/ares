@@ -120,7 +120,7 @@ class Theme {
   stopLive({ quitting = false } = {}) {
     if (!this.live) return;
     this.live = false;
-    if (quitting) this.bar.offline(); // the bar stays (clock, battery, Wi-Fi), the Mac's own Dock and menu bar come back
+    if (quitting) this.bar.offline(); // the Mac's own Dock and menu bar come back; the bar and the glow quit with ARES
     else { this.bar.stop(); this.bar.stopBorders(); }
     try { fs.rmSync(path.join(this.dir, 'ares.pid'), { force: true }); } catch {}
     if (!quitting) this.onLive?.(false); // quitting: ARES's window is already gone
@@ -131,8 +131,8 @@ class Theme {
     this.server?.close();
     this.server = null;
   }
-  /** ARES is quitting: the windows go; the bar and the glow stay (they're the Mac's look), the bar says offline, and
-   *  the Apple Dock is the user's own again until ARES is back. */
+  /** ARES is quitting: the windows, the bar and the glow all go; the Apple Dock and menu bar are the user's own again until
+   *  ARES is back (2026-10-05: the bar used to stay up saying "ares offline"). */
   quit() { this.quitting = true; this.stopLive({ quitting: true }); }
 
   // ---- The switch ----------------------------------------------------------------------------------------------

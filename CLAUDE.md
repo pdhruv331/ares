@@ -88,7 +88,8 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   the front app's menus come from Accessibility (`ares-theme menubar/menu-items/menu-press`), ARES's own from `menuSections()`
   in main.js (the ◉ menu is the same sections joined). Mirrored icons are SketchyBar aliases (Screen Recording for SketchyBar).
 - Offline: `~/.ares/sketchybar/offline.sh` (run on quit, and by the `ares.watch` item if ARES's pid in `<support>/theme/ares.pid`
-  dies) puts the user's Dock settings back and lowers the bar; `resumeDock()` re-applies on launch. A dev harness
+  dies) puts the user's Dock settings back and QUITS the bar and JankyBorders (since 2026-10-05; before, the bar stayed up saying
+  "ares offline"); `resumeDock()` re-applies on launch. A dev harness
   (ARES_USER_DATA set) uses `~/.ares/sketchybar-dev` so it never rewrites the installed bar's scripts.
 - Blended (theme live): summoning lifts ARES without glass or chrome and stays click-through except over her things;
   a lift for one panel (bar/dock/notification: `showWindow(panel)`) shows only that panel and sinks when it closes.

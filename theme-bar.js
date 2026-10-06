@@ -108,14 +108,14 @@ case "$SENDER" in
   mouse.exited.global) sketchybar --set "$NAME" popup.drawing=off; curl -s -m 2 '${url}/closed?i='"$I" >/dev/null & ;;
 esac
 `,
-      // Back to the user's own Dock and the plain macOS menu bar while ARES isn't running
+      // Back to the user's own Dock and the plain macOS menu bar while ARES isn't running: the bar and the glow go with her
+      // (she starts them again on launch). Run on quit, and by the watchdog if she dies.
       'offline.sh': `#!/bin/zsh
 export PATH="${path.dirname(this.sketchybar || '/opt/homebrew/bin/x')}:$PATH"
 touch ${q(this.marker)}
 ${this.offlineCommands().join('\n')}
-sketchybar --bar topmost=off --set ares.status label='ares offline' icon.color=${C.amber} label.color=${C.amber} background.border_color=${C.amberDim} \\
-  --set ares.voice icon='◌' icon.color=${C.muted} label.drawing=off --set '/menu\\..*/' drawing=off popup.drawing=off --set front drawing=on \\
-  --set ares.mark popup.drawing=off
+pkill -x borders
+pkill -x sketchybar
 `,
       // The watchdog: ARES died without quitting (once per outage; ARES clears the marker when it's back)
       'watch.sh': `#!/bin/zsh
@@ -223,7 +223,7 @@ sketchybar --update
   }
   /** Theme off: the bar's files go too. */
   removeFiles() { fs.rmSync(this.dir, { recursive: true, force: true }); try { fs.rmdirSync(path.dirname(this.dir)); } catch {} }
-  /** ARES is quitting: the bar stays (clock, battery, Wi-Fi) and offline.sh hands the Mac back. Synchronous. */
+  /** ARES is quitting: offline.sh hands the Mac back (Dock settings, then the bar and the glow quit). Synchronous. */
   offline() {
     this.active = false;
     if (!fs.existsSync(this.offlineFile)) return;
