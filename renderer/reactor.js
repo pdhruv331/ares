@@ -6,11 +6,12 @@
 //   engine.draw(ctx, cx, cy, r, { small });     the reactor: tick ring + scanner, four counter-turning rings, the waveform
 //                                               ring, ten coils in a chase, the core and its sparks. `small` (the dock orb,
 //                                               r < ~60): no sparks, no scanner.
-//   const back = new Reactor.Backdrop();         back.resize(w, h, dpr); back.draw(ctx, { cx, cy, r, hue, dt, level, speaking })
+//   const back = new Reactor.Backdrop();         back.resize(w, h, dpr, animDpr); back.draw(ctx, { staticCtx, cx, cy, r, hue, dt, level, speaking })
 //                                               near-black sheet, a 14 px dot grid in the reactor's colour (brightest near it),
 //                                               construction rings, crosshair, angle marks, a slow radar sweep, and ripples
-//                                               rolling out across the dots while she speaks. The static part is rendered
-//                                               once per colour/geometry and only tinted after that.
+//                                               rolling out across the dots while she speaks. Two canvases: the sheet itself
+//                                               (`staticCtx`) is rendered once per colour/geometry and left alone; only the
+//                                               sweep and the ripples are drawn per frame (`ctx`, a transparent layer).
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.Reactor = factory();
@@ -237,10 +238,31 @@
       this.lastLevel = 0; this.lastRipple = 0; this.t = 0;
       this.font = '"SF Mono", ui-monospace, Menlo, monospace';
     }
-    resize(w, h, dpr = 1) {
-      this.w = w; this.h = h; this.dpr = dpr;
-      for (const c of [this.mask, this.tinted, this.rip]) { c.width = Math.max(1, Math.round(w * dpr)); c.height = Math.max(1, Math.round(h * dpr)); }
-      this.maskKey = ''; this.tintKey = '';
+    resize(w, h, dpr = 1, animDpr = 1) {
+      this.w = w; this.h = h; this.dpr = dpr; this.animDpr = animDpr;
+      for (const c of [this.mask, this.tinted]) { c.width = Math.max(1, Math.round(w * dpr)); c.height = Math.max(1, Math.round(h * dpr)); }
+      this.rip.width = Math.max(1, Math.round(w * animDpr)); this.rip.height = Math.max(1, Math.round(h * animDpr));
+      this.maskKey = ''; this.tintKey = ''; this.sweepKey = ''; this.staticKey = '';
+    }
+    /** The radar wedge, rendered once per size and colour, then just rotated into place. */
+    sweepSprite(r, hue) {
+      const k = `${Math.round(r)}|${hue[0] >> 2},${hue[1] >> 2},${hue[2] >> 2}`;
+      if (k === this.sweepKey) return this.sweepC;
+      this.sweepKey = k;
+      const R = r * 1.62, d = this.animDpr;
+      const c = this.sweepC || (this.sweepC = document.createElement('canvas'));
+      c.width = c.height = Math.max(2, Math.ceil(R * 2 * d));
+      const g = c.getContext('2d');
+      g.setTransform(d, 0, 0, d, 0, 0);
+      g.clearRect(0, 0, R * 2, R * 2);
+      if (!g.createConicGradient) return c;
+      const sg = g.createConicGradient(0, R, R);
+      sg.addColorStop(0, rgba(hue, 0.16));
+      sg.addColorStop(0.12, rgba(hue, 0));
+      sg.addColorStop(1, rgba(hue, 0));
+      g.fillStyle = sg;
+      g.beginPath(); g.arc(R, R, R, 0, TAU); g.arc(R, R, r * 1.3, 0, TAU, true); g.fill('evenodd');
+      return c;
     }
     /** White dots (brightest near the reactor, fading with distance) and the schematic lines, as a mask. */
     renderMask(cx, cy, r) {
@@ -301,8 +323,8 @@
      * her voice level while `speaking`. `motion` false = a still frame (no sweep, no ripples). `ink` paints the near-black
      * sheet first (false on a transparent window, where the page's own background shows through).
      */
-    draw(ctx, { cx, cy, r, hue = COLORS.cyan, dt = 0, level = 0, speaking = false, motion = true, ink = true }) {
-      const { w, h, dpr } = this;
+    draw(ctx, { staticCtx = null, cx, cy, r, hue = COLORS.cyan, dt = 0, level = 0, speaking = false, motion = true, ink = true }) {
+      const { w, h, animDpr } = this;
       if (!w || !h || r < 4) return;
       dt = clamp(dt, 0, 0.05);
       this.t += dt;
@@ -310,19 +332,23 @@
       if (mk !== this.maskKey) { this.maskKey = mk; this.renderMask(cx, cy, r); this.tintKey = ''; }
       const tk = `${hue[0] >> 2},${hue[1] >> 2},${hue[2] >> 2}`;
       if (tk !== this.tintKey) { this.tintKey = tk; this.tint(hue); }
-      if (ink) { ctx.fillStyle = rgba(COLORS.ink, 1); ctx.fillRect(0, 0, w, h); } else ctx.clearRect(0, 0, w, h);
-      ctx.drawImage(this.tinted, 0, 0, w, h);
+      // The sheet: into its own canvas when it changes (geometry, colour), else once into this one
+      const sctx = staticCtx || ctx;
+      const sk = `${mk}|${tk}|${ink}`;
+      if (sk !== this.staticKey || !staticCtx) {
+        this.staticKey = sk;
+        if (ink) { sctx.fillStyle = rgba(COLORS.ink, 1); sctx.fillRect(0, 0, w, h); } else sctx.clearRect(0, 0, w, h);
+        sctx.drawImage(this.tinted, 0, 0, w, h);
+      }
+      if (staticCtx) ctx.clearRect(0, 0, w, h);
       if (!motion) return;
       // The radar sweep between the 1.3 and 1.62 rings
       this.sweep += dt * 28;
-      if (ctx.createConicGradient) {
-        const sg = ctx.createConicGradient(this.sweep * RAD, cx, cy);
-        sg.addColorStop(0, rgba(hue, 0.16));
-        sg.addColorStop(0.12, rgba(hue, 0));
-        sg.addColorStop(1, rgba(hue, 0));
-        ctx.fillStyle = sg;
-        ctx.beginPath(); ctx.arc(cx, cy, r * 1.62, 0, TAU); ctx.arc(cx, cy, r * 1.3, 0, TAU, true); ctx.fill('evenodd');
-      }
+      const wedge = this.sweepSprite(r, hue);
+      ctx.save();
+      ctx.translate(cx, cy); ctx.rotate(this.sweep * RAD);
+      ctx.drawImage(wedge, -r * 1.62, -r * 1.62, r * 3.24, r * 3.24);
+      ctx.restore();
       // Ripples across the dots while she speaks: a new one on each stronger syllable
       if (speaking && level > 0.04) {
         const rising = level > this.lastLevel + 0.12;
@@ -332,7 +358,7 @@
       this.ripples = this.ripples.filter((p) => this.t - p.t0 < 2.4);
       if (this.ripples.length) {
         const g = this.rip.getContext('2d');
-        g.setTransform(dpr, 0, 0, dpr, 0, 0);
+        g.setTransform(animDpr, 0, 0, animDpr, 0, 0);
         g.globalCompositeOperation = 'source-over';
         g.clearRect(0, 0, w, h);
         g.lineCap = 'butt';
@@ -350,7 +376,7 @@
         }
         g.globalCompositeOperation = 'destination-in';
         g.setTransform(1, 0, 0, 1, 0, 0);
-        g.drawImage(this.mask, 0, 0);
+        g.drawImage(this.mask, 0, 0, this.rip.width, this.rip.height);
         g.globalCompositeOperation = 'source-in';
         g.fillStyle = rgba(mix(hue, COLORS.white, 0.5), 1);
         g.fillRect(0, 0, this.rip.width, this.rip.height);

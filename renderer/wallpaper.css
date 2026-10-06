@@ -26,8 +26,8 @@ html, body {
 
 /* The reactor look (scene.js): the dot-matrix sheet full-bleed, the reactor's canvas the whole screen (its centre a little below
    the middle, as in the window), the starfield and the 3D brain off */
-#matrix { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-html.look-brain #matrix, html.look-reactor #stars, html.look-reactor #brain { display: none; }
+#matrix, #sheet { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+html.look-brain #matrix, html.look-brain #sheet, html.look-reactor #stars, html.look-reactor #brain { display: none; }
 html.look-reactor body { background: #03070d; }
 html.look-reactor .core { left: 0; top: 0; width: 100%; height: 100%; transform-origin: 50% 53%; }
 .close-hint { display: none; }

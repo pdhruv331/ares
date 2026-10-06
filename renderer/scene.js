@@ -9,11 +9,13 @@
 // are drawn here (the wallpaper shows them too); their hover, cards and actions live in callouts.js (the window only).
 const Scene = (() => {
   const hud = document.getElementById('hud');
-  const matrix = document.getElementById('matrix');
+  const matrix = document.getElementById('matrix'); // the sheet's moving parts (sweep, ripples), at 1×
+  const sheet = document.getElementById('sheet');   // the sheet itself (dots, schematic), drawn once per colour/geometry
   const core = hud?.parentElement;
   if (!hud || !core) return null;
   const ctx = hud.getContext('2d');
   const mctx = matrix?.getContext('2d');
+  const sctx = sheet?.getContext('2d');
   const { Engine, Backdrop, COLORS, rgba, mix, glow, TAU, clamp } = Reactor;
   const root = document.documentElement;
   const reduceMotionQuery = matchMedia('(prefers-reduced-motion: reduce)');
@@ -41,19 +43,24 @@ const Scene = (() => {
   const scaleOf = () => (w ? rect.width / w : 1);
   const toClient = (x, y) => ({ x: rect.left + x * scaleOf(), y: rect.top + y * scaleOf() });
   const fromClient = (x, y) => ({ x: (x - rect.left) / scaleOf(), y: (y - rect.top) / scaleOf() });
-  function resize() {
+  let sizeKey = '';
+  function resize() { // (only reallocates the canvases when a size or the pixel ratio changed: that's expensive)
     const dpr = sceneDpr();
-    const r = hud.getBoundingClientRect();
+    rect = hud.getBoundingClientRect();
     w = hud.clientWidth; h = hud.clientHeight;
+    const mw = matrix?.clientWidth || 0, mh = matrix?.clientHeight || 0;
+    const key = `${w}x${h}@${dpr}|${mw}x${mh}`;
+    if (key === sizeKey) return;
+    sizeKey = key;
     hud.width = Math.round(w * dpr); hud.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    rect = r;
     if (matrix) {
-      const mw = matrix.clientWidth, mh = matrix.clientHeight;
-      const mdpr = Math.min(dpr, 2);
-      matrix.width = Math.round(mw * mdpr); matrix.height = Math.round(mh * mdpr);
-      mctx.setTransform(mdpr, 0, 0, mdpr, 0, 0);
-      backdrop.resize(mw, mh, mdpr);
+      const sdpr = Math.min(dpr, 2);
+      matrix.width = Math.round(mw); matrix.height = Math.round(mh);
+      mctx.setTransform(1, 0, 0, 1, 0, 0);
+      if (sheet) { sheet.width = Math.round(mw * sdpr); sheet.height = Math.round(mh * sdpr); sctx.setTransform(sdpr, 0, 0, sdpr, 0, 0); }
+      backdrop.resize(mw, mh, sdpr, 1);
+      lastBack = 0;
     }
   }
 
@@ -73,7 +80,8 @@ const Scene = (() => {
   const ORB_COLOR = { queued: 'cyan', running: 'cyan', approval: 'amber', done: 'green', failed: 'red', paused: 'grey' };
   const ORB_SIZE = { small: 0.028, medium: 0.034, large: 0.04, project: 0.05 }; // of r
   const ORB_LABEL = { queued: 'QUEUED', paused: 'PAUSED', done: 'DONE', failed: 'FAILED', approval: 'NEEDS YOU' };
-  const PHYS = { throw: 0.55, maxSpeed: 9, friction: 0.965, bounce: 0.6, unfold: 0.35, catch: 58 };
+  const PHYS = { throw: 0.55, maxSpeed: 9, friction: 0.965, bounce: 0.6, unfold: 0.35, catch: 58 }; // catch: at least this, or the core (0.5 r)
+  const catchR = () => Math.max(PHYS.catch, geometry().r * 0.5);
   const EST = { small: 4, medium: 10, large: 25 };
   const FINISHED = ['done', 'failed'];
   const SHOW_DAYS = 3;
@@ -146,7 +154,7 @@ const Scene = (() => {
         if (orb.x > w - R) { orb.x = w - R; orb.vx = -Math.abs(orb.vx) * PHYS.bounce; }
         if (orb.y < R) { orb.y = R; orb.vy = Math.abs(orb.vy) * PHYS.bounce; }
         if (orb.y > h - R) { orb.y = h - R; orb.vy = -Math.abs(orb.vy) * PHYS.bounce; }
-        if (Math.hypot(orb.x - g.cx, orb.y - g.cy) < PHYS.catch) { absorb(orb); continue; }
+        if (Math.hypot(orb.x - g.cx, orb.y - g.cy) < catchR()) { absorb(orb); continue; }
         if (Math.hypot(orb.vx, orb.vy) < PHYS.unfold) move(orb, 'returning', null, 0.9);
       } else {
         orb.t = Math.min(1, orb.t + dt / orb.dur);
@@ -361,7 +369,7 @@ const Scene = (() => {
       held.samples.push({ t: performance.now(), x: held.orb.x, y: held.orb.y });
       while (held.samples.length > 12) held.samples.shift();
       const d = Math.hypot(held.orb.x - g.cx, held.orb.y - g.cy);
-      const near = clamp(1 - (d - PHYS.catch) / (g.r * 0.9), 0, 1);
+      const near = clamp(1 - (d - catchR()) / (g.r * 0.9), 0, 1);
       HUD.hover?.(near);
       const el = ensureHint();
       const show = near > 0.45;
@@ -387,7 +395,7 @@ const Scene = (() => {
     HUD.hover?.(0);
     if (!orb) return;
     const g = geometry();
-    if (deep || Math.hypot(orb.x - g.cx, orb.y - g.cy) < PHYS.catch) return absorb(orb);
+    if (deep || Math.hypot(orb.x - g.cx, orb.y - g.cy) < catchR()) return absorb(orb);
     const now = performance.now();
     const recent = held.samples.filter((s) => now - s.t < 90);
     let vx = 0, vy = 0;
@@ -502,7 +510,7 @@ const Scene = (() => {
 
   // ---- Frame -------------------------------------------------------------------------------------------------------------------
   const gate = Perf.gate();
-  let last = 0;
+  let last = 0, lastBack = 0;
   function frame(t) {
     requestAnimationFrame(frame);
     if (!gate(t)) { if (document.hidden) last = t; return; }
@@ -510,7 +518,6 @@ const Scene = (() => {
     last = t;
     if (!isReactor()) return;
     rect = hud.getBoundingClientRect();
-    if (!w || !h) resize();
     const live = HUD.live();
     engine.setState(live.state);
     engine.update(dt, { level: live.level, pulse: live.pulse, attention: live.attention, offline: live.offline });
@@ -520,11 +527,15 @@ const Scene = (() => {
     const motion = !window.SCENE_STILL && !reduceMotion;
     // The sheet: full-bleed, centred on the reactor wherever it sits (or on another window's reactor: the backdrop under the live
     // desktop, where this page's own reactor canvas is hidden and has no size)
-    if (matrix && mctx && !window.SCENE_BACKDROP_OFF?.()) {
+    // (30 fps at most, 20 with nothing but the sweep moving: it's a whole display's worth of pixels)
+    const backFps = backdrop.ripples.length || live.state === 'speaking' ? 30 : 20;
+    if (matrix && mctx && !window.SCENE_BACKDROP_OFF?.() && (t - lastBack >= 1000 / backFps - 2 || !lastBack)) {
+      const bdt = lastBack ? Math.min(0.1, (t - lastBack) / 1000) : dt;
+      lastBack = t;
       const mr = matrix.getBoundingClientRect();
       const c = centreOverride || (w ? { x: rect.left - mr.left + g.cx * scaleOf(), y: rect.top - mr.top + g.cy * scaleOf(), r: g.r * scaleOf() }
         : { x: mr.width / 2, y: mr.height / 2 + mr.height * 0.03, r: radiusFor(mr.width, mr.height) * boot });
-      backdrop.draw(mctx, { cx: c.x, cy: c.y, r: Math.max(c.r, radiusFor(mr.width, mr.height) * 0.2), hue: engine.hue, dt, level: live.level, speaking: live.state === 'speaking', motion, ink: !window.SCENE_TRANSPARENT });
+      backdrop.draw(mctx, { staticCtx: sctx, cx: c.x, cy: c.y, r: Math.max(c.r, radiusFor(mr.width, mr.height) * 0.2), hue: engine.hue, dt: bdt, level: live.level, speaking: live.state === 'speaking', motion, ink: !window.SCENE_TRANSPARENT });
     }
     if (!w) return;
     ctx.clearRect(0, 0, w, h);
@@ -540,6 +551,7 @@ const Scene = (() => {
   }
   new ResizeObserver(resize).observe(hud);
   if (matrix) new ResizeObserver(resize).observe(matrix);
+  addEventListener('scene-look', () => { lastBack = 0; backdrop.staticKey = ''; });
   addEventListener('scene-quality', resize);
   resize();
   requestAnimationFrame(frame);

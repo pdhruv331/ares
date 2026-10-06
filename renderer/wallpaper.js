@@ -151,6 +151,7 @@
     const cr = core.getBoundingClientRect();
     if (reactor) {
       if (tint) ctx.filter = 'hue-rotate(-155deg) saturate(1.15)';
+      ctx.drawImage(document.getElementById('sheet'), 0, 0, W, H);
       ctx.drawImage(document.getElementById('matrix'), 0, 0, W, H);
       ctx.drawImage(document.getElementById('hud'), cr.left * dpr, cr.top * dpr, cr.width * dpr, cr.height * dpr);
       ctx.filter = 'none';
