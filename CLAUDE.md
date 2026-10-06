@@ -227,6 +227,12 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   which reports the steps through ignition.js so the window plays the same charge. The ONLY true quit is ◉ → "Quit ARES Completely"
   (`power.quitFully`; `before-quit` turns any other quit into a power down unless `powerMonitor` said the Mac is shutting down).
   The helper then matters only at login and after that quit. ⌥⇧Space toggles standby; "power down" by voice is caught before the brain.
+- Transitions live in ignite.js's Controller: the amber tick sweep follows the charge (and the notch hold), a 0.55 s flare precedes a
+  spin-down from standby, the callouts draw in after every wake (`calloutK` → `Ignite.calloutReveal`, used by scene.js). Mockups with
+  the real code: `docs/mockups/ignition-opening.html` and `ignition-transitions.html` (serve the repo over HTTP and open them).
+- Lessons (2026-10-06): `open -j` keeps every window of ARES hidden (never use it); `loadFileURL` throws on a file URL with a query
+  (the helper injects geometry as a user script); a `.prohibited` activation policy forbids windows; macOS can report a new desktop
+  picture while still showing the old one (wallpaper.js reads it back and retries; keep the previous still file until then).
 - Testing: a cold start replays in the window on reload (`node scripts/harness.mjs reload`; start the dev instance with
   `--disable-backgrounding-occluded-windows --disable-renderer-backgrounding` or the charge crawls when covered); `window.ares.power.act('standby'|'wake'|'powerdown')`
   from the harness; `ARES_TEST_STILL` renders the offline and standby stills; the helper's page can be opened over HTTP from
