@@ -31,6 +31,7 @@ const C = {
   cyan: '0xff3ee6ff', cyanDim: '0x593ee6ff', cyanFaint: '0x1f3ee6ff', text: '0xffcfefff', muted: '0xff5d8797',
   violet: '0xffa78bfa', violetDim: '0x33a78bfa', green: '0xff4ade80', greenDim: '0x2a4ade80', amber: '0xffffb547', amberDim: '0x33ffb547',
   bar: '0xff02050a', popup: '0xf6040b12', none: '0x00000000',
+  blue: '0xff6096ff', gold: '0xfffac458', // standby / powering down (docs/ignition-prompt.md §4f)
 };
 const spaced = (s) => String(s).toUpperCase().split('').join(' ').replace(/ {3}/g, '  ');
 const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`; // a shell-quoted string inside the generated scripts
@@ -240,6 +241,11 @@ sketchybar --update
     execFile(bin, [...(animate ? ['--animate', animate[0], String(animate[1])] : []), '--set', item, ...props], { timeout: 3000 }, () => {});
   }
   raw(args) { if (this.sketchybar && this.active) execFile(this.sketchybar, args, { timeout: 3000 }, () => {}); }
+  /** The ◉ mark's colour by power state: cyan online, blue standby, gold while powering down. */
+  power(mode) {
+    const col = mode === 'standby' || mode === 'tostandby' || mode === 'fromstandby' ? C.blue : mode === 'spindown' ? C.gold : C.cyan;
+    this.set('ares.mark', [`icon.color=${col}`], ['sin', 12]);
+  }
   query(item) {
     return new Promise((resolve) => execFile(this.sketchybar, ['--query', item], { timeout: 2000 }, (err, out) => { try { resolve(JSON.parse(out)); } catch { resolve(null); } }));
   }

@@ -883,15 +883,4 @@ window.ares.onUiPrefs(applyLook);
 window.ares.ttsAvailable().then((on) => document.querySelector('[data-key="voice"]').classList.add(on ? 'online' : 'pending'));
 
 // ---- Boot -----------------------------------------------------------------
-setTimeout(() => {
-  const h = new Date().getHours();
-  const greeting = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
-  const line = h < 5
-    ? '[dryly] Burning the midnight oil, sir? Interface online. How may I be of service?'
-    : `${greeting}, sir. Interface online. How may I be of service?`;
-  note('ares', line);
-  // Launched at login with the window hidden: greet silently rather than talking to an empty room.
-  if (document.visibilityState !== 'visible') return;
-  window.ares.pauseListening();
-  Voice.speak(line).then(() => { setState('idle'); window.ares.resumeListening(); });
-}, 1400);
+// The greeting is the wake line at the end of the charge-to-wake (renderer/power.js, docs/ignition-prompt.md §4).

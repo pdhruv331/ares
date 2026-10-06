@@ -678,6 +678,8 @@ class Theme {
     else this.bar.state.jobs = { working, approval };
   }
   call(c) { if (this.live) this.bar.call(c); else this.bar.state.call = c; }
+  /** Standby / power down (power.js): the bar's ◉ takes the state's colour. */
+  power(mode) { if (this.live && !this.quitting) this.bar.power(mode); }
   weather(w) { const t = w?.text || ''; if (this.live) this.bar.weather(t); else this.bar.state.weather = t; }
   /** Where the ARES window is (surface.js) and what the desktop helper sees: the orb shows only while the brain doesn't. */
   surface(name) { this.summoned = name === 'lifted' || name === 'window'; this.updateOrb(); }

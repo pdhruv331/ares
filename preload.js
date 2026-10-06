@@ -122,6 +122,12 @@ contextBridge.exposeInMainWorld('ares', {
     on: (fn) => ipcRenderer.on('readouts', (_e, d) => fn(d)),
   },
   onUiPrefs: (fn) => ipcRenderer.on('ui-prefs', (_e, p) => fn(p)),
+  // Ignition / standby / power down (renderer/power.js ↔ ignition.js, power.js)
+  power: {
+    state: () => ipcRenderer.invoke('power-state'),
+    act: (what, why) => ipcRenderer.invoke('power-act', what, why),
+    on: (fn) => ipcRenderer.on('power', (_e, m) => fn(m)),
+  },
   onFullscreen: (fn) => ipcRenderer.on('fullscreen-changed', (_e, on) => fn(on)),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   // The dashboard (renderer/dash.js): live data, panel positions, weather city and home address

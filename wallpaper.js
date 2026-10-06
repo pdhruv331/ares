@@ -30,6 +30,7 @@ class Wallpaper extends EventEmitter {
   constructor({ log, readSettings, writeSettings, helper, appDir, supportDir, prefs }) {
     super();
     Object.assign(this, { log, readSettings, writeSettings, helper, appDir, supportDir, prefsOf: prefs });
+    this.coldStart = null; // () => bool: ARES is still starting (ignition.js), so a new backdrop page begins as the cold still
     this.views = new Map(); // displayId -> { win, wid, ready, mode }
     this.desk = { windows: {}, locked: false, lowPower: false, asleep: false };
     this.screenLocked = false;
@@ -110,7 +111,7 @@ class Wallpaper extends EventEmitter {
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: false });
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     win.webContents.on('will-navigate', (e) => e.preventDefault());
-    win.loadFile(path.join(this.appDir, 'renderer', 'wallpaper.html'), { query: { mode: 'wallpaper' } });
+    win.loadFile(path.join(this.appDir, 'renderer', 'wallpaper.html'), { query: { mode: 'wallpaper', ...(this.coldStart?.() ? { power: 'cold' } : {}) } });
     const view = { win, display, wid: null, ready: false, mode: null };
     win.once('ready-to-show', () => {
       if (this.revealed) win.showInactive();
@@ -136,6 +137,8 @@ class Wallpaper extends EventEmitter {
     send('wp-scene', this.lastScene.attention);
     send('wp-scene', this.lastScene.spot);
     if (this.lastScene.power) send('wp-scene', this.lastScene.power);
+    for (const s of this.lastScene.powerSteps || []) send('wp-scene', s);
+    if (this.lastScene.powerReady) send('wp-scene', { type: 'power-ready' });
     if (this.lastScene.offline) send('wp-scene', this.lastScene.offline);
     if (this.lastScene.readouts) send('wp-scene', this.lastScene.readouts);
     send('wp-jobs', this.jobList);
@@ -152,7 +155,9 @@ class Wallpaper extends EventEmitter {
     if (msg.type === 'state') this.lastScene.state = msg;
     if (msg.type === 'attention') this.lastScene.attention = msg;
     if (msg.type === 'spot') { this.lastScene.spot = msg; this.rememberSpot(msg); } // where the window's brain sits (shifted aside for panels or icons)
-    if (msg.type === 'power') this.lastScene.power = msg;
+    if (msg.type === 'power') { this.lastScene.power = msg; if (msg.mode === 'online') { this.lastScene.powerSteps = null; this.lastScene.powerReady = false; } }
+    if (msg.type === 'power-step') (this.lastScene.powerSteps ??= []).push(msg); // a cold start: a late page gets the steps so far
+    if (msg.type === 'power-ready') this.lastScene.powerReady = true;
     if (msg.type === 'readouts') this.lastScene.readouts = msg;
     if (msg.type === 'offline') this.lastScene.offline = msg;
     if (!this.views.size) return;

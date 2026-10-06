@@ -267,7 +267,7 @@ const Scene = (() => {
   let bottomDim = 1;
   function layoutCallouts(g) {
     calloutGeo.clear();
-    if (!readouts || g.r < 30 || (power && power.fade <= 0.01)) return;
+    if (!readouts || g.r < 30 || (power && power.mode !== 'online')) return; // (standby and every transition: callouts hidden)
     const s = scaleOf();
     for (const c of CALLOUTS) {
       let deg = c.angle;

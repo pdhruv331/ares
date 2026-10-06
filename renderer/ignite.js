@@ -201,7 +201,7 @@
       if (this.mode === 'offline') this.set('charging');
     }
     /** The sequence is complete: a held breath, then the wake. */
-    ready() { this.charge = 1; if (this.mode === 'charging' || this.mode === 'offline') { this.shown = Math.max(this.shown, 0.97); } this.readyAt = true; }
+    ready() { this.charge = 1; this.readyAt = true; if (this.mode === 'offline') this.set('charging'); }
 
     /** Pointer input (the window and the helper; replicas ignore it). x, y in the reactor's canvas px, g = { cx, cy, r }. */
     pointer(kind, x, y, g) {
@@ -256,7 +256,7 @@
       if (m === 'charging') {
         // the shown charge eases toward the real one and never passes it; it holds at the current step if one is slow
         const target = this.readyAt ? 1 : Math.min(this.charge, 0.97);
-        this.shown += (target - this.shown) * Math.min(1, dt * 1.8);
+        this.shown = Math.min(target, this.shown + dt * 0.22 + (target - this.shown) * Math.min(1, dt * 0.45)); // ~2.8 s for a charge that's already complete
         if (target - this.shown < 0.004) this.shown = target;
         const c = this.shown;
         this.title = Math.max(0, this.title - dt / TIMING.titleFade);

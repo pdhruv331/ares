@@ -52,6 +52,9 @@ const { ClaudeSessions } = require('./claude-sessions');
 const { ClaudeControl } = require('./claude-control');
 const { Surface } = require('./surface');
 const { DeskMode } = require('./desk');
+const { Ignition } = require('./ignition');
+const { Power } = require('./power');
+const { WakeLines } = require('./wakeline');
 const { Vision, visionPath } = require('./vision');
 const { judge: judgeAddressed } = require('./addressed');
 const { registry: workerTools } = require('./worker-tools');
@@ -68,6 +71,8 @@ const ELEVEN = {
 };
 let win;
 let tray;
+let ignition, power, wakeLines; // ignition.js / power.js / wakeline.js (docs/ignition-prompt.md)
+const HOTKEY_STANDBY = 'Alt+Shift+Space';
 let listener;
 let voiceId;
 let bridge;
@@ -135,7 +140,8 @@ function createWindow({ show }) {
     },
   });
 
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  // A cold start: the page begins as the offline still and brightens with the real start-up (renderer/ignite.js)
+  win.loadFile(path.join(__dirname, 'renderer', 'index.html'), { query: { power: ignition?.ready ? 'online' : 'cold' } });
   // The window only ever shows ARES itself: links open in the browser, never in here
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
@@ -225,6 +231,7 @@ function setLaunchAtLogin(on) {
   if (!app.isPackaged) return; // in development this would register the bare Electron binary
   app.setLoginItemSettings({ openAtLogin: on });
   writeSettings({ launchAtLogin: on });
+  ignition?.setAgent(on && power?.opts.helperAtLogin !== false); // the ignition helper rides along: the cold reactor at login until she's up
   refreshTray();
 }
 
@@ -236,8 +243,11 @@ function refreshTray() {
     ? ` until ${new Date(listener.muteUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
     : '';
   const awake = listener.awake;
-  tray.setTitle(muted ? '○' : awake ? '●' : '◉');
-  tray.setToolTip(muted ? `ARES — muted${until}` : awake ? 'ARES — always listening' : 'ARES — listening for "Hey ARES"');
+  // The ◉ in the state's colour (docs/ignition-prompt.md §4f): cyan online, blue in standby, gold while powering down
+  const pm = power?.mode || 'online';
+  tray.setImage(trayGlyph(pm === 'standby' || pm === 'tostandby' || pm === 'fromstandby' ? 'blue' : pm === 'spindown' ? 'gold' : 'cyan', muted ? 'ring' : awake ? 'dot' : 'both'));
+  tray.setTitle('');
+  tray.setToolTip(pm === 'standby' ? 'ARES — standby' : muted ? `ARES — muted${until}` : awake ? 'ARES — always listening' : 'ARES — listening for "Hey ARES"');
   const sections = menuSections();
   tray.setContextMenu(Menu.buildFromTemplate(['listen', 'view', 'voice', 'work', 'phone', 'ares']
     .flatMap((k, i) => [...(i ? [{ type: 'separator' }] : []), ...sections[k]])));
@@ -348,8 +358,64 @@ function menuSections() {
         checked: app.isPackaged && app.getLoginItemSettings().openAtLogin,
         click: (item) => setLaunchAtLogin(item.checked),
       },
-      { label: 'Quit ARES', click: () => { app.isQuitting = true; app.quit(); } },
+      { type: 'separator' },
+      ...powerMenu(),
+      { label: 'Power Down', click: () => power?.powerDown('menu') },
     ],
+  };
+}
+
+/** Wake · Standby and the power settings (docs/ignition-prompt.md §4, §4b, §4e, §4f). */
+function powerMenu() {
+  if (!power) return [{ label: 'Quit ARES', click: () => { app.isQuitting = true; app.quit(); } }];
+  const o = power.opts, a = o.auto;
+  const standby = power.mode === 'standby' || power.mode === 'tostandby';
+  const act = (fn) => (item) => { fn(item); refreshTray(); };
+  return [
+    { label: standby ? `Wake  (${HOTKEY_STANDBY.replace('Alt+Shift', '⌥⇧')})` : `Standby  (${HOTKEY_STANDBY.replace('Alt+Shift', '⌥⇧')})`, click: () => power.toggle('menu') },
+    { label: 'Power', submenu: [
+      { label: 'Wake line: Spoken + Shown', type: 'radio', checked: o.wakeLine === 'spoken', click: act(() => power.save({ wakeLine: 'spoken' })) },
+      { label: 'Wake line: Shown Only', type: 'radio', checked: o.wakeLine === 'shown', click: act(() => power.save({ wakeLine: 'shown' })) },
+      { label: 'Wake line: Off', type: 'radio', checked: o.wakeLine === 'off', click: act(() => power.save({ wakeLine: 'off' })) },
+      { type: 'separator' },
+      { label: 'Power Sounds', type: 'checkbox', checked: o.sounds !== false, click: act((item) => { power.save({ sounds: item.checked }); ignition?.writeConfig(); pushPowerPrefs(); }) },
+      { type: 'separator' },
+      { label: 'Auto Standby When the Screen Locks', type: 'checkbox', checked: Boolean(a.lock), click: act((item) => power.setAuto({ lock: item.checked })) },
+      { label: 'Auto Standby When Idle', submenu: [0, 15, 30, 60, 120].map((m) => ({ label: m ? `${m >= 60 ? `${m / 60} hour${m > 60 ? 's' : ''}` : `${m} minutes`}` : 'Off', type: 'radio', checked: (a.idleMin || 0) === m, click: act(() => power.setAuto({ idleMin: m })) })) },
+      { label: 'Auto Standby at Night', submenu: [null, 22, 23, 0, 1].map((h) => ({ label: h === null ? 'Off' : `${h === 0 ? 'Midnight' : `${h}:00`}`, type: 'radio', checked: (a.nightHour ?? null) === h, click: act(() => power.setAuto({ nightHour: h })) })) },
+      { label: 'Auto Standby on Low Battery (15%)', type: 'checkbox', checked: Boolean(a.lowBattery), click: act((item) => power.setAuto({ lowBattery: item.checked })) },
+      { label: 'Wake When I\'m Back (unlock, desk mode)', type: 'checkbox', checked: a.wakeOnReturn !== false, click: act((item) => power.setAuto({ wakeOnReturn: item.checked })) },
+      { type: 'separator' },
+      { label: 'Cold Reactor at Login (ignition helper)', type: 'checkbox', enabled: app.isPackaged, checked: Boolean(ignition?.agentOn), click: act((item) => { power.save({ helperAtLogin: item.checked }); ignition.setAgent(item.checked); }) },
+    ] },
+  ];
+}
+function pushPowerPrefs() { if (win && !win.isDestroyed()) win.webContents.send('power', { type: 'prefs', prefs: powerPrefs() }); }
+function powerPrefs() { const o = power?.opts || {}; return { sounds: o.sounds !== false, wakeLine: o.wakeLine || 'spoken' }; }
+/** Quiet hours for Claude alerts, or a macOS Focus on: the wake line is shown but not spoken, the power sounds stay silent. */
+async function silentNow() {
+  if (claudeQuietNow()) return true;
+  const helper = app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(__dirname, 'native', 'build', 'ares-theme');
+  return new Promise((resolve) => require('child_process').execFile(helper, ['focus'], { timeout: 3000 }, (err, out) => { try { resolve(!err && JSON.parse(out).focus === true); } catch { resolve(false); } }));
+}
+/** The wake line's context: how long she was off and why, what happened meanwhile, what's next. */
+function wakeContext() {
+  const last = ignition.lastShutdown();
+  const since = last.at || 0;
+  const list = jobs?.list() || [];
+  const snap = claudeUsage?.snapshot?.();
+  return {
+    why: last.why, first: last.first, offMs: last.offMs,
+    jobsDone: list.filter((j) => j.status === 'done' && (j.finished || 0) > since && !j.seen).map((j) => j.title).slice(0, 3),
+    jobsFailed: list.filter((j) => j.status === 'failed' && (j.finished || 0) > since && !j.seen).map((j) => j.title).slice(0, 3),
+    approvals: list.filter((j) => j.status === 'approval').length,
+    missedCalls: (calls?.views?.() || []).filter((c) => c.status === 'missed' && c.at > since).length,
+    voicemails: (voicemail?.unheard?.() || []).length,
+    claudeWaiting: heldAlerts.length,
+    nextEvent: ((calendar?.ready ? calendar.near() : dashboard?.events) || []).find((e) => e.start > Date.now() && !e.allDay) || null,
+    weather: dashboard?.weather?.text || null,
+    battery: readouts?.battery ? { pct: readouts.battery.pct, charging: readouts.battery.charging } : null,
+    usagePct: snap?.windows?.five_hour?.pct ?? null,
   };
 }
 
@@ -459,6 +525,26 @@ function voiceMenu() {
   ];
 }
 
+/** The menu-bar ◉ as a bitmap in the state's colour: a ring, a dot, or both. 18 pt, drawn at 2× for Retina. */
+const trayGlyphs = new Map();
+function trayGlyph(colour, shape) {
+  const key = `${colour}|${shape}`;
+  if (trayGlyphs.has(key)) return trayGlyphs.get(key);
+  const RGB = { cyan: [62, 230, 255], blue: [96, 150, 255], gold: [250, 196, 88] }[colour] || [62, 230, 255];
+  const S = 2, size = 18 * S, buf = Buffer.alloc(size * size * 4);
+  const cx = size / 2 - 0.5, cy = size / 2 - 0.5, R = 6.2 * S, ring = 1.3 * S, dot = 2.6 * S;
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const d = Math.hypot(x - cx, y - cy);
+    let a = 0;
+    if (shape !== 'dot') a = Math.max(a, Math.min(1, Math.max(0, 1 - Math.abs(d - R) / ring)));          // the ring (soft edge)
+    if (shape !== 'ring') a = Math.max(a, Math.min(1, Math.max(0, (dot - d) / S + 0.5)));                 // the dot
+    const i = (y * size + x) * 4; // BGRA, premultiplied
+    buf[i] = Math.round(RGB[2] * a); buf[i + 1] = Math.round(RGB[1] * a); buf[i + 2] = Math.round(RGB[0] * a); buf[i + 3] = Math.round(255 * a);
+  }
+  const img = nativeImage.createFromBitmap(buf, { width: size, height: size, scaleFactor: S });
+  trayGlyphs.set(key, img);
+  return img;
+}
 function createTray() {
   tray = new Tray(nativeImage.createEmpty());
   refreshTray();
@@ -1318,9 +1404,20 @@ function killSwitch(said, source) {
   remember('user', said, source); remember('ares', reply, source, true);
   return reply;
 }
+// "ARES, power down": a real quit with the spin-down (docs/ignition-prompt.md §4c), from the Mac or the phone, before the brain
+const POWER_PHRASE = /^(?:(?:hey|ok(?:ay)?)\s+)?(?:ares|aries)?[,.]?\s*(?:please\s+)?(?:power (?:down|off)|shut (?:yourself )?down|go offline|switch (?:yourself )?off)\b/i;
+function powerPhrase(said, source) {
+  if (!power || !POWER_PHRASE.test(said.trim())) return null;
+  const line = power.powerDown(`voice (${source})`);
+  if (!line) return null;
+  remember('user', said, source); remember('ares', line, source, true);
+  return line;
+}
 async function askBrain(said, prompt, onDelta, source = 'mac', images = [], verified = source !== 'mac') {
   const t0 = Date.now();
   let first = null;
+  const down = powerPhrase(said, source);
+  if (down) { onDelta?.(down); return { ok: true, text: down, model: 'none', why: 'power down' }; }
   const killed = killSwitch(said, source);
   if (killed) { onDelta?.(killed); return { ok: true, text: killed, model: 'none', why: 'kill switch' }; }
   autonomy?.observe(said);
@@ -2058,6 +2155,18 @@ app.on('second-instance', () => showWindow());
 
 app.whenReady().then(async () => {
   log('ARES starting', { version: app.getVersion(), packaged: app.isPackaged });
+  // Ignition (ignition.js): the helper's socket, the start-up steps the charge-to-wake follows, the shutdown record
+  ignition = new Ignition({
+    supportDir: app.getPath('userData'), appDir: __dirname, log, isPackaged: app.isPackaged, version: app.getVersion(), readSettings, writeSettings,
+    helperApp: app.isPackaged ? path.join(process.resourcesPath, 'ARES Ignition.app') : path.join(__dirname, 'native', 'build', 'ARES Ignition.app'),
+    appPath: app.isPackaged ? path.resolve(process.resourcesPath, '..', '..') : null,
+  });
+  ignition.start();
+  ignition.on('step', (s) => { win?.webContents.send('power', { type: 'step', step: s }); wallpaper?.scene({ type: 'power-step', step: s }); });
+  ignition.on('ready', ({ line }) => { win?.webContents.send('power', { type: 'ready', line }); wallpaper?.scene({ type: 'power-ready' }); });
+  ignition.on('handover', () => { win?.webContents.send('power', { type: 'handover' }); wallpaper?.reveal(true); });
+  wakeLines = new WakeLines(path.join(app.getPath('userData'), 'ignition', 'wake-lines.json'));
+  ignition.step('memory', 'start');
   claudeUsage = new ClaudeUsage({ file: path.join(app.getPath('userData'), 'claude-usage.json'), log });
   claudeUsage.on('change', () => toDash({ type: 'claude', lines: claudeUsage.statusLines() }));
   // 80% / 95% of a window: a line on screen (not spoken), the ticker, and the phone if they're away from the Mac
@@ -2070,13 +2179,16 @@ app.whenReady().then(async () => {
   // Tools: ARES's own MCP server (Mac controls, timers, confirmation gate), reached over a local bridge
   contacts = new Contacts(path.join(app.getPath('userData'), 'contacts.json'));
   memory = new Memory(path.join(app.getPath('userData'), 'memory.md'));
+  ignition.step('memory', 'ok', `${memory.count} facts`);
   const addFact = memory.add.bind(memory);
   memory.add = (fact) => { const saved = addFact(fact); toDash({ type: 'memory', fact: saved }); return saved; }; // the REMEMBERED flash
   dashboard = new Dashboard({ log, cli: claude.CLI, dir: path.join(app.getPath('userData'), 'dashboard'), settings: readSettings, country: app.getLocaleCountryCode() });
   dashboard.on('update', toDash);
   dashboard.on('update', (m) => { if (m.type === 'weather') theme?.weather(m.weather); });
+  ignition.step('voice', 'start');
   speech = createSpeech();
   speech.start();
+  { const vs = speech.status(); ignition.step('voice', 'ok', vs.dev || vs.backup || vs.reserve ? 'backup voice' : 'Katherine'); }
   relay = new Relay({ log, firebaseFile: path.join(app.getPath('userData'), 'google-services.json') });
   calls = createCalls();
   control = new Control({
@@ -2176,6 +2288,8 @@ app.whenReady().then(async () => {
     },
   }), { mode: 0o600 });
   claude.init(path.join(app.getPath('userData'), 'workspace'), { mcpConfigPath, memory: () => memory.facts() }); // isolated dir: no project files or CLAUDE.md
+  ignition.step('brain', 'start');
+  Promise.resolve(claude.available()).then((on) => ignition.step('brain', on ? 'ok' : 'fail', on ? 'Claude ready' : 'no Claude CLI'), (err) => ignition.step('brain', 'fail', err.message));
   await startWork();
   control.workDir = jobs?.dir; // a job's files may be sent to the phone too
   autonomy = new Autonomy({ jobs, audit: control.audit, supportDir: app.getPath('userData'), readSettings, writeSettings, log, oneShot: claude.oneShot,
@@ -2205,12 +2319,19 @@ app.whenReady().then(async () => {
     log,
   });
   intents.init().then(refreshTray, (err) => log('intent unavailable', err.message)); // until then, everything is chat
+  ignition.step('ears', 'start');
   createListener();
   wallpaper = new Wallpaper({
     log, readSettings, writeSettings, appDir: __dirname, supportDir: app.getPath('userData'), prefs: uiPrefs,
     helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-desktop') : path.join(__dirname, 'native', 'build', 'ares-desktop'),
   });
+  wallpaper.revealed = !ignition.helperAlive; // a helper is drawing the charge: the backdrop waits for the handover
+  wallpaper.coldStart = () => !ignition.ready;
   wallpaper.start();
+  const pushGeometry = () => ignition.writeGeometry(wallpaper.geometries());
+  wallpaper.on('geometry', pushGeometry);
+  for (const e of ['display-added', 'display-removed', 'display-metrics-changed']) require('electron').screen.on(e, () => setTimeout(pushGeometry, 1000));
+  pushGeometry();
   if (!app.isPackaged && process.env.ARES_TEST_STILL) { // development: render the lock-screen still to a file, without setting it
     const { screen } = require('electron');
     for (const kind of ['offline', 'standby']) {
@@ -2220,6 +2341,29 @@ app.whenReady().then(async () => {
   wallpaper.jobs(jobs.list());
   createDesk();
   createVision();
+  // Standby and power down (power.js)
+  power = new Power({
+    log, readSettings, writeSettings, audit: control.audit, listener, desk, powerMonitor,
+    jobs: () => jobs.list(), pauseJob: (id, why) => jobs.pause(id, why),
+    linkAlive: () => [...(phone?.listeners || [])].some((l) => l.native),
+    saveMemory: () => consolidateMemory('quit'), unsaved: () => unsavedTurns().length,
+    phone: (msg) => phone?.broadcast(msg), closeEars: () => listener.stop(), voiceOff: () => speech.stop(),
+    batteryPct: () => readouts?.battery?.pct,
+    quit: () => { app.isQuitting = true; memorySavedOnQuit = true; app.quit(); },
+  });
+  power.on('change', (c) => {
+    win?.webContents.send('power', { type: 'mode', ...c });
+    wallpaper?.scene({ type: 'power', mode: c.mode, status: c.status });
+    wallpaper?.setPower(c.mode, c.status);
+    theme?.power(c.mode);
+    phone?.broadcast({ type: 'power', mode: c.mode === 'tostandby' ? 'standby' : c.mode === 'fromstandby' ? 'online' : c.mode, status: c.status });
+    if (c.mode === 'standby' || c.mode === 'online') notice(c.mode === 'standby' ? `Standing by (${c.why}).` : c.why.startsWith('auto') ? `Awake again (${c.why}).` : '');
+    refreshTray();
+  });
+  power.on('step', (s) => win?.webContents.send('power', { type: 'step', step: s, reverse: true }));
+  power.on('say', ({ line }) => win?.webContents.send('power', { type: 'say', line }));
+  power.start();
+  desk.on('change', (st) => { if (st.active) power.back('desk mode'); });
   createWindow({ show: !openedAtLogin }); // at login, wait quietly in the menu bar
   theme = new Theme({
     log, readSettings, writeSettings, supportDir: app.getPath('userData'), appDir: __dirname, onOpen: openView, brainVisible, look,
@@ -2252,7 +2396,19 @@ app.whenReady().then(async () => {
   // First run with the wallpaper on: ask (once) about the ARES lock-screen picture
   if (wallpaper.opts.enabled && !wallpaper.opts.lockAsked && (app.isPackaged || process.env.ARES_ASK_LOCK)) setTimeout(() => wallpaper.setLockStill(true).then(refreshTray), 8000);
   win.webContents.once('did-finish-load', () => {
-    listener.start(); checkIntegrations(); startRemote(); startPhone(); calls.start().catch((err) => log('calls start failed', err.message));
+    listener.start(); checkIntegrations(); startRemote();
+    ignition.step('link', 'start');
+    startPhone(); calls.start().catch((err) => log('calls start failed', err.message));
+    ignition.step('link', 'ok', `phone :${PHONE_PORT}${relay?.ready ? ' · relay' : ''}`);
+    setTimeout(() => ignition.step('ears', listener.ready ? 'ok' : listener.child ? 'ok' : 'fail', listener.ready ? 'wake word' : listener.child ? 'starting' : 'listener missing'), 1200);
+    // The scene is up: the start-up is complete; the wake line is composed from what happened while she was off
+    setTimeout(async () => {
+      ignition.step('scene', 'ok', 'live');
+      const silent = await silentNow().catch(() => false);
+      const mode = power.opts.wakeLine;
+      const line = mode === 'off' ? null : wakeLines.compose(wakeContext());
+      ignition.setReady(line ? { text: line.shown, spoken: mode === 'spoken' && !silent ? line.spoken : null } : null);
+    }, 1500);
     voicemail.start();
     dashboard.start();
     dashboard.setVisible(win.isVisible());
@@ -2263,12 +2419,26 @@ app.whenReady().then(async () => {
     pushVoiceStatus();
   });
   globalShortcut.register(HOTKEY, toggleWindow);
+  globalShortcut.register(HOTKEY_STANDBY, () => power?.toggle('hotkey'));
   app.on('activate', () => showWindow());
+});
+
+// Ignition / standby / power down: the window's side (renderer/power.js)
+ipcMain.handle('power-state', () => ({ ...(ignition?.state() || {}), helperAlive: Boolean(ignition?.helperAlive), mode: power?.mode || 'online', status: power?.status() || null, prefs: powerPrefs() }));
+ipcMain.handle('power-act', (_e, what, why = 'window') => {
+  if (!power) return false;
+  if (what === 'standby') return power.standby(true, why);
+  if (what === 'wake') return power.standby(false, why);
+  if (what === 'toggle') return power.toggle(why);
+  if (what === 'powerdown') return Boolean(power.powerDown(why));
+  if (what === 'silent') return silentNow();
+  return false;
 });
 
 let memorySavedOnQuit = false;
 app.on('before-quit', (e) => {
   app.isQuitting = true;
+  if (power) power.quitting = true;
   if (memorySavedOnQuit || !unsavedTurns().length) return;
   // Save this conversation to memory first (at most ~25s), then quit for real
   e.preventDefault();
@@ -2278,6 +2448,8 @@ app.on('before-quit', (e) => {
 });
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  power?.stop();
+  ignition?.stop(power?.mode === 'spindown' ? 'power down' : 'quit'); // the clean record, then the helper takes the reactor over
   listener?.stop();
   remote?.stop();
   phone?.stop();

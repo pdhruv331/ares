@@ -46,6 +46,8 @@ class DeskMode extends EventEmitter {
 
   /** "Go quiet" / "stop listening" / "go to sleep" while desk mode is on: off until they've been away and back. */
   goQuiet() { if (this.state.active) { this.quiet = true; this.log('desk mode', { quiet: true }); this.check(); } }
+  /** Standby (power.js): desk mode held off while she stands by, whatever else is true. */
+  hold(on) { this.held = Boolean(on); this.check(); }
 
   away() { this.awayAt ??= Date.now(); this.quiet = false; }
 
@@ -55,6 +57,7 @@ class DeskMode extends EventEmitter {
     if (idle > o.idleMin * 60) this.away(); else this.awayAt = null;
     let reason = 'at the Mac';
     if (!o.enabled) reason = 'off';
+    else if (this.held) reason = 'standby';
     else if (!this.voiceId.enrolled) reason = 'needs Voice ID';
     else if (this.locked) reason = 'locked';
     else if (idle > o.idleMin * 60) reason = 'idle';
