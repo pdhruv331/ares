@@ -30,9 +30,12 @@ class Voicemail extends EventEmitter {
     this.secret = process.env.TWILIO_API_KEY_SECRET || process.env.TWILIO_AUTH_TOKEN;
     this.stateFile = path.join(this.dir, 'state.json');
     try { this.state = JSON.parse(fs.readFileSync(this.stateFile, 'utf8')); } catch { this.state = null; }
+    this.recent = []; // voicemails reported this run: { at, sid }
   }
 
   get ready() { return Boolean(this.sid && this.user && this.secret); }
+  /** Voicemails that arrived after `t` (ms). */
+  since(t) { return this.recent.filter((v) => v.at > t); }
 
   start() {
     if (!this.ready) return this.log('voicemail off', 'no Twilio keys (TWILIO_ACCOUNT_SID + TWILIO_API_KEY_SID/SECRET)');
@@ -65,6 +68,8 @@ class Voicemail extends EventEmitter {
         if (first) continue;
         const call = await this.#get(`Calls/${r.call_sid}.json`).catch(() => null);
         if (this.number() && call && call.to?.replace(/[^\d+]/g, '') !== this.number()) continue; // not the ARES line
+        this.recent.push({ at: Date.parse(r.date_created) || Date.now(), sid: r.sid }); // (read-only: for the wake line's "a voicemail while I was off")
+        this.recent = this.recent.slice(-50);
         await this.#report(r, call);
       }
       this.state.seen = this.state.seen.slice(-500);

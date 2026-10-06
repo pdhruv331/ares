@@ -410,7 +410,7 @@ function wakeContext() {
     jobsFailed: list.filter((j) => j.status === 'failed' && (j.finished || 0) > since && !j.seen).map((j) => j.title).slice(0, 3),
     approvals: list.filter((j) => j.status === 'approval').length,
     missedCalls: (calls?.views?.() || []).filter((c) => c.status === 'missed' && c.at > since).length,
-    voicemails: (voicemail?.unheard?.() || []).length,
+    voicemails: (voicemail?.since?.(since) || []).length,
     claudeWaiting: heldAlerts.length,
     nextEvent: ((calendar?.ready ? calendar.near() : dashboard?.events) || []).find((e) => e.start > Date.now() && !e.allDay) || null,
     weather: dashboard?.weather?.text || null,
