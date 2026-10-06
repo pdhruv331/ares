@@ -177,7 +177,8 @@
       this.fromStandby = false;  // a spin-down that began in standby flares first (there's little left to wind down otherwise)
       this.hoverAngle = 0;       // where the pointer is, from the centre
       this.embers = [];          // drifting up out of a hovered core: { x, y, vx, vy, life, s } in units of r
-      this.GLOW = 0.8;           // the hover glow's strength (the user's 80)
+      this.GLOW = 0.7;           // the hover glow's strength (the user's 70)
+      this.REST = 0.3;           // the glow at rest (no hover), in every state, the helper's cold reactor included
     }
     get S_() { return this.S; }
 
@@ -423,8 +424,8 @@
         glow(ctx, mix(GOLD, WHITE, c * 0.6), cx, cy, r * Math.min(1.2 + c * 0.9, reach * 0.55), 0.1 + c * 0.22);
       }
       if (m === 'wake' && this.bloom > 0) glow(ctx, mix(WHITE, CYAN, 0.3), cx, cy, r * Math.min(1.6 + (1 - this.bloom) * 1.6, reach * 0.55), this.bloom * 0.9);
-      if ((m === 'offline' || m === 'standby' || m === 'online') && this.hover > 0.01) { // the hover halo: a wide faint lift of the whole disc
-        const hv = this.hover * this.GLOW;
+      if (m === 'offline' || m === 'standby' || m === 'online') { // the halo: a faint lift of the whole disc at rest, wider and brighter on hover
+        const hv = Math.max(this.REST * 0.45, this.hover * this.GLOW);
         const halo = ctx.createRadialGradient(cx, cy, r * 0.3, cx, cy, r * Math.min(1.6 + hv, reach));
         halo.addColorStop(0, rgba(this.engine.hue, 0.22 * hv * 1.4)); halo.addColorStop(1, rgba(this.engine.hue, 0));
         ctx.fillStyle = halo; ctx.fillRect(cx - r * 2.6, cy - r * 2.6, r * 5.2, r * 5.2);

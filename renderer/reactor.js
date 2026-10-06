@@ -93,7 +93,8 @@
       this.amberSweep = 0; // the power hold: ticks lit amber outward from the bottom until they meet at the top (0..1)
       this.hover = 0;      // the pointer over the core (0..1): the core swells and whitens, its glow grows, the near ticks brighten
       this.hoverAngle = 0; // where the pointer is, from the centre (rad)
-      this.glowK = 0.8;    // how far the hover glow goes (the user's 80, 2026-10-06)
+      this.glowK = 0.7;    // how far the hover glow goes (the user's 70, 2026-10-06)
+      this.restGlow = 0.3; // the glow at rest, nothing hovered: the core's halo is never fully cold
       let s = seed;
       this.rnd = () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
     }
@@ -223,8 +224,8 @@
       // Core: breathes at rest, swells with the voice, flickers while thinking; a soft glow around it
       const breathe = (Math.sin(t * 1.4) + 1) * 0.025 * Math.max(0.3, Math.min(1, this.pace));
       const flicker = this.state === 'thinking' && !dim ? (Math.sin(t * 23) * 0.5 + Math.sin(t * 37) * 0.5) * 0.02 : 0;
-      const hv = this.hover * this.glowK;
-      const core = r * (0.24 + breathe + level * 0.13 + energy * 0.03 + flicker + this.pulse * 0.04 + this.flash * 0.06) * lerp(0.8, 1) * (1 + hv * 0.72);
+      const hv = Math.max(this.restGlow * 0.5, this.hover * this.glowK); // the resting glow underneath, the hover above it
+      const core = r * (0.24 + breathe + level * 0.13 + energy * 0.03 + flicker + this.pulse * 0.04 + this.flash * 0.06) * lerp(0.8, 1) * (1 + this.hover * this.glowK * 0.72);
       glow(ctx, c, 0, 0, core * 1.9 * (1 + hv), (lerp(0.22, (70 + energy * 90 + level * 120) / 255 + this.pulse * 0.3 + this.flash * 0.4) + hv * 0.68) * lit0 * alpha);
       const g = ctx.createRadialGradient(0, 0, 0, 0, 0, core);
       g.addColorStop(0, rgba(mix(c, COLORS.white, Math.min(1, lerp(0.35, 1) + this.hover * 0.45)), 1));
