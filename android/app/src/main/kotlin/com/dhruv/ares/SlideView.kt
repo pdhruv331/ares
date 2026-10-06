@@ -28,7 +28,7 @@ class SlideView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = n
     private val track = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#1AFAC458") }
     private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f; color = Color.parseColor("#66FAC458") }
     private val knob = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = gold }
-    private val glyph = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#1A1206"); textAlign = Paint.Align.CENTER; typeface = Typeface.DEFAULT_BOLD }
+    private val icon = ctx.getDrawable(R.drawable.ic_power)!!.mutate().apply { setTint(Color.parseColor("#1A1206")) }
     private val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = gold; textAlign = Paint.Align.CENTER; typeface = Typeface.MONOSPACE; letterSpacing = 0.18f }
     private val rect = RectF()
     private var k = 0f        // 0 = at rest, 1 = the end
@@ -89,7 +89,8 @@ class SlideView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = n
         canvas.drawText(label, width / 2f + knobR * 0.6f, height / 2f + 3.5f * dp, text)
         knob.alpha = 255
         canvas.drawCircle(kx, r, knobR, knob)
-        glyph.textSize = knobR * 1.1f
-        canvas.drawText("⏻", kx, r + knobR * 0.4f, glyph)
+        val ir = (knobR * 0.62f).toInt()
+        icon.setBounds((kx - ir).toInt(), (r - ir).toInt(), (kx + ir).toInt(), (r + ir).toInt())
+        icon.draw(canvas)
     }
 }

@@ -33,8 +33,8 @@
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:singleLine="true"
                     android:text="A.R.E.S" android:textColor="@color/cyan" android:textStyle="bold" android:textSize="13sp" android:letterSpacing="0.3"/>
                 <!-- Power down the Mac's ARES (a bottom sheet with a slider); hidden while she's off -->
-                <TextView android:id="@+id/powerBtn" android:layout_width="30dp" android:layout_height="30dp" android:layout_marginStart="8dp" android:gravity="center"
-                    android:text="⏻" android:textColor="@color/gold" android:textSize="13sp" android:background="?android:attr/selectableItemBackgroundBorderless"
+                <ImageView android:id="@+id/powerBtn" android:layout_width="30dp" android:layout_height="30dp" android:layout_marginStart="6dp" android:padding="7dp"
+                    android:src="@drawable/ic_power" android:background="?android:attr/selectableItemBackgroundBorderless"
                     android:contentDescription="Power down the Mac's ARES" android:visibility="gone"/>
                 <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1"/>
                 <TextView android:id="@+id/workBtn" android:layout_width="wrap_content" android:layout_height="28dp" android:layout_marginEnd="10dp"

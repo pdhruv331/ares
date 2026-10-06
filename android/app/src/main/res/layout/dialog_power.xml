@@ -5,7 +5,7 @@
     android:background="@drawable/bg_sheet" android:paddingStart="22dp" android:paddingEnd="22dp" android:paddingTop="14dp" android:paddingBottom="26dp">
     <View android:layout_width="36dp" android:layout_height="3dp" android:layout_gravity="center_horizontal" android:background="#40FAC458" android:layout_marginBottom="16dp"/>
     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center"
-        android:text="⏻  POWER DOWN MAC ARES" android:textColor="@color/gold" android:textSize="12sp" android:letterSpacing="0.25" android:fontFamily="monospace" android:textStyle="bold"
+        android:text="POWER DOWN MAC ARES" android:textColor="@color/gold" android:textSize="12sp" android:letterSpacing="0.25" android:fontFamily="monospace" android:textStyle="bold"
         android:shadowColor="#66FAC458" android:shadowRadius="10" android:shadowDx="0" android:shadowDy="0"/>
     <TextView android:id="@+id/sheetSub" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:layout_marginTop="8dp" android:layout_marginBottom="20dp"
         android:text="Jobs pause · phone access stops" android:textColor="@color/muted" android:textSize="11sp" android:letterSpacing="0.08" android:fontFamily="monospace"/>

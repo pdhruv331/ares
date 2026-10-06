@@ -54,7 +54,7 @@ class MainActivity : Activity(), Session.Ui {
     private val fadeCaption = Runnable { caption.animate().alpha(0f).setDuration(600).start(); schematic.dimBottom = false }
     private val jobsChanged = { showJobs() }
     // Power from the phone (docs/ignition-prompt.md §4d-4f): the Mac's state mirrored on the orb, the orb hold, the ⏻ sheet
-    private lateinit var powerBtn: TextView
+    private lateinit var powerBtn: View
     private lateinit var schedChip: TextView
     private lateinit var sounds: Sounds
     private var lastPower: PowerStore.Mode? = null
@@ -245,6 +245,7 @@ class MainActivity : Activity(), Session.Ui {
         status.text = PowerStore.header()
         status.setTextColor(getColor(colour))
         powerBtn.visibility = if (PowerStore.off || mode == PowerStore.Mode.UNKNOWN || mode == PowerStore.Mode.SPINDOWN) View.GONE else View.VISIBLE
+        if (powerBtn.visibility == View.GONE) powerSheet?.dismiss() // (she's off, or already going: nothing to slide)
         val sch = PowerStore.schedule
         schedChip.visibility = if (sch == null || !PowerStore.reach) View.GONE else View.VISIBLE
         if (sch != null) schedChip.text = listOfNotNull(sch.standby?.let { "☾ standby $it" }, sch.wake?.let { "☀ wake $it" }).joinToString(" · ") + if (sch.skipped) " · skipped tonight" else ""
@@ -339,6 +340,7 @@ class MainActivity : Activity(), Session.Ui {
         if (PowerStore.reach || PowerStore.igniting) return
         thread(name = "ares-relay-status") {
             val a = runCatching { RelayClient(relay).status() }.getOrNull() ?: return@thread
+            if (!a.ok) return@thread // the relay doesn't know this phone yet: stay "unreachable" rather than guess
             if (!PowerStore.reach) PowerStore.setHelper(a.helperAgeSec != null && a.helperAgeSec < 360)
         }
     }
