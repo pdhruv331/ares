@@ -6,7 +6,7 @@
 //   Sounds.loop('charge-hum')      a looping sound; Sounds.rate('charge-hum', 1.4) pitches it; Sounds.stop(name, fadeSec)
 const Sounds = (() => {
   const NAMES = ['tick', 'hold-rise', 'clunk', 'charge-hum', 'inhale', 'bloom', 'standby-down', 'wake-chime', 'winddown', 'thud', 'nope'];
-  const LEVEL = { tick: 0.5, 'hold-rise': 0.6, clunk: 0.8, 'charge-hum': 0.7, inhale: 0.6, bloom: 0.8, 'standby-down': 0.7, 'wake-chime': 0.7, winddown: 0.75, thud: 0.8, nope: 0.6 };
+  const LEVEL = { tick: 0.5, 'hold-rise': 0.6, clunk: 0.8, 'charge-hum': 0.7, inhale: 0.6, bloom: 0.8, 'standby-down': 0.7, 'wake-chime': 0.7, winddown: 0.5, thud: 0.8, nope: 0.6 };
   let ctx = null;
   const buffers = new Map();
   const playing = new Map(); // name -> { src, gain }
