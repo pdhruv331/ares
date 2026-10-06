@@ -242,7 +242,7 @@
       this.w = w; this.h = h; this.dpr = dpr; this.animDpr = animDpr;
       for (const c of [this.mask, this.tinted]) { c.width = Math.max(1, Math.round(w * dpr)); c.height = Math.max(1, Math.round(h * dpr)); }
       this.rip.width = Math.max(1, Math.round(w * animDpr)); this.rip.height = Math.max(1, Math.round(h * animDpr));
-      this.maskKey = ''; this.tintKey = ''; this.sweepKey = ''; this.staticKey = '';
+      this.maskKey = ''; this.tintKey = ''; this.sweepKey = ''; this.staticKey = ''; this.maskAt = 0;
     }
     /** The radar wedge, rendered once per size and colour, then just rotated into place. */
     sweepSprite(r, hue) {
@@ -270,19 +270,20 @@
       const g = this.mask.getContext('2d');
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       g.clearRect(0, 0, w, h);
-      // The dot grid, centred on the reactor so a dot sits on each axis
+      // The dot grid, centred on the reactor so a dot sits on each axis: brightness in 12 steps, one fill per step
       const x0 = cx % PITCH, y0 = cy % PITCH;
       const far = r * 3.2;
       g.fillStyle = '#fff';
+      const STEPS = 12;
+      const paths = Array.from({ length: STEPS }, () => new Path2D());
       for (let y = y0; y < h + PITCH; y += PITCH) {
         for (let x = x0; x < w + PITCH; x += PITCH) {
           const d = Math.hypot(x - cx, y - cy);
           const near = clamp(1 - (d - r * 0.9) / far, 0, 1);
-          const a = 0.07 + near * near * 0.5;
-          g.globalAlpha = a;
-          g.fillRect(x - DOT / 2, y - DOT / 2, DOT, DOT);
+          paths[Math.min(STEPS - 1, Math.round(near * near * (STEPS - 1)))].rect(x - DOT / 2, y - DOT / 2, DOT, DOT);
         }
       }
+      paths.forEach((pth, i) => { g.globalAlpha = 0.07 + (i / (STEPS - 1)) * 0.5; g.fill(pth); });
       // A soft glow in the middle of the sheet
       const v = g.createRadialGradient(cx, cy, 0, cx, cy, r * 3.1);
       v.addColorStop(0, 'rgba(255,255,255,0.09)');
@@ -328,17 +329,23 @@
       if (!w || !h || r < 4) return;
       dt = clamp(dt, 0, 0.05);
       this.t += dt;
+      // The sheet is re-rendered when the reactor moves or resizes, but not on every frame of a glide (a display's worth
+      // of dots): at most every 0.25 s, and meanwhile the last sheet is drawn shifted to follow
       const mk = `${Math.round(cx)},${Math.round(cy)},${Math.round(r)}`;
-      if (mk !== this.maskKey) { this.maskKey = mk; this.renderMask(cx, cy, r); this.tintKey = ''; }
+      if (mk !== this.maskKey && (!this.maskAt || this.t - this.maskAt > 0.25 || !this.maskKey)) {
+        this.maskKey = mk; this.maskAt = this.t; this.maskCx = cx; this.maskCy = cy;
+        this.renderMask(cx, cy, r); this.tintKey = '';
+      }
       const tk = `${hue[0] >> 2},${hue[1] >> 2},${hue[2] >> 2}`;
       if (tk !== this.tintKey) { this.tintKey = tk; this.tint(hue); }
       // The sheet: into its own canvas when it changes (geometry, colour), else once into this one
       const sctx = staticCtx || ctx;
-      const sk = `${mk}|${tk}|${ink}`;
+      const ox = cx - this.maskCx, oy = cy - this.maskCy;
+      const sk = `${this.maskKey}|${tk}|${ink}|${Math.round(ox)},${Math.round(oy)}`;
       if (sk !== this.staticKey || !staticCtx) {
         this.staticKey = sk;
         if (ink) { sctx.fillStyle = rgba(COLORS.ink, 1); sctx.fillRect(0, 0, w, h); } else sctx.clearRect(0, 0, w, h);
-        sctx.drawImage(this.tinted, 0, 0, w, h);
+        sctx.drawImage(this.tinted, ox, oy, w, h);
       }
       if (staticCtx) ctx.clearRect(0, 0, w, h);
       if (!motion) return;
