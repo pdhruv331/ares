@@ -345,7 +345,7 @@ final class Ignition: NSObject, NSApplicationDelegate {
     let url = resources.appendingPathComponent("sounds/\(name).wav")
     guard let s = sounds[name] ?? NSSound(contentsOf: url, byReference: true) else { return }
     sounds[name] = s
-    s.volume = 0.5
+    s.volume = 0.26 // (the files are mastered loud for the phone: make-sounds MASTER 1.9)
     s.stop(); s.play()
   }
 }

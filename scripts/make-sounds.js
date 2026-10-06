@@ -12,7 +12,10 @@ fs.mkdirSync(OUT, { recursive: true });
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 /** Render `seconds` of audio with fn(t) → sample, then normalise to `peak`. */
-function render(seconds, fn, peak = 0.5) {
+// Mastered loud (the phone plays them as they are; the window and the helper scale them down by MASTER)
+const MASTER = 1.9;
+function render(seconds, fn, peak0 = 0.5) {
+  const peak = Math.min(0.95, peak0 * MASTER);
   const n = Math.round(seconds * SR);
   const out = new Float32Array(n);
   let max = 0;

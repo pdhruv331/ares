@@ -37,7 +37,7 @@ const Sounds = (() => {
     stop(name, 0.02);
     const c = ensure();
     const src = c.createBufferSource(); src.buffer = buf; src.loop = loop; src.playbackRate.value = rate;
-    const gain = c.createGain(); gain.gain.value = (LEVEL[name] || 0.6) * 0.5;
+    const gain = c.createGain(); gain.gain.value = (LEVEL[name] || 0.6) * 0.5 / 1.9; // (the files are mastered loud for the phone: make-sounds MASTER)
     src.connect(gain).connect(c.destination);
     src.start();
     const entry = { src, gain };
