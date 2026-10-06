@@ -1683,6 +1683,7 @@ function startClaudeControl() {
   });
   claudeCtl = new ClaudeControl({ log, sessions, jobs, cli: claude.CLI, readSettings, workDir: jobs.dir,
     aresRepo: app.isPackaged ? path.join(os.homedir(), 'My AI') : __dirname });
+  sessions.on('event', () => orb?.refresh()); // a session waiting on the user, or done: the orb's needs-you count
   claudeCtl.startHooks(app.getPath('userData'), path.join(__dirname, 'tools', 'claude-hook.sh'));
   claudeCtl.on('alert', deliverClaudeAlert);
   setInterval(releaseHeldAlerts, 60_000);

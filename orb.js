@@ -272,6 +272,7 @@ class Orb {
   /** Something changed that the orb shows: jobs, calls, usage, mute. */
   refresh() {
     if (!this.win) return;
+    const t0 = Date.now(); this.refreshes = (this.refreshes || 0) + 1;
     const jobs = this.deps.jobs?.list?.() || [];
     const approvals = jobs.filter((j) => j.status === 'approval');
     const failed = jobs.filter((j) => j.status === 'failed' && !j.seen);
@@ -291,14 +292,26 @@ class Orb {
     const snap = this.deps.usage?.snapshot?.();
     const pct = Math.max(snap?.windows?.five_hour?.pct ?? 0, snap?.windows?.seven_day?.pct ?? 0);
     this.send({ type: 'signals', needs: { count: items.length }, job, call, usage: { pct }, muted: this.speechMuted });
+    this.refreshMs = Math.max(this.refreshMs || 0, Date.now() - t0);
   }
+  /** Claude Code sessions waiting on the user, from the hook store in memory and the live registry (both cheap; the transcript
+   *  scan in sessions.list() took ~180 ms of the main process per call, which stuttered the wake). */
   claudeWaiting() {
     try {
-      const s = this.deps.sessions; if (!s?.list) return [];
-      if (!this.sessionsCache || Date.now() - this.sessionsCache.at > 20_000) {
-        this.sessionsCache = { at: Date.now(), list: s.list({ days: 2, limit: 20 }).filter((x) => x.status === 'permission' || x.status === 'waiting') };
+      const s = this.deps.sessions; if (!s?.hooks) return [];
+      if (!this.sessionsCache || Date.now() - this.sessionsCache.at > 15_000) {
+        const live = s.live?.() || new Map();
+        const meta = s.desktopMeta?.() || new Map();
+        const list = [];
+        for (const [id, h] of Object.entries(s.hooks)) {
+          if (h.event !== 'Notification' || !/permission|elicitation|needs_input/.test(h.type || '') || Date.now() - h.at > 2 * 3600_000) continue;
+          if (live.size && !live.has(id)) continue; // its process is gone: nothing is waiting any more
+          const l = live.get(id);
+          list.push({ id, title: meta.get(id)?.title || (l?.cwd ? path.basename(l.cwd) : 'Claude Code'), detail: /permission/.test(h.type) ? 'needs permission' : h.text || 'waiting for your answer' });
+        }
+        this.sessionsCache = { at: Date.now(), list };
       }
-      return this.sessionsCache.list.map((x) => ({ id: x.id, title: x.title || x.project || 'Claude Code', detail: x.detail || (x.status === 'permission' ? 'needs permission' : 'waiting for your answer') }));
+      return this.sessionsCache.list;
     } catch { return []; }
   }
   /** A job finished: a result card for the ones the orb started. */
@@ -579,7 +592,7 @@ class Orb {
   /** Development only: drive the orb from the harness (ARES_USER_DATA set). */
   test(what, arg = {}) {
     switch (what) {
-      case 'state': return { on: this.on, visible: this.visible, ctx: this.ctx, portal: this.portalOpen, ptt: this.ptt, needs: this.needs, muted: this.speechMuted, interactive: this.interactive, bounds: this.win?.getBounds(), centre: this.centre(), drag: this.drag, caretNear: this.caretNear, hits: this.hits, media: this.win?.getMediaSourceId?.() };
+      case 'state': return { on: this.on, visible: this.visible, ctx: this.ctx, portal: this.portalOpen, ptt: this.ptt, needs: this.needs, muted: this.speechMuted, interactive: this.interactive, bounds: this.win?.getBounds(), centre: this.centre(), drag: this.drag, caretNear: this.caretNear, hits: this.hits, media: this.win?.getMediaSourceId?.(), refreshes: this.refreshes || 0, refreshMsMax: this.refreshMs || 0 };
       case 'act': return this.act(arg);
       case 'card': return this.card(arg);
       case 'call': return this.callEvent(arg);
