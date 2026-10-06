@@ -392,8 +392,15 @@ class Wallpaper extends EventEmitter {
         for (const old of fs.readdirSync(dir)) if (old.startsWith(`ares-${d.id}-`) && path.join(dir, old) !== file) fs.rmSync(path.join(dir, old), { force: true });
         const target = screens.find((s) => s.id === d.id) ? d.id : screens[0]?.id;
         if (target == null) continue;
-        const r = await this.helperJson(['wallpaper-set', String(target), file, '3', '1']).catch((err) => ({ ok: false, error: err.message }));
-        this.log('lock still', { display: d.id, size: `${Math.round(d.size.width * d.scaleFactor)}x${Math.round(d.size.height * d.scaleFactor)}`, evening, ok: r.ok, error: r.error });
+        let r = await this.helperJson(['wallpaper-set', String(target), file, '3', '1']).catch((err) => ({ ok: false, error: err.message }));
+        // macOS sometimes says yes and keeps the old picture (seen 2026-10-06): read it back and set it once more
+        const applied = async () => (await this.helperJson(['wallpaper-get']).catch(() => [])).some((s) => s.id === target && decodeURIComponent(String(s.url || '')).endsWith(path.basename(file)));
+        if (r.ok && !(await applied())) {
+          await new Promise((res) => setTimeout(res, 1500));
+          r = await this.helperJson(['wallpaper-set', String(target), file, '3', '1']).catch((err) => ({ ok: false, error: err.message }));
+          r.retried = true; r.applied = await applied();
+        }
+        this.log('lock still', { display: d.id, size: `${Math.round(d.size.width * d.scaleFactor)}x${Math.round(d.size.height * d.scaleFactor)}`, evening, ok: r.ok, error: r.error, retried: r.retried, applied: r.applied });
       }
       this.scheduleStill();
     })().finally(() => { this.rendering = null; });
