@@ -42,7 +42,9 @@ class Surface {
   }
 
   get desktopOn() { return this.opts().enabled; }
-  get blend() { return Boolean(this.opts().blend); }
+  /** Blended (the theme live): no glass, click-through except over her things. A SOLID lift (the corner orb's portal: ARES in
+   *  full view over the apps, docs/orb-prompt.md §2) keeps the glass and takes every click even with the theme on. */
+  get blend() { return Boolean(this.opts().blend) && !this.solid; }
   /** Click-through except over ARES's own things: as the desktop, and lifted when blended. */
   get passThrough() { return this.name === 'desktop' || this.name === 'sinking' || (this.name === 'lifted' && this.blend); }
   display() { return screen.getPrimaryDisplay(); }
@@ -59,6 +61,7 @@ class Surface {
     if (this.name === 'window') this.windowBounds = w.getBounds();
     this.name = 'desktop';
     this.panel = null;
+    this.solid = false;
     w.setAlwaysOnTop(true, 'normal', DESKTOP_LEVEL);
     w.setVisibleOnAllWorkspaces(true, ALL_SPACES);
     w.setHiddenInMissionControl?.(true);
@@ -72,10 +75,11 @@ class Surface {
   }
 
   /** Summoned: the desktop rises above the apps. panel: lifted only to show one panel ('work', 'status', 'call', 'job'). */
-  lift(panel = null) {
+  lift(panel = null, { solid = false } = {}) {
     const w = this.win;
     if (w.isFullScreen()) { w.focus(); return; }
     this.panel = this.name === 'lifted' && !this.panel ? null : panel; // already summoned in full: stays in full
+    this.solid = solid || (this.name === 'lifted' && this.solid);
     this.name = 'lifted';
     w.setFocusable(true);
     w.setVisibleOnAllWorkspaces(true, ALL_SPACES);
@@ -101,6 +105,7 @@ class Surface {
   window() {
     const w = this.win;
     this.name = 'window';
+    this.solid = false;
     w.setAlwaysOnTop(false);
     w.setVisibleOnAllWorkspaces(false, { skipTransformProcessType: true });
     w.setHiddenInMissionControl?.(false);
@@ -115,9 +120,9 @@ class Surface {
   }
 
   /** Summon (wake word, ⌥Space, the tray), or just one panel of hers (panel: see lift()). */
-  show(panel = null) {
+  show(panel = null, { solid = false } = {}) {
     if (!this.desktopOn) { if (this.name !== 'window') this.window(); else { this.win.show(); this.win.focus(); } return; }
-    if (this.opts().summon === 'window' && !panel) this.window(); else this.lift(panel);
+    if (this.opts().summon === 'window' && !panel) this.window(); else this.lift(panel, { solid });
   }
 
   /** Dismiss (Esc, ✕, ⌥Space again): back to being the desktop, or hidden when the wallpaper is off. */

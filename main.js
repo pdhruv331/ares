@@ -182,8 +182,8 @@ function present() {
 
 // Summon: lift the desktop above the apps, or open the window (the ◉ menu's summon mode). panel: only to show one of
 // her panels (the ARES theme's bar, dock and notifications), which sinks back when it's closed.
-function showWindow(panel = null) {
-  surface.show(panel);
+function showWindow(panel = null, { solid = false } = {}) {
+  surface.show(panel, { solid }); // solid: the corner orb's portal (full view even with the theme on)
   app.focus({ steal: true });
   win.focus();
 }
@@ -2531,7 +2531,7 @@ app.whenReady().then(async () => {
       get memory() { return memory; }, get tasks() { return tasks; }, get usage() { return claudeUsage; }, get sessions() { return claudeCtl?.sessions; },
     },
     hooks: {
-      summon: () => showWindow(), dismiss: () => surface.hide(), sendWindow: (ch, m) => { if (win && !win.isDestroyed()) win.webContents.send(ch, m); },
+      summon: () => showWindow(null, { solid: true }), dismiss: () => surface.hide(), sendWindow: (ch, m) => { if (win && !win.isDestroyed()) win.webContents.send(ch, m); },
       openView, stopSpeaking: () => { stopSpeaking(); win?.webContents.send('orb-stop'); }, ask: (text) => win?.webContents.send('orb-ask', text),
       silentNow, liveCall, ownIds: ['com.dhruv.ares', 'com.github.Electron'],
     },

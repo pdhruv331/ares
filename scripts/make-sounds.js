@@ -14,7 +14,7 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 /** Render `seconds` of audio with fn(t) → sample, then normalise to `peak`. */
 // Mastered loud (the phone plays them as they are; the window and the helper scale them down by MASTER)
 const MASTER = 1.9;
-function render(seconds, fn, peak0 = 0.5) {
+function render(seconds, fn, peak0 = 0.5, { seamless = false } = {}) {
   const peak = Math.min(0.95, peak0 * MASTER);
   const n = Math.round(seconds * SR);
   const out = new Float32Array(n);
@@ -22,9 +22,11 @@ function render(seconds, fn, peak0 = 0.5) {
   for (let i = 0; i < n; i++) { const v = fn(i / SR, i); out[i] = v; max = Math.max(max, Math.abs(v)); }
   const k = max > 0 ? peak / max : 1;
   for (let i = 0; i < n; i++) out[i] *= k;
-  // a 3 ms fade at both ends against clicks
-  const f = Math.round(0.003 * SR);
-  for (let i = 0; i < f; i++) { out[i] *= i / f; out[n - 1 - i] *= i / f; }
+  // a 3 ms fade at both ends against clicks (not for a seamless loop: every partial there completes whole cycles)
+  if (!seamless) {
+    const f = Math.round(0.003 * SR);
+    for (let i = 0; i < f; i++) { out[i] *= i / f; out[n - 1 - i] *= i / f; }
+  }
   return out;
 }
 function wav(samples) {
@@ -53,7 +55,7 @@ const sounds = {
   // Commit: a muted clunk
   clunk: () => { const n = noise(600); return render(0.22, (t) => (Math.sin(TAU * 95 * t) * expDecay(t, 22) + 0.6 * n() * expDecay(t, 40) + 0.3 * Math.sin(TAU * 60 * t) * expDecay(t, 14)), 0.4); },
   // Charge-to-wake: a hum that rises with the charge (3 s; the player pitches it by playbackRate from the real %)
-  'charge-hum': () => render(3.0, (t) => { const f = 55; return (Math.sin(TAU * f * t) + 0.5 * Math.sin(TAU * f * 2 * t + Math.sin(t * 3) * 0.3) + 0.25 * Math.sin(TAU * f * 3 * t) + 0.08 * Math.sin(TAU * f * 7.01 * t)) * env(t, 0.3, 3.0, 1, 0.3) * (0.7 + 0.3 * Math.sin(TAU * 6 * t)); }, 0.26),
+  'charge-hum': () => render(3.0, (t) => { const f = 55; return (Math.sin(TAU * f * t) + 0.5 * Math.sin(TAU * f * 2 * t + Math.sin(TAU * t / 3) * 0.3) + 0.25 * Math.sin(TAU * f * 3 * t) + 0.08 * Math.sin(TAU * f * 7 * t)) * (0.7 + 0.3 * Math.sin(TAU * 6 * t)); }, 0.26, { seamless: true }), // a LOOP: constant level, every partial and the tremolo whole cycles over 3 s, so the join is silent (the player fades it in and out)
   // The held breath: a tiny inhale (near-silence: a filtered breath of noise fading to nothing)
   inhale: () => { const n = noise(1800); return render(0.35, (t) => n() * env(t, 0.2, 0.15, 0, 0) * (0.3 + t), 0.08); },
   // Wake: a bright bloom chime

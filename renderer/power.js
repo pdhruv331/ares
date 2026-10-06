@@ -80,7 +80,7 @@
     else if (m.mode === 'online') { if (P.mode !== 'online' && P.mode !== 'fromstandby' && P.mode !== 'wake') P.set('online'); quiet(false); }
     else if (m.mode === 'spindown') { P.set('spindown'); quiet(true); Sounds.play('clunk'); setTimeout(() => Sounds.play('winddown'), 250); }
     else if (m.mode === 'dormant') { if (P.mode !== 'offline' && P.mode !== 'spindown') P.set('offline', { force: true }); quiet(true); modeClass('offline'); }
-    else if (m.mode === 'charging') { if (state === 'speaking') setState('idle'); helperDriven = false; root.classList.remove('power-wait'); ghost.clear(); P.set('charging', { force: true }); P.charge = 0; P.readyAt = false; quiet(true); modeClass('charging'); ghost.line('igniting', 1500); } // (a wake from dormancy: this page plays the charge)
+    else if (m.mode === 'charging') { if (state === 'speaking') setState('idle'); helperDriven = false; root.classList.remove('power-wait'); ghost.clear(); P.set('charging', { force: true }); P.steps = []; P.charge = 0; P.readyAt = false; quiet(true); modeClass('charging'); ghost.line('igniting', 1500); } // (a wake from dormancy: this page plays the charge)
   }
 
   // ---- The controller's events (scene.js dispatches them each frame) -------------------------------------------------------------
