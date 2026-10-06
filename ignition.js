@@ -125,6 +125,8 @@ class Ignition extends EventEmitter {
     this.send({ type: 'handover' });
   }
   state() { return { steps: [...this.steps.values()], ready: this.ready, helper: Boolean(this.helper), line: this.readyLine, last: this.lastShutdown() }; }
+  /** A wake from dormancy: the steps start over (no helper is involved; the window plays the charge from these). */
+  reset() { this.steps.clear(); this.ready = false; this.readyLine = null; this.handedOver = false; this.startedAt = Date.now(); clearTimeout(this.handoverTimer); }
 
   // ---- The helper's socket ------------------------------------------------------------------------------------------------------
   accept(c) {

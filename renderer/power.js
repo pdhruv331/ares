@@ -74,20 +74,22 @@
     else if (m.mode === 'fromstandby') { P.set('fromstandby', { status }); Sounds.play('wake-chime'); ghost.line('awake', 1500); }
     else if (m.mode === 'online') { if (P.mode !== 'online' && P.mode !== 'fromstandby' && P.mode !== 'wake') P.set('online'); quiet(false); }
     else if (m.mode === 'spindown') { P.set('spindown'); quiet(true); Sounds.play('clunk'); setTimeout(() => Sounds.play('winddown'), 250); }
+    else if (m.mode === 'dormant') { if (P.mode !== 'offline' && P.mode !== 'spindown') P.set('offline', { force: true }); quiet(true); modeClass('offline'); }
+    else if (m.mode === 'charging') { ghost.clear(); P.set('charging', { force: true }); P.charge = 0; P.readyAt = false; quiet(true); modeClass('charging'); ghost.line('igniting', 1500); }
   }
 
   // ---- The controller's events (scene.js dispatches them each frame) -------------------------------------------------------------
   window.addEventListener('power', (e) => {
     const ev = e.detail;
     if (ev === 'wake') { Sounds.stop('charge-hum', 0.3); Sounds.play('bloom'); }
-    else if (ev === 'online') { if (!helperDriven) { ghost.line('all systems nominal'); sayWake(); } quiet(false); modeClass('online'); }
+    else if (ev === 'online') { if (!helperDriven) { ghost.line('all systems nominal'); sayWake(); } quiet(false); modeClass('online'); window.ares.power.act('online', 'window'); }
     else if (ev === 'offline') { Sounds.play('thud'); ghost.line('reactor cold', 2500); }
     else if (ev === 'standby') { /* settled */ }
     else if (ev.startsWith('commit:')) {
       const kind = ev.slice(7);
       Sounds.stop('hold-rise'); Sounds.play('clunk');
       if (kind === 'standby') window.ares.power.act('standby', 'core hold');
-      else if (kind === 'wakeup') window.ares.power.act('wake', 'core hold');
+      else if (kind === 'wakeup' || kind === 'wake') window.ares.power.act('wake', 'core hold'); // (wake: from dormancy)
       else if (kind === 'power') window.ares.power.act('powerdown', 'notch hold');
     } else if (ev.startsWith('cancel:')) Sounds.stop('hold-rise');
   });
@@ -111,7 +113,8 @@
     applyPrefs(st.prefs || {});
     Sounds.silent = await window.ares.power.act('silent').catch(() => false);
     Sounds.preload();
-    if (st.mode === 'standby' || st.mode === 'tostandby') { P.set('standby', { force: true, status: st.status }); quiet(true); modeClass('standby'); return; }
+    if (st.mode === 'standby' || st.mode === 'tostandby') { root.classList.remove('power-wait'); P.set('standby', { force: true, status: st.status }); quiet(true); modeClass('standby'); return; }
+    if (st.mode === 'dormant') { root.classList.remove('power-wait'); P.set('offline', { force: true }); quiet(true); modeClass('offline'); return; } // (a reload while dormant)
     if (st.ready && st.helper === false && P.mode === 'offline' && !st.helperAlive) {
       // a reload after the start (or a very slow page): no ceremony, straight to live
       if (!st.steps?.length) { P.set('online', { force: true }); modeClass('online'); return; }

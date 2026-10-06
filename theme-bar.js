@@ -243,7 +243,7 @@ sketchybar --update
   raw(args) { if (this.sketchybar && this.active) execFile(this.sketchybar, args, { timeout: 3000 }, () => {}); }
   /** The ◉ mark's colour by power state: cyan online, blue standby, gold while powering down. */
   power(mode) {
-    const col = mode === 'standby' || mode === 'tostandby' || mode === 'fromstandby' ? C.blue : mode === 'spindown' ? C.gold : C.cyan;
+    const col = mode === 'standby' || mode === 'tostandby' || mode === 'fromstandby' ? C.blue : ['spindown', 'dormant', 'charging', 'offline'].includes(mode) ? C.gold : C.cyan;
     this.set('ares.mark', [`icon.color=${col}`], ['sin', 12]);
   }
   query(item) {

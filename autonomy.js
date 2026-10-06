@@ -417,7 +417,7 @@ class Autonomy extends EventEmitter {
     return job;
   }
   tickRoutines() {
-    if (this.state.paused) return;
+    if (this.state.paused || this.dormant) return; // (dormant: power.js)
     const now = Date.now();
     for (const r of this.state.routines) {
       if (!r.enabled || r.schedule.kind === 'event') continue;

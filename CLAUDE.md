@@ -220,7 +220,13 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   renderer's scene files; build-app.sh copies them). It runs only while `ares.pid` is dead, is click-through outside the reactor's
   circle (pointer polled at 15 Hz), registers ⌥Space with Carbon only while ARES is off, and exits after the handover. Packaged
   builds launch it on quit; in development only with `ARES_IGNITION_HELPER=1` (it puts a window on the real desktop: ask first).
-- "Quit ARES" is now Power Down (the spin-down); ⌥⇧Space toggles standby; "power down" by voice is caught before the brain.
+- POWER DOWN DOES NOT QUIT (decided 2026-10-06: a process launch can't be seamless, the theme restart blinks the screen). It plays the
+  spin-down then goes DORMANT (`power.js`): every service stopped by `sleepServices()` in main.js (listener, camera, phone, Telegram,
+  calls, voicemail, dashboard, calendar, tasks, panels, speech; routines held via `autonomy.dormant`), the window keeps drawing the cold
+  gold reactor at 4 fps, the theme bar stays up with a gold ◉. Waking (`power.wake`: core hold, ⌥Space, menu) runs `wakeServices()`,
+  which reports the steps through ignition.js so the window plays the same charge. The ONLY true quit is ◉ → "Quit ARES Completely"
+  (`power.quitFully`; `before-quit` turns any other quit into a power down unless `powerMonitor` said the Mac is shutting down).
+  The helper then matters only at login and after that quit. ⌥⇧Space toggles standby; "power down" by voice is caught before the brain.
 - Testing: a cold start replays in the window on reload (`node scripts/harness.mjs reload`; start the dev instance with
   `--disable-backgrounding-occluded-windows --disable-renderer-backgrounding` or the charge crawls when covered); `window.ares.power.act('standby'|'wake'|'powerdown')`
   from the harness; `ARES_TEST_STILL` renders the offline and standby stills; the helper's page can be opened over HTTP from

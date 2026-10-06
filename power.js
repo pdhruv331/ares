@@ -1,10 +1,15 @@
-// Standby and power down (docs/ignition-prompt.md §4b, §4c, §4f): ARES keeps running in standby with the listener off, desk
-// mode held and the desktop quiet; power down is a real quit with the spin-down and a ghost log of the real steps. Auto
-// standby (lock / idle / night / low battery, wake on unlock or presence) is here too. Every change is logged in the audit
-// log and announced to the window, the backdrop, the phone and the menu bar through the 'change' event.
+// Standby, power down and dormancy (docs/ignition-prompt.md §4b, §4c, §4f): ARES keeps running in standby with the listener off,
+// desk mode held and the desktop quiet. POWER DOWN does not quit the process (a process launch can't be made seamless: the theme
+// restarts, the screen blinks, decided 2026-10-06): it plays the spin-down with a ghost log of the real steps, then goes DORMANT:
+// every service stopped (listener, phone, calls, voicemail, dashboard, calendar, tasks, panels, camera; jobs and routines held),
+// memory saved, the window left drawing the cold gold reactor at a trickle. Waking re-initialises the services in place with the
+// same charge-to-wake. The only true quit is ◉ → "Quit ARES Completely" (quitFully), which hands the reactor to the ignition helper.
+// Auto standby (lock / idle / night / low battery, wake on unlock or presence) is here too. Every change is logged in the audit log
+// and announced to the window, the backdrop, the phone and the menu bar through the 'change' event.
 //
-//   power.standby(on, why)   power.toggle(why)   power.powerDown(why)   power.status() → { listening, link, jobs }
-//   events: 'change' { mode: 'online'|'tostandby'|'standby'|'fromstandby'|'spindown', status, why }
+//   power.standby(on, why)   power.toggle(why)   power.powerDown(why)   power.wake(why)   power.quitFully(why)
+//   power.status() → { listening, link, jobs }
+//   events: 'change' { mode: 'online'|'tostandby'|'standby'|'fromstandby'|'spindown'|'dormant'|'charging', status, why }
 //           'step'   { name, status, detail }   (the spin-down's ghost log, in reverse boot order)
 //           'say'    { line }                   (spoken + typed by the window: "Powering down. Goodnight, sir.")
 const EventEmitter = require('events');
@@ -24,12 +29,15 @@ class Power extends EventEmitter {
    * @param {() => boolean} o.linkAlive   a phone is connected
    * @param {() => Promise} o.saveMemory   the quit consolidation (resolves when saved)   @param {() => number} o.unsaved
    * @param {(msg) => void} o.phone   broadcast to the phones   @param {() => void} o.closeEars   @param {() => void} o.voiceOff
-   * @param {() => void} o.quit   @param {object} o.powerMonitor   @param {() => boolean} o.deskPresent
+   * @param {() => void} o.quit   the real quit   @param {object} o.powerMonitor
+   * @param {{ sleep: () => Promise, wake: () => Promise }} o.services   stop everything for dormancy / start it all again (reporting steps)
    */
   constructor(o) {
     super();
     Object.assign(this, o);
     this.mode = 'online';
+    this.dormantSince = null;
+    this.quitAllowed = false; // only ◉ → Quit ARES Completely (and a system shutdown) may end the process
     this.prior = null;      // the listener's state before standby { muted, awake }
     this.autoWhy = null;    // why auto standby put her in standby (so wake-on-return applies)
     this.quitting = false;
@@ -56,7 +64,7 @@ class Power extends EventEmitter {
 
   /** Standby on or off. Instant on the way back: no cold start. */
   standby(on, why = 'user') {
-    if (this.quitting) return false;
+    if (this.quitting || this.mode === 'dormant' || this.mode === 'charging') return false;
     if (on && this.mode !== 'online') return false;
     if (!on && this.mode !== 'standby' && this.mode !== 'tostandby') return false;
     if (on) {
@@ -84,7 +92,7 @@ class Power extends EventEmitter {
     }
     return true;
   }
-  toggle(why = 'user') { return this.standby(this.mode === 'online', why); }
+  toggle(why = 'user') { if (this.mode === 'dormant') return this.wake(why); return this.standby(this.mode === 'online', why); }
   /** Back at the Mac (unlock, wake from sleep, desk-mode presence): wake if auto standby put her there. */
   back(how) {
     if (!this.autoWhy || !this.opts.auto.wakeOnReturn) return;
@@ -109,12 +117,13 @@ class Power extends EventEmitter {
   }
 
   /**
-   * Power down: the spin-down with the real steps in reverse, then quit. Returns the line she says first (so the caller can
-   * answer the voice command), or null if already on the way out.
+   * Power down: the spin-down with the real steps in reverse, then DORMANT (the process stays; see the top). Returns the line she
+   * says first (so the caller can answer the voice command), or null if already on the way out. `fully` = the real quit instead.
    */
-  powerDown(why = 'user') {
-    if (this.quitting) return null;
+  powerDown(why = 'user', { fully = false } = {}) {
+    if (this.quitting || this.mode === 'dormant' || this.mode === 'charging') return null;
     this.quitting = true;
+    this.fully = fully;
     clearTimeout(this.settle);
     const running = this.jobs().filter((j) => j.status === 'running');
     const line = running.length
@@ -150,9 +159,36 @@ class Power extends EventEmitter {
       if (left > 0) await new Promise((r) => setTimeout(r, left));
       step('reactor', 'ok', 'cold');
       this.emit('cold');
-      setTimeout(() => this.quit(), 350);
-    })().catch((err) => { this.log('power down failed', err.message); this.quit(); });
+      if (this.fully) { this.quitAllowed = true; setTimeout(() => this.quit(), 350); return; }
+      // Dormant: everything else stops; the window keeps the cold reactor
+      try { await this.services?.sleep?.(); } catch (err) { this.log('dormant: sleep failed', err.message); }
+      this.mode = 'dormant'; this.quitting = false; this.dormantSince = Date.now();
+      this.log('dormant', { why });
+      this.emit('change', { mode: 'dormant', status: this.status(), why });
+    })().catch((err) => { this.log('power down failed', err.message); this.quitting = false; });
     return line;
+  }
+  /** ◉ → Quit ARES Completely: the spin-down, then the process ends and the ignition helper takes the reactor over. */
+  quitFully(why = 'menu') { return this.powerDown(why, { fully: true }); }
+
+  /** Wake from dormancy: the charge-to-wake follows the services starting again (main.js reports the steps). Instant from standby. */
+  wake(why = 'user') {
+    if (this.mode === 'standby' || this.mode === 'tostandby') return this.standby(false, why);
+    if (this.mode !== 'dormant') return false;
+    this.mode = 'charging';
+    this.log('wake from dormant', { why });
+    this.audit?.record({ kind: 'power', what: 'wake', why, tier: 1 });
+    this.emit('change', { mode: 'charging', status: this.status(), why });
+    (async () => {
+      try { await this.services?.wake?.(); } catch (err) { this.log('wake failed', err.message); }
+    })();
+    return true;
+  }
+  /** The window finished its wake animation (or main.js's fallback): online. */
+  setOnline(why = 'wake') {
+    if (this.mode !== 'charging') return;
+    this.mode = 'online'; this.dormantSince = null;
+    this.emit('change', { mode: 'online', status: this.status(), why });
   }
 }
 

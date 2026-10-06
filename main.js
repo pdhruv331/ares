@@ -186,6 +186,8 @@ function showWindow(panel = null) {
 // ⌥Space: summon ARES and start listening straight away (push-to-talk); again to hide.
 function toggleWindow() {
   if (!win) return;
+  if (power?.mode === 'dormant') return power.wake('hotkey'); // ⌥Space ignites, as it does from the helper
+  if (power?.mode === 'charging') return;
   if (surface.summoned && win.isFocused()) {
     hideWindow();
   } else {
@@ -245,9 +247,9 @@ function refreshTray() {
   const awake = listener.awake;
   // The ◉ in the state's colour (docs/ignition-prompt.md §4f): cyan online, blue in standby, gold while powering down
   const pm = power?.mode || 'online';
-  tray.setImage(trayGlyph(pm === 'standby' || pm === 'tostandby' || pm === 'fromstandby' ? 'blue' : pm === 'spindown' ? 'gold' : 'cyan', muted ? 'ring' : awake ? 'dot' : 'both'));
+  tray.setImage(trayGlyph(pm === 'standby' || pm === 'tostandby' || pm === 'fromstandby' ? 'blue' : ['spindown', 'dormant', 'charging'].includes(pm) ? 'gold' : 'cyan', muted || pm === 'dormant' ? 'ring' : awake ? 'dot' : 'both'));
   tray.setTitle('');
-  tray.setToolTip(pm === 'standby' ? 'ARES — standby' : muted ? `ARES — muted${until}` : awake ? 'ARES — always listening' : 'ARES — listening for "Hey ARES"');
+  tray.setToolTip(pm === 'dormant' ? 'ARES — powered down (hold the reactor or press ⌥Space to wake)' : pm === 'standby' ? 'ARES — standby' : muted ? `ARES — muted${until}` : awake ? 'ARES — always listening' : 'ARES — listening for "Hey ARES"');
   const sections = menuSections();
   tray.setContextMenu(Menu.buildFromTemplate(['listen', 'view', 'voice', 'work', 'phone', 'ares']
     .flatMap((k, i) => [...(i ? [{ type: 'separator' }] : []), ...sections[k]])));
@@ -360,7 +362,8 @@ function menuSections() {
       },
       { type: 'separator' },
       ...powerMenu(),
-      { label: 'Power Down', click: () => power?.powerDown('menu') },
+      { label: power?.mode === 'dormant' ? 'Wake ARES' : 'Power Down', click: () => (power?.mode === 'dormant' ? power.wake('menu') : power?.powerDown('menu')) },
+      { label: 'Quit ARES Completely', click: () => power?.quitFully('menu') }, // the only way the process ends (the ignition helper takes over)
     ],
   };
 }
@@ -372,7 +375,7 @@ function powerMenu() {
   const standby = power.mode === 'standby' || power.mode === 'tostandby';
   const act = (fn) => (item) => { fn(item); refreshTray(); };
   return [
-    { label: standby ? `Wake  (${HOTKEY_STANDBY.replace('Alt+Shift', '⌥⇧')})` : `Standby  (${HOTKEY_STANDBY.replace('Alt+Shift', '⌥⇧')})`, click: () => power.toggle('menu') },
+    { label: standby ? `Wake  (${HOTKEY_STANDBY.replace('Alt+Shift', '⌥⇧')})` : `Standby  (${HOTKEY_STANDBY.replace('Alt+Shift', '⌥⇧')})`, enabled: power.mode !== 'dormant' && power.mode !== 'charging', click: () => power.toggle('menu') },
     { label: 'Power', submenu: [
       { label: 'Wake line: Spoken + Shown', type: 'radio', checked: o.wakeLine === 'spoken', click: act(() => power.save({ wakeLine: 'spoken' })) },
       { label: 'Wake line: Shown Only', type: 'radio', checked: o.wakeLine === 'shown', click: act(() => power.save({ wakeLine: 'shown' })) },
@@ -392,6 +395,52 @@ function powerMenu() {
 }
 function pushPowerPrefs() { if (win && !win.isDestroyed()) win.webContents.send('power', { type: 'prefs', prefs: powerPrefs() }); }
 function powerPrefs() { const o = power?.opts || {}; return { sounds: o.sounds !== false, wakeLine: o.wakeLine || 'spoken' }; }
+/** The start-up is complete (or a dormant wake): compose the wake line and tell the window the charge may finish. */
+async function finishWake() {
+  const silent = await silentNow().catch(() => false);
+  const mode = power.opts.wakeLine;
+  const line = mode === 'off' ? null : wakeLines.compose(wakeContext());
+  ignition.setReady(line ? { text: line.shown, spoken: mode === 'spoken' && !silent ? line.spoken : null } : null);
+  if (power.mode === 'charging') setTimeout(() => power.setOnline('fallback'), 7000); // (if the window never reports its wake)
+}
+/** Dormant (power.js): everything but the window, the theme bar, the tray and the backdrop stops. Never the microphone or the camera. */
+async function sleepServices() {
+  const stop = (name, fn) => { try { fn(); } catch (err) { log('dormant: stop failed', { name, error: err.message }); } };
+  stop('listener', () => listener?.stop());
+  stop('vision', () => vision?.stop());
+  stop('phone', () => phone?.stop());
+  stop('remote', () => remote?.stop());
+  stop('calls', () => calls?.stop());
+  stop('voicemail', () => voicemail?.stop());
+  stop('dashboard', () => dashboard?.stop());
+  stop('calendar', () => calendar?.stop());
+  stop('tasks', () => tasks?.stop());
+  stop('panels', () => customPanels?.stop());
+  stop('speech', () => speech?.stop());
+  if (autonomy) autonomy.dormant = true;
+  desk?.hold(true);
+  wallpaper?.setPower('dormant', power.status());
+  log('dormant: services stopped');
+}
+/** Waking from dormancy: the services start again, each reported as a step so the charge ring follows them. */
+async function wakeServices() {
+  ignition.reset();
+  const step = (name, fn, detail) => { ignition.step(name, 'start'); try { const d = fn(); ignition.step(name, 'ok', typeof d === 'string' ? d : detail || ''); } catch (err) { ignition.step(name, 'fail', err.message); } };
+  step('memory', () => `${memory.count} facts`);
+  step('voice', () => { speech.start(); const vs = speech.status(); return vs.dev || vs.backup || vs.reserve ? 'backup voice' : 'Katherine'; });
+  ignition.step('brain', 'start');
+  Promise.resolve(claude.available()).then((on) => ignition.step('brain', on ? 'ok' : 'fail', on ? 'Claude ready' : 'no Claude CLI'), (err) => ignition.step('brain', 'fail', err.message));
+  ignition.step('ears', 'start');
+  desk?.hold(false);
+  listener.start();
+  setTimeout(() => ignition.step('ears', listener.ready || listener.child ? 'ok' : 'fail', listener.ready ? 'wake word' : listener.child ? 'starting' : 'listener missing'), 1200);
+  step('link', () => { phone?.start(); startRemote(); calls.start().catch((err) => log('calls start failed', err.message)); voicemail.start(); return `phone :${PHONE_PORT}${relay?.ready ? ' · relay' : ''}`; });
+  dashboard.start(); calendar.start(); tasks.start().catch((err) => log('tasks start failed', err.message)); customPanels.start();
+  if (autonomy) autonomy.dormant = false;
+  if (vision?.opts?.enabled) { try { vision.start(); } catch {} }
+  wallpaper?.setPower('charging', power.status());
+  setTimeout(() => { ignition.step('scene', 'ok', 'live'); finishWake(); }, 1400);
+}
 /** Quiet hours for Claude alerts, or a macOS Focus on: the wake line is shown but not spoken, the power sounds stay silent. */
 async function silentNow() {
   if (claudeQuietNow()) return true;
@@ -400,7 +449,7 @@ async function silentNow() {
 }
 /** The wake line's context: how long she was off and why, what happened meanwhile, what's next. */
 function wakeContext() {
-  const last = ignition.lastShutdown();
+  const last = power?.dormantSince ? { why: 'clean', first: false, offMs: Date.now() - power.dormantSince, at: power.dormantSince } : ignition.lastShutdown();
   const since = last.at || 0;
   const list = jobs?.list() || [];
   const snap = claudeUsage?.snapshot?.();
@@ -2354,14 +2403,17 @@ app.whenReady().then(async () => {
     phone: (msg) => phone?.broadcast(msg), closeEars: () => listener.stop(), voiceOff: () => speech.stop(),
     batteryPct: () => readouts?.battery?.pct,
     quit: () => { app.isQuitting = true; memorySavedOnQuit = true; app.quit(); },
+    services: { sleep: sleepServices, wake: wakeServices },
   });
+  powerMonitor.on('shutdown', () => { if (power) power.quitAllowed = true; }); // the Mac is going down: a quit may happen
   power.on('change', (c) => {
     win?.webContents.send('power', { type: 'mode', ...c });
-    wallpaper?.scene({ type: 'power', mode: c.mode, status: c.status });
+    wallpaper?.scene({ type: 'power', mode: c.mode === 'dormant' ? 'offline' : c.mode, status: c.status }); // (the backdrop's controller knows offline, not dormant)
     wallpaper?.setPower(c.mode, c.status);
     theme?.power(c.mode);
     phone?.broadcast({ type: 'power', mode: c.mode === 'tostandby' ? 'standby' : c.mode === 'fromstandby' ? 'online' : c.mode, status: c.status });
     if (c.mode === 'standby' || c.mode === 'online') notice(c.mode === 'standby' ? `Standing by (${c.why}).` : c.why.startsWith('auto') ? `Awake again (${c.why}).` : '');
+    if (c.mode === 'dormant') { applyReachable(); dashboard?.setVisible(false); }
     refreshTray();
   });
   power.on('step', (s) => win?.webContents.send('power', { type: 'step', step: s, reverse: true }));
@@ -2406,13 +2458,7 @@ app.whenReady().then(async () => {
     ignition.step('link', 'ok', `phone :${PHONE_PORT}${relay?.ready ? ' · relay' : ''}`);
     setTimeout(() => ignition.step('ears', listener.ready ? 'ok' : listener.child ? 'ok' : 'fail', listener.ready ? 'wake word' : listener.child ? 'starting' : 'listener missing'), 1200);
     // The scene is up: the start-up is complete; the wake line is composed from what happened while she was off
-    setTimeout(async () => {
-      ignition.step('scene', 'ok', 'live');
-      const silent = await silentNow().catch(() => false);
-      const mode = power.opts.wakeLine;
-      const line = mode === 'off' ? null : wakeLines.compose(wakeContext());
-      ignition.setReady(line ? { text: line.shown, spoken: mode === 'spoken' && !silent ? line.spoken : null } : null);
-    }, 1500);
+    setTimeout(() => { ignition.step('scene', 'ok', 'live'); finishWake(); }, 1500);
     voicemail.start();
     dashboard.start();
     dashboard.setVisible(win.isVisible());
@@ -2432,15 +2478,21 @@ ipcMain.handle('power-state', () => ({ ...(ignition?.state() || {}), helperAlive
 ipcMain.handle('power-act', (_e, what, why = 'window') => {
   if (!power) return false;
   if (what === 'standby') return power.standby(true, why);
-  if (what === 'wake') return power.standby(false, why);
+  if (what === 'wake') return power.wake(why); // (from standby or from dormancy)
   if (what === 'toggle') return power.toggle(why);
   if (what === 'powerdown') return Boolean(power.powerDown(why));
+  if (what === 'online') { power.setOnline(why); return true; }
   if (what === 'silent') return silentNow();
   return false;
 });
 
 let memorySavedOnQuit = false;
 app.on('before-quit', (e) => {
+  if (power && !power.quitAllowed && !memorySavedOnQuit) { // a quit from elsewhere (Dock, a script): power down instead, the process stays
+    e.preventDefault();
+    if (power.mode === 'online' || power.mode === 'standby') power.powerDown('quit request');
+    return;
+  }
   app.isQuitting = true;
   if (power) power.quitting = true;
   if (memorySavedOnQuit || !unsavedTurns().length) return;
