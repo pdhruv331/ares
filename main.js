@@ -2213,8 +2213,8 @@ app.whenReady().then(async () => {
   wallpaper.start();
   if (!app.isPackaged && process.env.ARES_TEST_STILL) { // development: render the lock-screen still to a file, without setting it
     const { screen } = require('electron');
-    for (const tint of [false, true]) {
-      wallpaper.renderStill(screen.getPrimaryDisplay(), tint).then((png) => { if (png) fs.writeFileSync(`${process.env.ARES_TEST_STILL}-${tint ? 'evening' : 'day'}.png`, png); log('test still', { tint, bytes: png?.length }); });
+    for (const kind of ['offline', 'standby']) {
+      wallpaper.renderStill(screen.getPrimaryDisplay(), false, kind).then((png) => { if (png) fs.writeFileSync(`${process.env.ARES_TEST_STILL}-${kind}.png`, png); log('test still', { kind, bytes: png?.length }); });
     }
   }
   wallpaper.jobs(jobs.list());

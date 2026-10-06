@@ -40,6 +40,8 @@ class Wallpaper extends EventEmitter {
     this.stillTimer = null;
     this.main = null; // { win, wid, name, mode } the ARES window, while it's the desktop or lifted
     this.icons = [];
+    this.power = { mode: 'online', status: null }; // ignition / standby / power down (ignition.js): what the still and the backdrop show
+    this.revealed = true; // false during a cold start with the ignition helper up: the backdrop stays hidden until the handover
   }
 
   // ---- Settings ------------------------------------------------------------------------------------------
@@ -111,7 +113,7 @@ class Wallpaper extends EventEmitter {
     win.loadFile(path.join(this.appDir, 'renderer', 'wallpaper.html'), { query: { mode: 'wallpaper' } });
     const view = { win, display, wid: null, ready: false, mode: null };
     win.once('ready-to-show', () => {
-      win.showInactive();
+      if (this.revealed) win.showInactive();
       view.wid = Number(String(win.getMediaSourceId()).split(':')[1]) || null; // "window:<CGWindowID>:0"
       this.pushIds();
     });
@@ -133,6 +135,7 @@ class Wallpaper extends EventEmitter {
     send('wp-scene', this.lastScene.state);
     send('wp-scene', this.lastScene.attention);
     send('wp-scene', this.lastScene.spot);
+    if (this.lastScene.power) send('wp-scene', this.lastScene.power);
     if (this.lastScene.offline) send('wp-scene', this.lastScene.offline);
     if (this.lastScene.readouts) send('wp-scene', this.lastScene.readouts);
     send('wp-jobs', this.jobList);
@@ -148,13 +151,53 @@ class Wallpaper extends EventEmitter {
   scene(msg) {
     if (msg.type === 'state') this.lastScene.state = msg;
     if (msg.type === 'attention') this.lastScene.attention = msg;
-    if (msg.type === 'spot') this.lastScene.spot = msg; // where the window's brain sits (shifted aside for panels or icons)
+    if (msg.type === 'spot') { this.lastScene.spot = msg; this.rememberSpot(msg); } // where the window's brain sits (shifted aside for panels or icons)
+    if (msg.type === 'power') this.lastScene.power = msg;
     if (msg.type === 'readouts') this.lastScene.readouts = msg;
     if (msg.type === 'offline') this.lastScene.offline = msg;
     if (!this.views.size) return;
     this.send('wp-scene', msg);
     if (msg.type === 'state') this.refreshModes(); // 60 fps while listening or speaking
   }
+  /**
+   * The reactor's place on each display, remembered from the window's `spot` messages (screen px → that display's own CSS px),
+   * so the lock-screen still and the ignition helper draw it exactly where the live window does (docs/ignition-prompt.md).
+   */
+  rememberSpot(msg) {
+    if (!Number.isFinite(msg.cx) || !Number.isFinite(msg.r) || msg.r < 20) return;
+    const d = screen.getDisplayNearestPoint({ x: msg.cx, y: msg.cy });
+    const spot = { cx: Math.round(msg.cx - d.bounds.x), cy: Math.round(msg.cy - d.bounds.y), r: Math.round(msg.r) };
+    const spots = this.readSettings().wallpaper?.spots || {};
+    const old = spots[d.id];
+    if (old && old.cx === spot.cx && old.cy === spot.cy && old.r === spot.r) return;
+    this.debounce('spot', () => { this.save({ spots: { ...(this.readSettings().wallpaper?.spots || {}), [d.id]: spot } }); this.emit('geometry'); }, 800);
+  }
+  /** Where the reactor sits on a display (its own CSS px): the remembered spot, else the window's default placement. */
+  geometryFor(display) {
+    const spot = (this.readSettings().wallpaper?.spots || {})[display.id];
+    if (spot && spot.r > 20 && spot.cx > 0 && spot.cx < display.bounds.width && spot.cy > 0 && spot.cy < display.bounds.height) return { ...spot, scale: display.scaleFactor };
+    const wa = display.workArea; // the ARES window is the work area (surface.js); scene.js: radius = min(26% h, 22% w), centre 3% below the middle
+    return { cx: Math.round(wa.x - display.bounds.x + wa.width / 2), cy: Math.round(wa.y - display.bounds.y + wa.height / 2 + wa.height * 0.03),
+      r: Math.round(Math.min(wa.height * 0.26, wa.width * 0.22)), scale: display.scaleFactor };
+  }
+  /** Every display's geometry, for the ignition helper (ignition.js writes it to a file). */
+  geometries() {
+    return screen.getAllDisplays().map((d) => ({ id: d.id, x: d.bounds.x, y: d.bounds.y, w: d.bounds.width, h: d.bounds.height, ...this.geometryFor(d),
+      primary: d.id === screen.getPrimaryDisplay().id }));
+  }
+  /** Ignition / standby / power down: the state the still should show, and a re-render if the still is in use. */
+  setPower(mode, status) {
+    const was = this.power.mode;
+    this.power = { mode, status: status || null };
+    const stillKind = (m) => (m === 'standby' || m === 'tostandby' ? 'standby' : 'offline');
+    if (this.opts.lockStill && stillKind(was) !== stillKind(mode) && ['standby', 'online', 'offline'].includes(mode)) this.renderStills();
+  }
+  /** A cold start with the helper drawing the charge: keep the backdrop windows hidden until the handover, then show them. */
+  reveal(on) {
+    this.revealed = on;
+    for (const v of this.views.values()) if (!v.win.isDestroyed() && v.ready) { if (on) v.win.showInactive(); else v.win.hide(); }
+  }
+
   jobs(list) {
     this.jobList = list.map(({ id, status, size, steps, title, dismissed, seen, finished, created }) => ({ id, status, size, steps, title, dismissed, seen, finished, created }));
     this.send('wp-jobs', this.jobList);
@@ -345,8 +388,8 @@ class Wallpaper extends EventEmitter {
     return this.rendering;
   }
 
-  /** One still: a hidden window the size of the display, rendering the same scene at its scale factor. */
-  renderStill(display, evening) {
+  /** One still: a hidden window the size of the display, rendering the same scene at its scale factor. `kind` overrides the state. */
+  renderStill(display, evening, kind = null) {
     return new Promise((resolve) => {
       const win = new BrowserWindow({
         ...display.bounds, show: false, frame: false, enableLargerThanScreen: true, paintWhenInitiallyHidden: true,
@@ -361,7 +404,13 @@ class Wallpaper extends EventEmitter {
       require('electron').ipcMain.on('wp-still', onStill);
       const timer = setTimeout(() => { this.log('lock still timed out'); done(null); }, 30_000);
       const look = this.readSettings().look === 'brain' ? 'brain' : 'reactor';
-      win.loadFile(path.join(this.appDir, 'renderer', 'wallpaper.html'), { query: { mode: 'still', look, caption: this.opts.caption, ...(evening ? { tint: 'evening' } : {}) } });
+      // The reactor look's still follows the power state (gold offline / blue standby) unless the caption is off; at the window's spot
+      const standby = this.power.mode === 'standby' || this.power.mode === 'tostandby';
+      const caption = this.opts.caption === 'none' ? 'none' : (kind || (standby ? 'standby' : 'offline'));
+      const g = this.geometryFor(display);
+      const running = this.jobList.filter((j) => ['running', 'queued', 'approval'].includes(j.status)).length;
+      win.loadFile(path.join(this.appDir, 'renderer', 'wallpaper.html'), { query: { mode: 'still', look, caption, geo: `${g.cx},${g.cy},${g.r}`,
+        jobs: String(running), link: this.power.status?.link ? '1' : '0', ...(evening ? { tint: 'evening' } : {}) } });
     });
   }
 

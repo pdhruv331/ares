@@ -38,7 +38,16 @@ const Scene = (() => {
   let bootStart = null;
   let boot = 0;
   const radiusFor = (W, H) => Math.min(H * 0.26, W * 0.22);
-  function geometry() { return { w, h, cx: w / 2, cy: h / 2 + h * 0.03, r: radiusFor(w, h) * boot }; }
+  // A geometry override (canvas px): the lock-screen still, the ignition helper and the live window place the reactor identically
+  // (docs/ignition-prompt.md); set from the page's query or by Scene.setGeometry(). Nothing else changes where it draws.
+  let geometryOverride = window.SCENE_GEOMETRY || null;
+  function geometry() {
+    if (geometryOverride) return { w, h, cx: geometryOverride.cx, cy: geometryOverride.cy, r: geometryOverride.r * boot };
+    return { w, h, cx: w / 2, cy: h / 2 + h * 0.03, r: radiusFor(w, h) * boot };
+  }
+  // A cold start (?power=cold): the reactor begins as the offline still, full size and gold, and the charge-to-wake brightens it
+  const pageQuery = new URLSearchParams(location.search);
+  const coldStart = pageQuery.get('power') === 'cold' || window.SCENE_POWER === 'cold';
   let rect = { left: 0, top: 0, width: 1, height: 1 };
   const scaleOf = () => (w ? rect.width / w : 1);
   const toClient = (x, y) => ({ x: rect.left + x * scaleOf(), y: rect.top + y * scaleOf() });
@@ -66,6 +75,10 @@ const Scene = (() => {
 
   const engine = new Engine();
   const backdrop = new Backdrop();
+  // Ignition / standby / power down (renderer/ignite.js): drives the engine's cold / hue / pace, paints the extras, takes the holds
+  const power = window.Ignite ? new Ignite.Controller(engine, { replica: Boolean(window.SCENE_REPLICA) }) : null;
+  if (power && coldStart) power.set('offline');
+  else if (power && window.SCENE_POWER === 'standby') power.set('standby', { force: true });
   let readouts = null;     // { jobs: {value, amber}, host, claude, battery } (callouts.js / the wallpaper bridge)
   let columns = null;      // the panel columns' inner edges (stage px) the callouts keep clear of
   let openCallout = null;  // the callout whose card is open
@@ -206,7 +219,7 @@ const Scene = (() => {
     ctx.restore();
   }
   function drawOrb(orb, g) {
-    const a = orb.alpha * orb.show * orb.fade;
+    const a = orb.alpha * orb.show * orb.fade * (power ? power.fade : 1);
     if (a <= 0.01) return;
     const c = orbColor(orb), R = orbRadius(orb, g), beat = orb.beat ?? 0.6;
     ctx.save();
@@ -254,7 +267,7 @@ const Scene = (() => {
   let bottomDim = 1;
   function layoutCallouts(g) {
     calloutGeo.clear();
-    if (!readouts || g.r < 30) return;
+    if (!readouts || g.r < 30 || (power && power.fade <= 0.01)) return;
     const s = scaleOf();
     for (const c of CALLOUTS) {
       let deg = c.angle;
@@ -298,7 +311,7 @@ const Scene = (() => {
       calloutFade.set(c.id, f);
       const hot = hoverCallout === c.id || openCallout === c.id;
       const col = d.amber ? COLORS.amber : engine.hue;
-      const k = (geo.bottom ? bottomDim : 1) * f.v * (hot ? 1.35 : 1);
+      const k = (geo.bottom ? bottomDim : 1) * f.v * (hot ? 1.35 : 1) * (power ? power.fade : 1);
       ctx.strokeStyle = rgba(col, 0.42 * k);
       ctx.beginPath(); ctx.moveTo(geo.ax, geo.ay); ctx.lineTo(geo.ex, geo.ey); ctx.lineTo(geo.tx, geo.ey); ctx.stroke();
       // The anchor dot (pulsing while its card is open)
@@ -348,6 +361,10 @@ const Scene = (() => {
   }
   core.addEventListener('pointerdown', (e) => {
     if (!isReactor() || e.button !== 0) return;
+    if (power) { // holding the core (wake / standby) or the notch (power down): never a click, never an orb
+      const p = fromClient(e.clientX, e.clientY);
+      if (power.pointer('down', p.x, p.y, geometry())) { press.power = true; press.orb = null; press.callout = null; try { core.setPointerCapture(e.pointerId); } catch {} return; }
+    }
     const id = calloutAt(e.clientX, e.clientY);
     if (id) { press.callout = id; press.orb = null; return; }
     const orb = pickOrb(e.clientX, e.clientY, e.pointerType === 'touch' ? 30 : 16);
@@ -356,6 +373,12 @@ const Scene = (() => {
   });
   core.addEventListener('pointermove', (e) => {
     if (!isReactor()) return;
+    if (power) {
+      const p = fromClient(e.clientX, e.clientY);
+      const over = power.pointer('move', p.x, p.y, geometry());
+      if (press.power) { if (!power.hold) { press.power = false; try { core.releasePointerCapture(e.pointerId); } catch {} } return; }
+      if (over) { core.style.cursor = 'pointer'; return; }
+    }
     if (press.orb && !held.orb && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 6 && !reduceMotion) {
       held.orb = press.orb; held.samples = [];
       held.orb.done?.(); held.orb.done = null;
@@ -411,12 +434,13 @@ const Scene = (() => {
   }
   core.addEventListener('pointerup', (e) => {
     if (!isReactor()) return;
+    if (press.power) { press.power = false; power.pointer('up', 0, 0, geometry()); try { core.releasePointerCapture(e.pointerId); } catch {} return; }
     if (held.orb) return letGo(e);
     if (press.orb) { const orb = press.orb; press.orb = null; if (hint) hint.hidden = true; window.dispatchEvent(new CustomEvent('orb-open', { detail: orb.id })); return; }
     if (press.callout) { const id = press.callout; press.callout = null; if (calloutAt(e.clientX, e.clientY) === id) window.dispatchEvent(new CustomEvent('callout-click', { detail: id })); }
   });
-  core.addEventListener('pointercancel', (e) => { if (held.orb) letGo(e); press.orb = null; press.callout = null; });
-  core.addEventListener('mouseleave', () => { core.style.cursor = ''; if (hoverCallout) { hoverCallout = null; window.dispatchEvent(new CustomEvent('callout-hover', { detail: null })); } });
+  core.addEventListener('pointercancel', (e) => { if (held.orb) letGo(e); press.orb = null; press.callout = null; if (press.power) { press.power = false; power?.pointer('cancel', 0, 0, geometry()); } });
+  core.addEventListener('mouseleave', () => { core.style.cursor = ''; power?.pointer('up', 0, 0, geometry()); if (hoverCallout) { hoverCallout = null; window.dispatchEvent(new CustomEvent('callout-hover', { detail: null })); } });
 
   // ---- The orbs API (window.JobOrbs forwards here in the reactor look) --------------------------------------------------------
   const reactorOrbs = {
@@ -520,9 +544,16 @@ const Scene = (() => {
     rect = hud.getBoundingClientRect();
     const live = HUD.live();
     engine.setState(live.state);
-    engine.update(dt, { level: live.level, pulse: live.pulse, attention: live.attention, offline: live.offline });
+    if (power) { // (before the engine's update: the controller sets what it should look like this frame)
+      power.update(dt);
+      for (const ev of power.events.splice(0)) {
+        if (ev === 'wake') backdrop.ripples.push({ t0: backdrop.t, k: 1.7 }); // the shockwave relighting the dots
+        window.dispatchEvent(new CustomEvent('power', { detail: ev }));
+      }
+    }
+    engine.update(dt, { level: live.level, pulse: live.pulse, attention: live.attention, offline: live.offline && !(power && power.mode !== 'online') });
     bootStart ??= t;
-    boot = 1 - Math.pow(1 - Math.min(1, (t - bootStart) / 1600), 3);
+    boot = coldStart || geometryOverride ? 1 : 1 - Math.pow(1 - Math.min(1, (t - bootStart) / 1600), 3);
     const g = geometry();
     const motion = !window.SCENE_STILL && !reduceMotion;
     // The sheet: full-bleed, centred on the reactor wherever it sits (or on another window's reactor: the backdrop under the live
@@ -535,19 +566,24 @@ const Scene = (() => {
       const mr = matrix.getBoundingClientRect();
       const c = centreOverride || (w ? { x: rect.left - mr.left + g.cx * scaleOf(), y: rect.top - mr.top + g.cy * scaleOf(), r: g.r * scaleOf() }
         : { x: mr.width / 2, y: mr.height / 2 + mr.height * 0.03, r: radiusFor(mr.width, mr.height) * boot });
-      backdrop.draw(mctx, { staticCtx: sctx, cx: c.x, cy: c.y, r: Math.max(c.r, radiusFor(mr.width, mr.height) * 0.2), hue: engine.hue, dt: bdt, level: live.level, speaking: live.state === 'speaking', motion, ink: !window.SCENE_TRANSPARENT });
+      const cr = Math.max(c.r, radiusFor(mr.width, mr.height) * 0.2);
+      let hue = engine.hue;
+      if (power) { const sh = power.sheet({ cx: c.x, cy: c.y, r: cr }); backdrop.setOpts(sh.opts); hue = sh.hue; }
+      backdrop.draw(mctx, { staticCtx: sctx, cx: c.x, cy: c.y, r: cr, hue, dt: bdt, level: live.level, speaking: live.state === 'speaking', motion: motion && !(power && power.mode === 'offline'), ink: !window.SCENE_TRANSPARENT });
     }
     if (!w) return;
     ctx.clearRect(0, 0, w, h);
     if (window.SCENE_HIDE_BRAIN) return; // (the wallpaper backdrop under the live ARES desktop: the window draws the reactor)
     updateOrbs(dt, t / 1000);
-    drawOrbit(g);
-    engine.draw(ctx, g.cx, g.cy, g.r, { alpha: 1 });
+    power?.drawUnder(ctx, g);
+    if (!power || power.fade > 0.01) drawOrbit(g);
+    engine.draw(ctx, g.cx, g.cy, power ? power.radius(g.r) : g.r, { alpha: 1 });
     const flying = [];
     for (const orb of orbs.values()) { if (orb.mode === 'held' || orb.mode === 'thrown' || orb.mode === 'absorbing') flying.push(orb); else drawOrb(orb, g); }
     layoutCallouts(g);
     drawCallouts(g, dt);
     for (const orb of flying) drawOrb(orb, g);
+    power?.drawOver(ctx, g);
   }
   new ResizeObserver(resize).observe(hud);
   if (matrix) new ResizeObserver(resize).observe(matrix);
@@ -590,7 +626,19 @@ const Scene = (() => {
     calloutRects() { return [...calloutGeo].map(([id, geo]) => ({ id, ...clientBox(geo.box) })); },
     fadeCallout(id, on) { const f = calloutFade.get(id) || { v: 1, to: 1 }; f.to = on ? 0.2 : 1; calloutFade.set(id, f); },
     /** Client rectangles the window takes clicks on as the live desktop: the callout labels. */
-    hits() { return isReactor() && !window.SCENE_HIDE_BRAIN ? [...calloutGeo.values()].map((geo) => clientBox(geo.box)) : []; },
+    hits() {
+      if (!isReactor() || window.SCENE_HIDE_BRAIN) return [];
+      const out = [...calloutGeo.values()].map((geo) => clientBox(geo.box));
+      if (power && !power.replica && w) { // the core (hold for standby / wake) and, in standby, the power notch
+        const g = geometry(), cr = g.r * 0.35;
+        out.push(clientBox({ x: g.cx - cr, y: g.cy - cr, w: cr * 2, h: cr * 2 }));
+        if (power.mode === 'standby') { const n = Ignite.layout(g.cx, g.cy, g.r, 1).notch; out.push(clientBox({ x: n.x - n.r - 6, y: n.y - n.r - 6, w: (n.r + 6) * 2, h: (n.r + 6) * 2 })); }
+      }
+      return out;
+    },
+    /** Ignition / standby / power down (renderer/ignite.js): the controller, and the geometry override. */
+    power,
+    setGeometry(g) { geometryOverride = g ? { cx: g.cx, cy: g.cy, r: g.r } : null; lastBack = 0; backdrop.staticKey = ''; },
     orbs: reactorOrbs,
     get held() { return Boolean(held.orb); },
   };

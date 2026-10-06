@@ -21,6 +21,7 @@
   const COLORS = {
     cyan: [62, 230, 255], purple: [157, 140, 255], white: [242, 251, 255], amber: [255, 181, 71],
     green: [74, 222, 128], red: [248, 113, 113], grey: [127, 140, 153], ink: [3, 7, 13],
+    gold: [250, 196, 88], blue: [96, 150, 255], // the cold reactor (ARES off) and standby (docs/ignition-prompt.md)
   };
   const STATE_COLOR = { idle: 'cyan', listening: 'cyan', thinking: 'purple', speaking: 'white', offline: 'amber' };
   const ENERGY = { idle: 0, offline: 0, listening: 0.55, speaking: 0.8, thinking: 1 };
@@ -81,6 +82,14 @@
       this.sparks = [];    // { x, y, vx, vy, life, size } in units of r
       this.spawn = 0;
       this.flash = 0;      // a brief flare of the core (an orb sunk into it)
+      // Ignition / standby / power down (renderer/ignite.js drives these):
+      this.cold = 0;       // 0 live → 1 the offline still's brightness (rings 0.54, ticks 0.36, coils 0.33, a soft core glow, no motion)
+      this.forceHue = null; // a colour the engine holds instead of the state's (gold while cold, blue in standby)
+      this.pace = 1;       // speed of every motion (1 normal; the spin-down winds it to 0, standby holds ~0.15)
+      this.hum = 0;        // the tick ring's vibration while charging (0..1)
+      this.coilsLit = -1;  // charge-to-wake: how many coils are lit (0..10); -1 = the normal chase
+      this.scanOn = 1;     // the scanner's visibility (0..1)
+      this.rate = 1;       // how fast hue changes follow (1 normal; a spin-down drains slowly)
       let s = seed;
       this.rnd = () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
     }
@@ -109,18 +118,18 @@
       const wantEnergy = this.offline ? 0 : (ENERGY[st] ?? 0);
       this.energy += (wantEnergy - this.energy) * Math.min(1, dt * 3);
       this.attention += ((live.attention ? 1 : 0) - this.attention) * Math.min(1, dt * 2.5);
-      let target = this.target;
-      if (this.attention > 0.01 && !this.offline) target = mix(target, COLORS.amber, this.attention * 0.5);
-      this.hue = mix(this.hue, target, Math.min(1, dt * 4));
+      let target = this.forceHue || this.target;
+      if (this.attention > 0.01 && !this.offline && !this.forceHue) target = mix(target, COLORS.amber, this.attention * 0.5);
+      this.hue = mix(this.hue, target, Math.min(1, dt * 4 * this.rate));
       this.pulse = Math.max(live.pulse || 0, this.pulse * Math.exp(-dt * 3));
       this.flash *= Math.exp(-dt * 4);
-      const pace = 1 + this.energy * (st === 'thinking' ? 6 : 2.2);
+      const pace = (1 + this.energy * (st === 'thinking' ? 6 : 2.2)) * this.pace;
       this.spin += dt * 10 * pace;
-      this.scan += dt * (40 + this.energy * 160 + this.pulse * 120);
-      this.chase += dt * (90 + this.energy * 420 + this.level * 300);
-      this.t += dt;
-      // Sparks: a trickle at rest, a stream while she works or speaks
-      this.spawn += dt * (2 + this.energy * 22 + this.level * 30 + this.pulse * 20);
+      this.scan += dt * (40 + this.energy * 160 + this.pulse * 120) * this.pace;
+      this.chase += dt * (90 + this.energy * 420 + this.level * 300) * this.pace;
+      this.t += dt * Math.max(0.15, this.pace);
+      // Sparks: a trickle at rest, a stream while she works or speaks (none while cold)
+      this.spawn += dt * (2 + this.energy * 22 + this.level * 30 + this.pulse * 20) * (1 - this.cold) * Math.min(1, this.pace * 2);
       while (this.spawn >= 1) { this.spawn -= 1; this.burst(1); }
       for (let i = this.sparks.length - 1; i >= 0; i--) {
         const s = this.sparks[i];
@@ -134,29 +143,32 @@
     draw(ctx, cx, cy, r, { small = false, alpha = 1 } = {}) {
       if (r < 4) return;
       const c = this.hue, t = this.t, energy = this.energy, level = this.level, dim = this.offline;
+      const cold = clamp(this.cold, 0, 1), warm = 1 - cold; // the cold still is the floor: every element only brightens from it
       const lit0 = dim ? 0.5 : 1;
+      const lerp = (a, b) => a + (b - a) * warm; // (a) cold value → (b) live value
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.lineCap = 'round';
       ctx.translate(cx, cy);
-      // Outer tick ring with the scanner: a bright wedge sweeping round, the ticks behind it lit
+      // Outer tick ring with the scanner: a bright wedge sweeping round, the ticks behind it lit. Charging: the ring hums
       ctx.lineWidth = Math.max(0.8, r * 0.01);
+      const humA = this.hum > 0 ? Math.sin(t * 90) * this.hum * r * 0.006 : 0;
       for (let i = 0; i < 90; i++) {
         const deg = i * 4, a = deg * RAD;
         const behind = ((this.scan - deg) % 360 + 360) % 360; // how far past this tick the scanner is
-        const lit = small ? 0 : clamp(1 - behind / 70, 0, 1);
-        const inner = i % 9 === 0 ? r * 0.9 : r * 0.945;
-        ctx.strokeStyle = rgba(c, (45 + lit * 190) / 255 * lit0 * (0.6 + 0.4 * (dim ? 1 : 1)));
+        const lit = small ? 0 : clamp(1 - behind / 70, 0, 1) * this.scanOn * warm;
+        const inner = (i % 9 === 0 ? r * 0.9 : r * 0.945) + humA * (i % 2 ? 1 : -1);
+        ctx.strokeStyle = rgba(c, lerp(0.36, (45 + lit * 190) / 255 * lit0));
         ctx.beginPath();
         ctx.moveTo(Math.cos(a) * inner, Math.sin(a) * inner);
-        ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+        ctx.lineTo(Math.cos(a) * (r + humA * (i % 2 ? -1 : 1)), Math.sin(a) * (r + humA * (i % 2 ? -1 : 1)));
         ctx.stroke();
       }
-      if (!small) { // the scanner's glow trail (three soft passes)
+      if (!small && this.scanOn > 0.01 && warm > 0.01) { // the scanner's glow trail (three soft passes)
         const a1 = this.scan * RAD, a0 = a1 - 40 * RAD;
         for (const [w, k] of [[0.09, 0.08], [0.05, 0.14], [0.02, 0.28]]) {
           ctx.lineWidth = r * w;
-          ctx.strokeStyle = rgba(c, (0.25 + energy * 0.35 + this.pulse * 0.3) * k * lit0);
+          ctx.strokeStyle = rgba(c, (0.25 + energy * 0.35 + this.pulse * 0.3) * k * lit0 * this.scanOn * warm);
           ctx.beginPath(); ctx.arc(0, 0, r * 0.95, a0, a1); ctx.stroke();
         }
       }
@@ -165,13 +177,14 @@
         const rad = r * ring.rad, circ = TAU * rad;
         ctx.setLineDash([circ * ring.on / 360, circ * ring.off / 360]);
         ctx.lineWidth = Math.max(0.8, r * ring.width);
-        ctx.strokeStyle = rgba(c, dim ? ring.alpha / 2 : ring.alpha * (0.7 + energy * 0.3));
+        const liveA = dim ? ring.alpha / 2 : ring.alpha * (0.7 + energy * 0.3);
+        ctx.strokeStyle = rgba(c, lerp(ring.alpha * 0.54 / 0.86, Math.max(liveA, ring.alpha * 0.54 / 0.86)));
         ctx.beginPath(); ctx.arc(0, 0, rad, this.spin * ring.speed / 10 * RAD, this.spin * ring.speed / 10 * RAD + TAU); ctx.stroke();
       }
       ctx.setLineDash([]);
       // The waveform ring: her voice (or yours) ripples it
       const wr = r * 0.47;
-      if (level > 0.02 || energy > 0.05) {
+      if ((level > 0.02 || energy > 0.05) && warm > 0.01) {
         const amp = wr * (0.02 + level * 0.16 + energy * 0.015);
         ctx.beginPath();
         for (let i = 0; i <= 120; i++) {
@@ -182,37 +195,38 @@
         }
         ctx.closePath();
         ctx.lineWidth = Math.max(0.8, r * 0.012);
-        ctx.strokeStyle = rgba(c, (90 + level * 160) / 255 * lit0);
+        ctx.strokeStyle = rgba(c, (90 + level * 160) / 255 * lit0 * warm);
         ctx.stroke();
       }
-      // Coils around the core, lit in a chase
+      // Coils around the core, lit in a chase (charging: one lights per 10%, from the bottom, both ways up)
       const coilR = r * 0.4;
       ctx.lineWidth = Math.max(1, r * 0.045);
       for (let i = 0; i < 10; i++) {
         const deg = i * 36, a = deg * RAD;
         const d = ((this.chase - deg) % 360 + 360) % 360;
-        const lit = clamp(1 - d / 110, 0, 1);
-        ctx.strokeStyle = rgba(c, (50 + lit * 200 * (0.4 + energy * 0.6 + level * 0.5)) / 255 * lit0);
+        let lit = clamp(1 - d / 110, 0, 1) * warm;
+        if (this.coilsLit >= 0) { const order = [2, 3, 1, 4, 0, 5, 9, 6, 8, 7].indexOf(i); lit = order < this.coilsLit ? 0.9 + 0.1 * Math.sin(t * 6 + i) : 0; }
+        ctx.strokeStyle = rgba(c, lerp(0.33, Math.max(0.33, (50 + lit * 200 * (0.4 + energy * 0.6 + level * 0.5)) / 255 * lit0)));
         ctx.beginPath();
         ctx.moveTo(Math.cos(a) * (coilR - r * 0.035), Math.sin(a) * (coilR - r * 0.035));
         ctx.lineTo(Math.cos(a) * (coilR + r * 0.035), Math.sin(a) * (coilR + r * 0.035));
         ctx.stroke();
       }
       // Core: breathes at rest, swells with the voice, flickers while thinking; a soft glow around it
-      const breathe = (Math.sin(t * 1.4) + 1) * 0.025;
+      const breathe = (Math.sin(t * 1.4) + 1) * 0.025 * Math.max(0.3, Math.min(1, this.pace));
       const flicker = this.state === 'thinking' && !dim ? (Math.sin(t * 23) * 0.5 + Math.sin(t * 37) * 0.5) * 0.02 : 0;
-      const core = r * (0.24 + breathe + level * 0.13 + energy * 0.03 + flicker + this.pulse * 0.04 + this.flash * 0.06);
-      glow(ctx, c, 0, 0, core * 1.9, ((70 + energy * 90 + level * 120) / 255 + this.pulse * 0.3 + this.flash * 0.4) * lit0 * alpha);
+      const core = r * (0.24 + breathe + level * 0.13 + energy * 0.03 + flicker + this.pulse * 0.04 + this.flash * 0.06) * lerp(0.8, 1);
+      glow(ctx, c, 0, 0, core * 1.9, lerp(0.22, (70 + energy * 90 + level * 120) / 255 + this.pulse * 0.3 + this.flash * 0.4) * lit0 * alpha);
       const g = ctx.createRadialGradient(0, 0, 0, 0, 0, core);
-      g.addColorStop(0, rgba(COLORS.white, 1));
+      g.addColorStop(0, rgba(mix(c, COLORS.white, lerp(0.35, 1)), 1));
       g.addColorStop(0.42, rgba(c, 1));
       g.addColorStop(1, rgba(c, 0));
-      ctx.globalAlpha = (dim ? 150 / 255 : 1) * alpha;
+      ctx.globalAlpha = (dim ? 150 / 255 : 1) * alpha * lerp(0.42, 1);
       ctx.fillStyle = g;
       ctx.beginPath(); ctx.arc(0, 0, core, 0, TAU); ctx.fill();
       ctx.globalAlpha = alpha;
       // Sparks
-      if (!small) {
+      if (!small && warm > 0.01) {
         ctx.fillStyle = rgba(c, 1);
         for (const s of this.sparks) {
           ctx.globalAlpha = s.life * 220 / 255 * alpha;
@@ -237,6 +251,18 @@
       this.sweep = 0;
       this.lastLevel = 0; this.lastRipple = 0; this.t = 0;
       this.font = '"SF Mono", ui-monospace, Menlo, monospace';
+      // The still / standby sheet (docs/ignition-prompt.md §1, §4b): denser, brighter dots and schematic (`bright` 0..1), a
+      // cleared band (stage px: { x, y, w, h }) where the title block sits, the 90° label hidden, a warm glow, and the
+      // power notch's port ({ x, y, r }: every line cut around it, the dots under it left out). Changing them re-renders.
+      this.opts = { bright: 0, band: null, hideLabel: false, warm: 0, notch: null, scale: 1 };
+    }
+    /** Set the still options above; returns true when something changed (the sheet is re-rendered on the next draw). */
+    setOpts(o) {
+      const next = { ...this.opts, ...o };
+      const k = JSON.stringify(next);
+      if (k === this.optsKey) return false;
+      this.optsKey = k; this.opts = next; this.maskKey = ''; this.staticKey = '';
+      return true;
     }
     resize(w, h, dpr = 1, animDpr = 1) {
       this.w = w; this.h = h; this.dpr = dpr; this.animDpr = animDpr;
@@ -267,44 +293,83 @@
     /** White dots (brightest near the reactor, fading with distance) and the schematic lines, as a mask. */
     renderMask(cx, cy, r) {
       const { w, h, dpr } = this;
+      const o = this.opts, S = o.scale || 1; // S: the display's backing scale when the sheet is drawn in device px (the still)
+      const bright = clamp(o.bright, 0, 1);
       const g = this.mask.getContext('2d');
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       g.clearRect(0, 0, w, h);
       // The dot grid, centred on the reactor so a dot sits on each axis: brightness in 12 steps, one fill per step
-      const x0 = cx % PITCH, y0 = cy % PITCH;
+      const pitch = PITCH * S * (1 - bright * 0.15), dot = DOT * S;
+      const x0 = cx % pitch, y0 = cy % pitch;
       const far = r * 3.2;
+      const band = o.band, notch = o.notch;
+      const inBand = (x, y) => band && x >= band.x && x <= band.x + band.w && y >= band.y && y <= band.y + band.h;
+      const bandFade = (x, y) => { // 1 outside the band, 0 well inside it (a soft edge so nothing crosses the text)
+        if (!band) return 1;
+        const dx = Math.max(band.x - x, 0, x - (band.x + band.w)), dy = Math.max(band.y - y, 0, y - (band.y + band.h));
+        return clamp(Math.hypot(dx, dy) / (12 * S), 0, 1);
+      };
       g.fillStyle = '#fff';
       const STEPS = 12;
       const paths = Array.from({ length: STEPS }, () => new Path2D());
-      for (let y = y0; y < h + PITCH; y += PITCH) {
-        for (let x = x0; x < w + PITCH; x += PITCH) {
+      for (let y = y0; y < h + pitch; y += pitch) {
+        for (let x = x0; x < w + pitch; x += pitch) {
+          if (inBand(x, y)) continue;
+          if (notch && Math.hypot(x - notch.x, y - notch.y) < notch.r + 5 * S) continue;
           const d = Math.hypot(x - cx, y - cy);
-          const near = clamp(1 - (d - r * 0.9) / far, 0, 1);
-          paths[Math.min(STEPS - 1, Math.round(near * near * (STEPS - 1)))].rect(x - DOT / 2, y - DOT / 2, DOT, DOT);
+          const near = clamp(1 - (d - r * 0.9) / far, 0, 1) * bandFade(x, y);
+          paths[Math.min(STEPS - 1, Math.round(near * near * (STEPS - 1)))].rect(x - dot / 2, y - dot / 2, dot, dot);
         }
       }
-      paths.forEach((pth, i) => { g.globalAlpha = 0.07 + (i / (STEPS - 1)) * 0.5; g.fill(pth); });
-      // A soft glow in the middle of the sheet
-      const v = g.createRadialGradient(cx, cy, 0, cx, cy, r * 3.1);
-      v.addColorStop(0, 'rgba(255,255,255,0.09)');
+      paths.forEach((pth, i) => { g.globalAlpha = Math.min(1, (0.07 + (i / (STEPS - 1)) * 0.5) * (1 + bright * 0.3)); g.fill(pth); });
+      // A soft glow in the middle of the sheet (warmer and wider on the still)
+      const v = g.createRadialGradient(cx, cy, 0, cx, cy, r * (3.1 + o.warm * 0.6));
+      v.addColorStop(0, `rgba(255,255,255,${0.09 + o.warm * 0.07})`);
       v.addColorStop(1, 'rgba(255,255,255,0)');
       g.globalAlpha = 1; g.fillStyle = v; g.fillRect(0, 0, w, h);
-      // Construction rings running off toward the edges, crosshair, diagonals
-      g.strokeStyle = '#fff'; g.lineWidth = 1; g.lineCap = 'butt';
-      for (const [rr, a, dash] of SCHEMATIC_RINGS) { g.globalAlpha = a; g.setLineDash(dash); g.beginPath(); g.arc(cx, cy, r * rr, 0, TAU); g.stroke(); }
+      // Construction rings running off toward the edges, crosshair, diagonals (cut around the band and the notch)
+      g.strokeStyle = '#fff'; g.lineWidth = 1 * S; g.lineCap = 'butt';
+      const gain = 1 + bright; // ~2× brighter on the still
+      const cut = (x, y) => (band && inBand(x, y)) || (notch && Math.hypot(x - notch.x, y - notch.y) < notch.r + 5 * S);
+      const arc = (rr, a0 = 0, a1 = TAU) => { // an arc as short runs, skipping what the band or the notch would cross
+        if (!band && !notch) { g.beginPath(); g.arc(cx, cy, rr, a0, a1); g.stroke(); return; }
+        const n = Math.max(64, Math.round(rr / (2 * S)));
+        g.beginPath();
+        let open = false;
+        for (let i = 0; i <= n; i++) {
+          const a = a0 + (a1 - a0) * i / n, x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr;
+          if (cut(x, y)) { open = false; continue; }
+          if (open) g.lineTo(x, y); else { g.moveTo(x, y); open = true; }
+        }
+        g.stroke();
+      };
+      const line = (x0, y0, x1, y1) => {
+        const n = Math.max(32, Math.round(Math.hypot(x1 - x0, y1 - y0) / (2 * S)));
+        g.beginPath();
+        let open = false;
+        for (let i = 0; i <= n; i++) {
+          const x = x0 + (x1 - x0) * i / n, y = y0 + (y1 - y0) * i / n;
+          if (cut(x, y)) { open = false; continue; }
+          if (open) g.lineTo(x, y); else { g.moveTo(x, y); open = true; }
+        }
+        g.stroke();
+      };
+      for (const [rr, a, dash] of SCHEMATIC_RINGS) { g.globalAlpha = Math.min(0.6, a * gain); g.setLineDash(dash.map((d) => d * S)); arc(r * rr); }
       g.setLineDash([]);
       const reach = r * 2.6;
-      g.globalAlpha = 0.16; g.beginPath(); g.moveTo(cx, cy - reach); g.lineTo(cx, cy + reach); g.moveTo(cx - reach, cy); g.lineTo(cx + reach, cy); g.stroke();
-      g.globalAlpha = 0.08; g.beginPath(); g.moveTo(cx - reach, cy - reach); g.lineTo(cx + reach, cy + reach); g.moveTo(cx + reach, cy - reach); g.lineTo(cx - reach, cy + reach); g.stroke();
-      // Angle marks on the 1.3 ring, labels at the quarters
-      g.font = `8px ${this.font}`; g.textAlign = 'center'; g.fillStyle = '#fff';
+      g.globalAlpha = Math.min(0.5, 0.16 * gain); line(cx, cy - reach, cx, cy + reach); line(cx - reach, cy, cx + reach, cy);
+      g.globalAlpha = Math.min(0.4, 0.08 * gain); line(cx - reach, cy - reach, cx + reach, cy + reach); line(cx + reach, cy - reach, cx - reach, cy + reach);
+      // Angle marks on the 1.3 ring, labels at the quarters (the 90° label hidden on the still: the title sits there)
+      g.font = `${8 * S}px ${this.font}`; g.textAlign = 'center'; g.fillStyle = '#fff';
       const r0 = r * 1.3;
       for (let i = 0; i < 72; i++) {
         const a = i * 5 * RAD;
-        const len = i % 18 === 0 ? 14 : i % 6 === 0 ? 8 : 4;
-        g.globalAlpha = i % 18 === 0 ? 0.42 : i % 6 === 0 ? 0.25 : 0.14;
-        g.beginPath(); g.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0); g.lineTo(cx + Math.cos(a) * (r0 + len), cy + Math.sin(a) * (r0 + len)); g.stroke();
-        if (i % 18 === 0) { g.globalAlpha = 0.42; g.fillText(`${i * 5}°`, cx + Math.cos(a) * (r0 + 26), cy + Math.sin(a) * (r0 + 26) + 3); }
+        const len = (i % 18 === 0 ? 14 : i % 6 === 0 ? 8 : 4) * S;
+        const tx = cx + Math.cos(a) * r0, ty = cy + Math.sin(a) * r0;
+        if (cut(tx, ty) || cut(cx + Math.cos(a) * (r0 + len), cy + Math.sin(a) * (r0 + len))) continue;
+        g.globalAlpha = Math.min(0.7, (i % 18 === 0 ? 0.42 : i % 6 === 0 ? 0.25 : 0.14) * gain);
+        g.beginPath(); g.moveTo(tx, ty); g.lineTo(cx + Math.cos(a) * (r0 + len), cy + Math.sin(a) * (r0 + len)); g.stroke();
+        if (i % 18 === 0 && !(o.hideLabel && i === 18)) { g.globalAlpha = Math.min(0.7, 0.42 * gain); g.fillText(`${i * 5}°`, cx + Math.cos(a) * (r0 + 26 * S), cy + Math.sin(a) * (r0 + 26 * S) + 3 * S); }
       }
       g.globalAlpha = 1;
     }
@@ -396,5 +461,5 @@
     }
   }
 
-  return { Engine, Backdrop, COLORS, rgba, mix, glow, sprite, TAU, RAD, clamp };
+  return { Engine, Backdrop, COLORS, RINGS, SCHEMATIC_RINGS, PITCH, rgba, mix, glow, sprite, TAU, RAD, clamp };
 });

@@ -19,7 +19,9 @@ const Perf = (() => {
       let last = 0;
       return (now) => {
         if (document.hidden && !window.SCENE_STILL) return false; // (the still renders in a window never shown)
-        const cap = (policy && policy()) ?? fps; // a policy may return undefined: the normal rules
+        let cap = (policy && policy()) ?? fps; // a policy may return undefined: the normal rules
+        const pc = window.Scene?.power?.fps;   // ignition / standby (renderer/ignite.js): 60 through a transition, a trickle at rest
+        if (cap && pc) cap = pc;
         if (!cap || now - last < 1000 / cap - 2) return false;
         last = now;
         return true;

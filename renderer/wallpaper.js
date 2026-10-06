@@ -62,6 +62,15 @@
       case 'offline':
         HUD.offline?.(msg.on);
         break;
+      case 'power': // ignition / standby / power down: this page's controller follows the window's (renderer/ignite.js)
+        if (window.Scene?.power) { Scene.power.set(msg.mode, { force: true, status: msg.status }); drawUntil = performance.now() + 5000; }
+        break;
+      case 'power-step':
+        window.Scene?.power?.step(msg.step);
+        break;
+      case 'power-ready':
+        window.Scene?.power?.ready();
+        break;
       case 'readouts': // the HOST / CLAUDE / BATTERY values (readouts.js); JOBS from the jobs this page has
         readouts = msg.readouts || null;
         pushReadouts();
@@ -134,12 +143,24 @@
     drawUntil = performance.now() + 1500;
   }
 
-  // ---- The lock-screen still: one picture of the scene at this display's native resolution, no text --------
+  // ---- The lock-screen still: one picture of the scene at this display's native resolution ------------------
+  // The reactor look (docs/ignition-prompt.md §1): the cold reactor in gold ("offline", what the desktop shows while ARES is
+  // quit) or the blue standby scene, drawn by the same controller as the window and the ignition helper (renderer/ignite.js),
+  // at the same spot (?geo), with the cleared title band and the brighter sheet. Every size scales with the backing scale
+  // because the canvases themselves are at the display's native resolution.
   async function renderStill(tint, caption) {
-    // "offline": the reactor cold and amber, as it runs with no brain; "standby": at rest, in cyan; else no caption
-    if (caption === 'offline') HUD.offline?.(true);
-    await new Promise((r) => (window.JobOrbs ? r() : addEventListener('orbs-ready', r, { once: true })));
-    await new Promise((r) => setTimeout(r, 2600)); // past the boot animation, a few neurons alight
+    const reactor = window.SCENE_LOOK === 'reactor';
+    const kind = caption === 'standby' ? 'standby' : caption === 'none' ? null : 'offline';
+    if (reactor && window.Scene?.power) {
+      if (kind) Scene.power.set(kind, { force: true, status: { listening: false, link: q.get('link') === '1', jobs: Number(q.get('jobs')) || 0 } });
+      else Scene.power.set('online', { force: true });
+      Scene.power.title = 1;
+      await new Promise((r) => setTimeout(r, 900)); // the sheet re-renders with the band and the brighter dots; the hue settles
+    } else {
+      if (caption === 'offline') HUD.offline?.(true);
+      await new Promise((r) => (window.JobOrbs ? r() : addEventListener('orbs-ready', r, { once: true })));
+      await new Promise((r) => setTimeout(r, 2600)); // past the boot animation, a few neurons alight
+    }
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     const dpr = window.devicePixelRatio || 1;
     const W = Math.round(innerWidth * dpr), H = Math.round(innerHeight * dpr);
@@ -147,35 +168,12 @@
     out.width = W; out.height = H;
     const ctx = out.getContext('2d');
     // The page background, then each layer where it sits
-    const reactor = window.SCENE_LOOK === 'reactor';
     ctx.fillStyle = reactor ? '#03070d' : '#02050a';
     ctx.fillRect(0, 0, W, H);
     const cr = core.getBoundingClientRect();
     if (reactor) {
-      if (tint) ctx.filter = 'hue-rotate(-155deg) saturate(1.15)';
       ctx.drawImage(document.getElementById('sheet'), 0, 0, W, H);
-      ctx.drawImage(document.getElementById('matrix'), 0, 0, W, H);
       ctx.drawImage(document.getElementById('hud'), cr.left * dpr, cr.top * dpr, cr.width * dpr, cr.height * dpr);
-      ctx.filter = 'none';
-      if (caption === 'offline' || caption === 'standby') { // a spaced line under the reactor, flanked by two short rules
-        const sc = Scene.screen();
-        const col = caption === 'offline' ? '255, 181, 71' : '62, 230, 255';
-        const x = sc.x * dpr, y = (sc.y + sc.r * 1.5) * dpr; // under the 90° mark, well above where the lock screen puts its field
-        ctx.font = `${Math.round(12 * dpr)}px "SF Mono", ui-monospace, Menlo, monospace`;
-        ctx.letterSpacing = `${Math.round(5 * dpr)}px`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        const text = caption === 'offline' ? 'ARES · OFFLINE' : 'ARES · STANDING BY';
-        const tw = ctx.measureText(text).width;
-        ctx.fillStyle = `rgba(${col}, 0.85)`;
-        ctx.shadowColor = `rgba(${col}, 0.6)`; ctx.shadowBlur = 10 * dpr;
-        ctx.fillText(text, x, y);
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = `rgba(${col}, 0.45)`; ctx.lineWidth = dpr;
-        for (const dir of [-1, 1]) { ctx.beginPath(); ctx.moveTo(x + dir * (tw / 2 + 18 * dpr), y); ctx.lineTo(x + dir * (tw / 2 + 78 * dpr), y); ctx.stroke(); }
-        ctx.fillStyle = `rgba(${col}, 0.4)`;
-        ctx.font = `${Math.round(9 * dpr)}px "SF Mono", ui-monospace, Menlo, monospace`; ctx.letterSpacing = `${Math.round(3 * dpr)}px`;
-        ctx.fillText(caption === 'offline' ? 'REACTOR COLD · SYSTEMS DOWN' : 'LOCKED · SAY HEY ARES WHEN YOU\'RE BACK', x, y + 22 * dpr);
-      }
       return out.toDataURL('image/png');
     }
     const glow = ctx.createRadialGradient((cr.left + cr.width / 2) * dpr, (cr.top + cr.height / 2) * dpr, 0, (cr.left + cr.width / 2) * dpr, (cr.top + cr.height / 2) * dpr, Math.min(W, H) * 0.42);
