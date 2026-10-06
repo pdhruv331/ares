@@ -461,8 +461,10 @@ async function wakeServices() {
   Promise.resolve(claude.available()).then((on) => ignition.step('brain', on ? 'ok' : 'fail', on ? 'Claude ready' : 'no Claude CLI'), (err) => ignition.step('brain', 'fail', err.message));
   ignition.step('ears', 'start');
   desk?.hold(false);
-  listener.start();
-  setTimeout(() => ignition.step('ears', listener.ready || listener.child ? 'ok' : 'fail', listener.ready ? 'wake word' : listener.child ? 'starting' : 'listener missing'), 1200);
+  // The ears open once the wake is over (power 'online' below): starting the microphone engine (voice processing) reconfigures the
+  // output device and would stutter the charge hum and the bloom
+  earsPending = true;
+  setTimeout(() => ignition.step('ears', listener.available ? 'ok' : 'fail', listener.available ? 'wake word · after the wake' : 'listener missing'), 1200);
   step('link', () => { if (phone?.server) phone.setCold(false); else phone?.start(); startRemote(); calls.start().catch((err) => log('calls start failed', err.message)); voicemail.start(); return `phone :${PHONE_PORT}${relay?.ready ? ' · relay' : ''}`; });
   dashboard.start(); calendar.start(); tasks.start().catch((err) => log('tasks start failed', err.message)); customPanels.start();
   if (autonomy) autonomy.dormant = false;
@@ -470,6 +472,7 @@ async function wakeServices() {
   wallpaper?.setPower('charging', power.status());
   setTimeout(() => { ignition.step('scene', 'ok', 'live'); finishWake(); }, 1400);
 }
+let earsPending = false; // a wake from dormancy: the listener starts when the power goes online (after the sounds)
 /** Quiet hours for Claude alerts, or a macOS Focus on: the wake line is shown but not spoken, the power sounds stay silent. */
 async function silentNow() {
   if (claudeQuietNow()) return true;
@@ -2499,6 +2502,8 @@ app.whenReady().then(async () => {
   powerMonitor.on('shutdown', () => { if (power) power.quitAllowed = true; }); // the Mac is going down: a quit may happen
   power.on('change', (c) => {
     win?.webContents.send('power', { type: 'mode', ...c });
+    if (c.mode === 'online' && earsPending) { earsPending = false; setTimeout(() => { if (power.mode === 'online') listener.start(); }, 400); } // the ears, after the bloom
+    if (c.mode === 'dormant') earsPending = false;
     orb?.setContext({ power: c.mode });
     wallpaper?.scene({ type: 'power', mode: c.mode === 'dormant' ? 'offline' : c.mode, status: c.status }); // (the backdrop's controller knows offline, not dormant)
     wallpaper?.setPower(c.mode, c.status);

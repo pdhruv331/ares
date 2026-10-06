@@ -41,6 +41,7 @@ class WakeListener extends EventEmitter {
     if (process.env.ARES_DEBUG_HEARING === '1') args.push('--debug');
     if (process.env.ARES_END_SILENCE_MS) args.push('--end-silence', process.env.ARES_END_SILENCE_MS);
     if (process.env.ARES_ECHO_CANCEL === '0') args.push('--no-aec');
+    if (this.muted) args.push('--muted'); // the engine stays off until unmute (no device glitch under a power sound)
     this.child = spawn(this.bin, args, { stdio: ['pipe', 'pipe', 'pipe'] });
     this.child.stdin.on('error', (err) => { if (err.code !== 'EPIPE') this.emit('stderr', `stdin: ${err.message}`); });
     let buf = '';
@@ -76,7 +77,7 @@ class WakeListener extends EventEmitter {
   onEvent(evt) {
     if (evt.type === 'ready') { this.restarts = 0; this.ready = true; }
     if (evt.type === 'error' && evt.code === 'aec') process.env.ARES_ECHO_CANCEL = '0';
-    if (evt.type === 'ready' && this.muted) this.send('mute');
+    if (evt.type === 'ready' && this.muted && !this.child?.spawnargs?.includes('--muted')) this.send('mute');
     if (evt.type === 'ready') this.send('micmode'); // which Apple mic mode is in use, for the log
     this.emit('event', evt);
   }

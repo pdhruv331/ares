@@ -103,6 +103,7 @@ final class Listener {
     private var captureStartedAt = Date()
     private var lastTranscriptChangeAt = Date()
     var debug = false                  // --debug: report mic level + what was heard (diagnostics only)
+    var startMuted = false   // --muted: no audio engine until unmute
     private var debugPeak: Float = 0
     private var debugHeard = ""
     private var debugTimer: Timer?
@@ -257,7 +258,9 @@ final class Listener {
                             return
                         }
                         emit(["type": "ready", "onDevice": self.recognizer.supportsOnDeviceRecognition])
-                        self.unmute()
+                        // Spawned muted (ARES is muted, or standing by): the audio engine stays off until "unmute". Starting voice
+                        // processing reconfigures the output device and glitches whatever is playing (the power sounds).
+                        if self.startMuted { self.mode = .muted; emit(["type": "muted"]) } else { self.unmute() }
                     }
                 }
             }
@@ -801,6 +804,7 @@ FileHandle.standardInput.readabilityHandler = { handle in
 }
 
 listener.debug = CommandLine.arguments.contains("--debug")
+listener.startMuted = CommandLine.arguments.contains("--muted")
 listener.echoCancel = !CommandLine.arguments.contains("--no-aec")
 if let i = CommandLine.arguments.firstIndex(of: "--end-silence"), i + 1 < CommandLine.arguments.count,
    let ms = Double(CommandLine.arguments[i + 1]) {

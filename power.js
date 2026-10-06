@@ -69,7 +69,10 @@ class Power extends EventEmitter {
     if (!on && this.mode !== 'standby' && this.mode !== 'tostandby') return false;
     if (on) {
       this.prior = { muted: this.listener.muted, awake: this.listener.awake };
-      if (!this.listener.muted) this.listener.mute();
+      // The ears close after the standby sound, not under it: stopping the microphone engine (voice processing) reconfigures
+      // the output device and glitches whatever is playing
+      clearTimeout(this.earsTimer);
+      this.earsTimer = setTimeout(() => { if ((this.mode === 'tostandby' || this.mode === 'standby') && !this.listener.muted) this.listener.mute(); }, 1600);
       this.desk?.hold(true);
       this.autoWhy = why.startsWith('auto') ? why : null;
       this.mode = 'tostandby';
@@ -82,8 +85,13 @@ class Power extends EventEmitter {
       clearTimeout(this.settle);
       this.mode = 'fromstandby';
       this.desk?.hold(false);
-      if (this.prior && !this.prior.muted) this.listener.unmute();
-      if (this.prior?.awake) this.listener.setAwake(true);
+      clearTimeout(this.earsTimer);
+      const prior = this.prior;
+      this.earsTimer = setTimeout(() => { // the ears open after the wake chime (see standby: the engine's start would glitch it)
+        if (this.mode !== 'fromstandby' && this.mode !== 'online') return;
+        if (prior && !prior.muted) this.listener.unmute();
+        if (prior?.awake) this.listener.setAwake(true);
+      }, 1200);
       this.prior = null; this.autoWhy = null;
       this.log('standby', { on: false, why });
       this.audit?.record({ kind: 'power', what: 'wake from standby', why, tier: 1 });
