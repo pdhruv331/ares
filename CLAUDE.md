@@ -201,3 +201,27 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   `ARESWall.hold({paused:false})` to draw while covered; `JobOrbs.sync([...fake jobs])`, `Callouts.open('claude')`,
   `Scene.orbs.throw(id, vx, vy)`, `Scene.orbs.fadeOf(id)`, `Overlap.tick()`. Measured 2026-10-05 (window + backdrop, held at full
   rate): reactor 8% CPU on power / 7% on battery vs the brain's 23% / 11%.
+
+## Ignition, standby, power down (docs/ignition-prompt.md; part A = the Mac side)
+
+- `renderer/ignite.js` is the ONE module for the visuals (title block with the "·" on the centre line, the power notch, the
+  charge/wake/standby/spin-down `Controller`, the ghost log); `renderer/scene.js` runs it on every page as `Scene.power` and
+  drives `Reactor.Engine`'s `cold` / `forceHue` / `pace` / `coilsLit` / `hum`. The cold still is the floor: nothing dims below it.
+  The wallpaper/still/saver pages are replicas (`window.SCENE_REPLICA`, from `?mode=`); the window and the helper take the holds.
+- Geometry: `?geo=cx,cy,r` (renderer/scene-boot.js → `window.SCENE_GEOMETRY`) places the reactor identically in the still, the
+  helper and the live window; wallpaper.js remembers the window's `spot` per display (settings `wallpaper.spots`, `geometryFor`),
+  and ignition.js writes `<support>/ignition/geometry.json` for the helper.
+- Main: `ignition.js` (the helper's UNIX socket `<support>/ignition/ignition.sock`, start-up steps memory/voice/brain/ears/link/scene,
+  `ares.pid`, the shutdown record `shutdown.json` → clean/crash/restart/update for the wake line, helper launch on quit, LaunchAgent
+  `com.dhruv.ares.ignition`), `power.js` (standby: listener muted with the prior state kept, `desk.hold`, auto standby; power down:
+  the real steps in reverse then quit), `wakeline.js` (template pools, never the last 20). The window side is `renderer/power.js`
+  (+ `renderer/sounds.js`, WAVs from `node scripts/make-sounds.js` into renderer/sounds/). Settings live under `power`.
+- The helper is `native/AresIgnition.swift` → "ARES Ignition.app" (a WKWebView loading native/ignition.html with copies of the
+  renderer's scene files; build-app.sh copies them). It runs only while `ares.pid` is dead, is click-through outside the reactor's
+  circle (pointer polled at 15 Hz), registers ⌥Space with Carbon only while ARES is off, and exits after the handover. Packaged
+  builds launch it on quit; in development only with `ARES_IGNITION_HELPER=1` (it puts a window on the real desktop: ask first).
+- "Quit ARES" is now Power Down (the spin-down); ⌥⇧Space toggles standby; "power down" by voice is caught before the brain.
+- Testing: a cold start replays in the window on reload (`node scripts/harness.mjs reload`; start the dev instance with
+  `--disable-backgrounding-occluded-windows --disable-renderer-backgrounding` or the charge crawls when covered); `window.ares.power.act('standby'|'wake'|'powerdown')`
+  from the harness; `ARES_TEST_STILL` renders the offline and standby stills; the helper's page can be opened over HTTP from
+  `native/build/ARES Ignition.app/Contents/Resources/ignition.html?geo=…&mode=ignition&power=cold` and driven with `Ignition.rx({...})`.

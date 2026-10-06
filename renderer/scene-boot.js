@@ -9,5 +9,5 @@
   const geo = (q.get('geo') || '').split(',').map(Number);
   if (geo.length === 3 && geo.every(Number.isFinite) && geo[2] > 0) window.SCENE_GEOMETRY = { cx: geo[0], cy: geo[1], r: geo[2] };
   if (q.get('power')) window.SCENE_POWER = q.get('power');
-  if (q.get('mode') || document.body?.dataset.mode) window.SCENE_REPLICA = true;
+  if (['wallpaper', 'still', 'saver'].includes(q.get('mode') || document.body?.dataset.mode)) window.SCENE_REPLICA = true; // (the ignition helper's page takes holds itself)
 })();

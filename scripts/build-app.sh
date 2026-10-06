@@ -42,6 +42,17 @@ xcrun swiftc -O -swift-version 5 native/AresCalendar.swift -o "$CAL/Contents/Mac
 cp native/Calendar-Info.plist "$CAL/Contents/Info.plist"
 codesign --force --sign "$SIGN" "$CAL"
 
+echo "› Compiling ignition helper (the cold reactor over the offline still while ARES is quit; hold to wake)"
+IGN="native/build/ARES Ignition.app"
+mkdir -p "$IGN/Contents/MacOS" "$IGN/Contents/Resources/sounds"
+xcrun swiftc -O -swift-version 5 native/AresIgnition.swift -o "$IGN/Contents/MacOS/ares-ignition"
+cp native/Ignition-Info.plist "$IGN/Contents/Info.plist"
+# The page reuses the window's scene: the same drawing code, so the handover is pixel-for-pixel
+node scripts/make-sounds.js >/dev/null
+cp native/ignition.html native/ignition.js renderer/perf.js renderer/neural.js renderer/reactor.js renderer/ignite.js renderer/scene-boot.js renderer/scene.js "$IGN/Contents/Resources/"
+cp renderer/sounds/*.wav "$IGN/Contents/Resources/sounds/"
+codesign --force --sign "$SIGN" "$IGN"
+
 echo "› Backup voice model (Kokoro, downloaded once into the support folder)"
 zsh scripts/get-voice-model.sh
 
@@ -60,6 +71,7 @@ npx electron-packager . ARES \
   --extra-resource=native/build/ares-control \
   --extra-resource="native/build/ARES Vision.app" \
   --extra-resource="native/build/ARES Calendar.app" \
+  --extra-resource="native/build/ARES Ignition.app" \
   --extra-resource=models/speaker-titanet-small.onnx \
   --extra-resource=models/intent \
   --ignore='^/relay(/|$)' --ignore='^/(native|android|scripts|dist|assets|models|\.env.*|\.gitignore)' \
