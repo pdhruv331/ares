@@ -225,14 +225,7 @@ class MainActivity : Activity(), Session.Ui {
     /** The Mac's power state on the screen: the orb's colour and motion, the header, the ⏻ button, the hint, the chip. */
     private fun showPower() {
         val mode = PowerStore.mode
-        fallback.power = when (mode) {
-            PowerStore.Mode.ONLINE, PowerStore.Mode.UNKNOWN -> ReactorView.Power.ONLINE
-            PowerStore.Mode.STANDBY -> ReactorView.Power.STANDBY
-            PowerStore.Mode.OFFLINE, PowerStore.Mode.QUIT, PowerStore.Mode.UNREACHABLE -> ReactorView.Power.OFFLINE
-            PowerStore.Mode.CHARGING -> ReactorView.Power.CHARGING
-            PowerStore.Mode.SPINDOWN -> ReactorView.Power.SPINDOWN
-            PowerStore.Mode.ASLEEP -> ReactorView.Power.ASLEEP
-        }
+        fallback.power = PowerStore.reactorPower
         fallback.chargeK = PowerStore.chargeK
         fallback.holdColor = Color.parseColor(if (PowerStore.canStandby) "#6096FF" else "#3EE6FF")
         reactor.state = if (mode == PowerStore.Mode.ONLINE) session.state else State.OFFLINE // (the 3D brain only knows on/off)
@@ -565,6 +558,7 @@ class MainActivity : Activity(), Session.Ui {
         menu.menu.add(0, 1, 0, "Floating bubble").apply { isCheckable = true; isChecked = Ares.bubbleOn(this@MainActivity) }
         menu.menu.add(0, 4, 1, "Share my screen when summoned").apply { isCheckable = true; isChecked = Ares.prefs(this@MainActivity).getBoolean("screen", true) }
         menu.menu.add(0, 5, 2, "Make ARES your assistant…")
+        menu.menu.add(0, 11, 2, "Use ARES as the home screen…")
         menu.menu.add(0, 6, 3, "Check for updates (v${Updater.version(this)})")
         menu.menu.add(0, 9, 3, "3D brain instead of the reactor").apply { isCheckable = true; isChecked = Ares.prefs(this@MainActivity).getBoolean("brain3d", false) }
         if (Ares.prefs(this).getBoolean("brain3d", false)) menu.menu.add(0, 8, 3, "Brain diagnostics")
@@ -573,6 +567,7 @@ class MainActivity : Activity(), Session.Ui {
         menu.setOnMenuItemClickListener {
             when (it.itemId) {
                 10 -> startActivity(CallsActivity.intent(this))
+                11 -> HomeActivity.chooseHome(this)
                 7 -> if (needMic()) session.setHandsFree(!session.handsFree, "asked")
                 1 -> {
                     val on = !Ares.bubbleOn(this)

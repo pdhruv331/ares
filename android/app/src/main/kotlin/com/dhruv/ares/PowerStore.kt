@@ -111,6 +111,16 @@ object PowerStore {
     }
     private fun save(c: Context) = c.getSharedPreferences("ares", Context.MODE_PRIVATE).edit().putString("powerMode", macMode).apply()
 
+    /** How the reactor shows the Mac's state (the app and the home screen). */
+    val reactorPower get() = when (mode) {
+        Mode.ONLINE, Mode.UNKNOWN -> ReactorView.Power.ONLINE
+        Mode.STANDBY -> ReactorView.Power.STANDBY
+        Mode.OFFLINE, Mode.QUIT, Mode.UNREACHABLE -> ReactorView.Power.OFFLINE
+        Mode.CHARGING -> ReactorView.Power.CHARGING
+        Mode.SPINDOWN -> ReactorView.Power.SPINDOWN
+        Mode.ASLEEP -> ReactorView.Power.ASLEEP
+    }
+
     /** One word for the header. */
     fun header(): String = when (mode) {
         Mode.ONLINE -> "ONLINE"; Mode.STANDBY -> "STANDBY"; Mode.OFFLINE, Mode.QUIT -> "OFFLINE"; Mode.CHARGING -> "CHARGING"

@@ -37,6 +37,10 @@ class SchematicView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet?
     private val ringA = intArrayOf(70, 50, 36, 26, 18, 50)
     /** While a caption shows, the bottom callouts step back so the words have the floor. */
     var dimBottom = false
+    /** As ReactorView: a lower frame rate where it's ambient, or held still. */
+    var maxFps = 0
+    var still = false
+        set(v) { field = v; last = 0L; invalidate() }
     private var bottomAlpha = 1f
     private var sweep = 0f
     private var last = 0L
@@ -100,6 +104,7 @@ class SchematicView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet?
         for ((i, spot) in spots.withIndex()) {
             val (anchor, box, align) = spot
             val (label, value) = readouts.getOrNull(i) ?: continue
+            if (label.isEmpty()) continue // (the home screen shows only the bottom two)
             val bx = box[0]; val by = box[1].coerceIn(60f * dp, h - 20f * dp)
             val dir = if (align == Paint.Align.LEFT) 1f else -1f
             val k = if (i >= 2) bottomAlpha else 1f
@@ -112,7 +117,7 @@ class SchematicView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet?
             text.textSize = 8f * dp; text.alpha = (130 * k).toInt(); canvas.drawText(value, bx, by + 10f * dp, text)
         }
         fill.alpha = 255
-        if (isShown) postInvalidateOnAnimation()
+        if (isShown && !still) nextFrame(maxFps)
     }
 
     override fun onVisibilityChanged(changedView: View, visibility: Int) {

@@ -108,13 +108,32 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
 
     // Job orbs around the outside: id → (angle, waiting)
     private var orbs: List<Pair<Float, Boolean>> = emptyList()
+    private var orbIds: List<String> = emptyList()
     private var orbSpin = 0f
+    /** Frames per second to aim for: 0 = every vsync (the app), lower where she's ambient (the home screen). */
+    var maxFps = 0
+    /** Draw once and hold still (Power Saving on the home screen). */
+    var still = false
+        set(v) { field = v; last = 0L; invalidate() }
 
     /** The Mac's jobs: one orb each, amber for ones waiting on you. */
     fun jobs(list: List<JobStore.Job>) {
         val active = list.filter { it.active }
         orbs = active.mapIndexed { i, j -> (i * 360f / active.size) to (j.status == "approval") }
+        orbIds = active.map { it.id }
         invalidate()
+    }
+
+    /** The job whose orb is under (x, y) in this view, if any (a finger-sized target). */
+    fun orbAt(x: Float, y: Float): String? {
+        val cx = width / 2f; val cy = height / 2f; val r = min(width, height) / 2f * 0.92f
+        val reach = 22f * resources.displayMetrics.density
+        for ((i, o) in orbs.withIndex()) {
+            val a = Math.toRadians((o.first + orbSpin).toDouble())
+            val ox = cx + cos(a).toFloat() * r; val oy = cy + sin(a).toFloat() * r
+            if ((x - ox) * (x - ox) + (y - oy) * (y - oy) < reach * reach) return orbIds.getOrNull(i)
+        }
+        return null
     }
 
     private val stateHue get() = when (state) { State.THINKING -> purple; State.OFFLINE -> amber; State.SPEAKING -> white; else -> cyan }
@@ -346,7 +365,7 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         }
 
         // A dead-still grey needs no redraws beyond the first; everything else animates
-        if (isShown && !(power == Power.ASLEEP && alive == 0f && sparks.isEmpty() && holdK == 0f && abs(Color.red(hue) - Color.red(target)) < 2)) postInvalidateOnAnimation()
+        if (isShown && !still && !(power == Power.ASLEEP && alive == 0f && sparks.isEmpty() && holdK == 0f && abs(Color.red(hue) - Color.red(target)) < 2)) nextFrame(maxFps)
     }
 
     override fun onVisibilityChanged(changedView: View, visibility: Int) {
@@ -355,3 +374,6 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         if (visibility == VISIBLE) invalidate()
     }
 }
+
+/** The next frame: on the next vsync, or after 1/fps s when a view is held to a lower rate (a delayed invalidate on a hidden window draws nothing, so the loop stops by itself). */
+internal fun View.nextFrame(fps: Int) = if (fps in 1..59) postInvalidateDelayed(1000L / fps) else postInvalidateOnAnimation()

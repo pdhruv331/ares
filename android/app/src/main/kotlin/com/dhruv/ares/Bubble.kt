@@ -24,6 +24,12 @@ import kotlin.math.hypot
  */
 @SuppressLint("ClickableViewAccessibility")
 class Bubble(private val ctx: Context, private val dismissed: () -> Unit) {
+    companion object {
+        private var live: Bubble? = null
+        private var onHome = false
+        /** The ARES home screen came to the front (true) or left it (false). Main thread. */
+        fun home(showing: Boolean) { onHome = showing; live?.update() }
+    }
     private val wm = ctx.getSystemService(WindowManager::class.java)
     private val dp = ctx.resources.displayMetrics.density
     private val size = (58 * dp).toInt()
@@ -102,18 +108,21 @@ class Bubble(private val ctx: Context, private val dismissed: () -> Unit) {
         if (shown) return
         wm.addView(view, params)
         shown = true
+        live = this
         update()
     }
 
     fun hide() {
+        if (live === this) live = null
         if (!shown) return
         runCatching { wm.removeView(view) }
         runCatching { if (trash.isAttachedToWindow) wm.removeView(trash) }
         shown = false
     }
 
-    /** Dim the bubble when the Mac can't be reached. */
+    /** Dim the bubble when the Mac can't be reached; out of the way while the ARES home screen is in front (the reactor's right there). */
     fun update() {
+        view.visibility = if (onHome) View.GONE else View.VISIBLE
         view.alpha = if (Ares.status(ctx) == "online") 1f else 0.55f
         val n = JobStore.working + JobStore.waiting
         badge.visibility = if (n > 0) View.VISIBLE else View.GONE

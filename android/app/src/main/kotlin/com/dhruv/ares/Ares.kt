@@ -193,6 +193,9 @@ class AresClient(private val ctx: Context) {
         } finally { c.disconnect() }
     }
 
+    /** The kill switch: pause every job, hold goals and routines (the Work view's STOP ALL). */
+    fun stopAll(): JSONObject = postJson("/api/autonomy/stop", JSONObject())
+
     /** Give the Mac this phone's Firebase push token (it registers it with the relay). */
     fun pushToken(token: String) {
         if (!postJson("/api/push/fcm", JSONObject().put("token", token)).optBoolean("ok")) throw IOException("token not accepted")
