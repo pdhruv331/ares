@@ -1,0 +1,191 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>ARES launcher · options</title>
+<style>
+  body { margin: 0; background: #0b0f14; color: #cfefff; font-family: ui-monospace, Menlo, monospace; padding: 24px; }
+  h1 { font-size: 14px; letter-spacing: .3em; color: #3ee6ff; font-weight: 600; margin: 0 0 6px; }
+  .sub { font-size: 11px; color: #8fb3c1; margin: 0 0 20px; }
+  .row { display: flex; gap: 26px; flex-wrap: wrap; }
+  .phone { zoom: .9; width: 375px; height: 812px; border-radius: 38px; border: 2px solid #22303a; position: relative; overflow: hidden; background: #03080e; box-shadow: 0 30px 80px #000; }
+  .phone canvas { position: absolute; inset: 0; }
+  .ui { position: absolute; inset: 0; padding: 14px 18px 12px; box-sizing: border-box; display: flex; flex-direction: column; }
+  .sb { display: flex; justify-content: space-between; font-size: 11px; color: #cfefffcc; height: 20px; padding: 0 8px; }
+  .clock { color: #e6faff; font-weight: 200; letter-spacing: .04em; }
+  .big { font-size: 64px; line-height: 1; font-family: -apple-system, "Helvetica Neue", sans-serif; font-weight: 100; }
+  .meta { font-size: 9px; letter-spacing: .25em; color: #3ee6ffaa; }
+  .dock { display: flex; justify-content: space-around; margin-top: auto; padding: 10px 6px 0; }
+  .ic { width: 50px; height: 50px; border-radius: 50%; border: 1px solid #3ee6ff55; display: grid; place-items: center; color: #3ee6ff; font-size: 20px; background: #3ee6ff0d; box-shadow: inset 0 0 12px #3ee6ff14; }
+  .ic.s { width: 40px; height: 40px; font-size: 16px; }
+  .handle { text-align: center; color: #3ee6ff; font-size: 9px; letter-spacing: .35em; margin-top: 10px; opacity: .6; line-height: 1.1; }
+  .handle b { display: block; font-size: 13px; }
+  .card { border: 1px solid #3ee6ff30; border-radius: 10px; padding: 10px 12px; margin-bottom: 9px; background: #06121bcc; }
+  .card h4 { margin: 0 0 7px; font-size: 9px; letter-spacing: .3em; color: #3ee6ff; font-weight: 600; display: flex; justify-content: space-between; }
+  .card h4 i { font-style: normal; color: #3ee6ff88; font-weight: 400; }
+  .ln { font-size: 12px; color: #cfefff; display: flex; justify-content: space-between; align-items: center; margin: 4px 0; }
+  .ln span { color: #8fb3c1; font-size: 10px; }
+  .bar { height: 3px; background: #3ee6ff22; border-radius: 2px; margin: 3px 0 7px; } .bar b { display: block; height: 100%; background: #3ee6ff; border-radius: 2px; box-shadow: 0 0 6px #3ee6ff; }
+  .amber { color: #ffb648 !important; } .btn { border: 1px solid #ffb64888; color: #ffb648; border-radius: 12px; font-size: 9px; letter-spacing: .2em; padding: 4px 9px; }
+  .talk { margin: 10px auto 0; width: 200px; height: 38px; border-radius: 19px; border: 1px solid #3ee6ff66; display: grid; place-items: center; color: #3ee6ff; letter-spacing: .2em; font-size: 10px; }
+  .field { border: 1px solid #3ee6ff; border-radius: 22px; height: 44px; display: flex; align-items: center; padding: 0 16px; gap: 10px; font-size: 15px; color: #e6faff; box-shadow: 0 0 22px #3ee6ff33; }
+  .caret { width: 2px; height: 18px; background: #3ee6ff; animation: blink 1s steps(1) infinite; } @keyframes blink { 50% { opacity: 0 } }
+  .res { display: flex; align-items: center; gap: 12px; padding: 9px 4px; border-bottom: 1px solid #3ee6ff14; font-size: 13px; }
+  .res .tag { margin-left: auto; font-size: 8px; letter-spacing: .25em; color: #3ee6ff99; border: 1px solid #3ee6ff33; border-radius: 8px; padding: 3px 6px; }
+  .res.hot { background: #3ee6ff12; border-radius: 10px; border-bottom-color: transparent; }
+  .kbd { margin-top: auto; height: 230px; margin-left: -18px; margin-right: -18px; margin-bottom: -12px; background: #0a141c; border-top: 1px solid #22303a;
+    display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px; padding: 12px 6px; box-sizing: border-box; }
+  .kbd i { background: #14212b; border-radius: 5px; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px 6px; margin-top: 16px; }
+  .app { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 9px; color: #8fb3c1; letter-spacing: .05em; }
+  .letter { font-size: 9px; letter-spacing: .3em; color: #3ee6ff; margin: 16px 0 -4px; grid-column: 1 / -1; opacity: .8; }
+  .label { margin-top: 10px; font-size: 12px; color: #8fb3c1; width: 338px; line-height: 1.5; }
+  .label b { color: #3ee6ff; }
+</style></head>
+<body>
+<h1>ARES · LAUNCHER · OPTIONS</h1>
+<p class="sub">Home-screen options for the Android launcher. All live-drawn with the phone mockups' reactor. Icons are Android's themed (monochrome) icons tinted to the reactor colour; glyphs stand in for them here.</p>
+<div class="row">
+
+<!-- 1 · REACTOR HOME -->
+<div><div class="phone" id="p1"><canvas width="375" height="812"></canvas><div class="ui">
+  <div class="sb"><span>09:41</span><span>5G ▮▮▮ 82%</span></div>
+  <div style="text-align:center;margin-top:26px" class="clock"><div class="big">09:41</div><div class="meta" style="margin-top:8px">WED 08 OCT · 18°</div></div>
+  <div style="flex:1"></div>
+  <div class="meta" style="text-align:center;opacity:.7">HOLD · TALK &nbsp;&nbsp; TAP · ASK</div>
+  <div class="dock"><div class="ic">☎</div><div class="ic">✉</div><div class="ic">◍</div><div class="ic">♫</div><div class="ic">◎</div></div>
+  <div class="handle"><b>︿</b>APPS</div>
+</div></div><div class="label"><b>1 · REACTOR HOME</b><br>The phone's version of the Mac desktop: the reactor in the middle, job orbs in orbit (tap for the card, fling into the reactor to put away), two callouts for what's next. Five pinned apps, swipe up for the rest. Closest to what ARES already is.</div></div>
+
+<!-- 2 · ORBIT -->
+<div><div class="phone" id="p2"><canvas width="375" height="812"></canvas><div class="ui">
+  <div class="sb"><span>09:41</span><span>5G ▮▮▮ 82%</span></div>
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:22px" class="clock">
+    <div><div class="big" style="font-size:44px">09:41</div><div class="meta" style="margin-top:6px">WED 08 OCT</div></div>
+    <div class="meta" style="text-align:right;line-height:1.8">MAC ONLINE<br>JOBS 2 · 1 NEEDS OK</div></div>
+  <div style="flex:1"></div>
+  <div class="meta" style="text-align:center;opacity:.7">SPIN A RING · HOLD CORE TO TALK</div>
+  <div class="handle"><b>︿</b>ALL APPS</div>
+</div></div><div class="label"><b>2 · ORBIT</b><br>Apps live on the reactor's rings: favourites on the inner ring, the next seven outside. Drag a ring to spin it like a dial; the one at 12 o'clock gets a label. The most "Stark", the least like a normal phone; muscle memory takes a few days.</div></div>
+
+<!-- 3 · HUD STACK -->
+<div><div class="phone" id="p3"><canvas width="375" height="812"></canvas><div class="ui">
+  <div class="sb"><span>09:41</span><span>5G ▮▮▮ 82%</span></div>
+  <div style="display:flex;align-items:center;gap:14px;margin:18px 0 18px 128px" class="clock">
+    <div><div class="big" style="font-size:46px">09:41</div><div class="meta" style="margin-top:6px">WED 08 OCT · 18°</div><div class="meta" style="margin-top:4px;color:#3ee6ff">● ONLINE · MACBOOK PRO</div></div></div>
+  <div class="card"><h4>NEXT <i>CALENDAR</i></h4>
+    <div class="ln">10:30 Standup <span>in 49 min</span></div><div class="ln">13:00 Dentist <span>Harley St</span></div></div>
+  <div class="card"><h4>WORK <i>2 RUNNING</i></h4>
+    <div class="ln">Build portfolio site <span>72%</span></div><div class="bar"><b style="width:72%"></b></div>
+    <div class="ln"><span class="amber" style="font-size:12px">Inbox sweep · wants to archive 40</span><div class="btn">OK</div></div></div>
+  <div class="card"><h4>SYSTEMS</h4>
+    <div class="ln">Claude <span>5H 38% · WEEK 12%</span></div><div class="ln">MacBook <span>82% · on power</span></div></div>
+  <div class="dock" style="padding-top:4px"><div class="ic">☎</div><div class="ic">✉</div><div class="ic">◍</div><div class="ic">♫</div><div class="ic">◎</div></div>
+  <div class="handle"><b>︿</b>APPS</div>
+</div></div><div class="label"><b>3 · HUD STACK</b><br>Small reactor top-left, then the same panels the Mac shows (calendar, work, systems) as cards you can act on. Most useful at a glance; least dramatic. Cards reuse the Mac's panel kinds, so pins can sync.</div></div>
+
+<!-- 4 · COMMAND -->
+<div><div class="phone" id="p4"><canvas width="375" height="812"></canvas><div class="ui">
+  <div class="sb"><span>09:41</span><span>5G ▮▮▮ 82%</span></div>
+  <div style="height:214px"></div>
+  <div class="field"><span style="color:#3ee6ff">◉</span>spo<div class="caret"></div></div>
+  <div style="margin-top:10px">
+    <div class="res hot"><div class="ic s">♫</div>Spotify<div class="tag">APP</div></div>
+    <div class="res"><div class="ic s">◉</div>Play my focus playlist<div class="tag">ARES</div></div>
+    <div class="res"><div class="ic s">◉</div>What's on Spotify's charts?<div class="tag">ASK</div></div>
+  </div>
+  <div class="kbd"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i style="grid-column:span 2"></i><i></i><i></i><i></i><i></i><i></i><i></i><i style="grid-column:span 2"></i><i style="grid-column:span 2"></i><i style="grid-column:span 6"></i><i style="grid-column:span 2"></i></div>
+</div></div><div class="label"><b>4 · COMMAND</b><br>One line does everything: type (or hold the reactor and speak) and it matches apps, ARES actions and questions together. No home grid at all; the reactor and clock sit above. Fastest once learned, but a blank screen for anyone else picking up the phone.</div></div>
+
+<!-- 5 · APP DRAWER (shared) -->
+<div><div class="phone" id="p5"><canvas width="375" height="812"></canvas><div class="ui">
+  <div class="sb"><span>09:41</span><span>5G ▮▮▮ 82%</span></div>
+  <div class="field" style="margin-top:14px;font-size:12px;color:#8fb3c1;box-shadow:none;border-color:#3ee6ff55"><span style="color:#3ee6ff">⌕</span>SEARCH OR ASK</div>
+  <div class="grid">
+    <div class="letter">— PINNED</div>
+    <div class="app"><div class="ic">☎</div>Phone</div><div class="app"><div class="ic">✉</div>Messages</div><div class="app"><div class="ic">◍</div>Chrome</div><div class="app"><div class="ic">♫</div>Spotify</div>
+    <div class="letter">— A–G</div>
+    <div class="app"><div class="ic">◉</div>ARES</div><div class="app"><div class="ic">◷</div>Calendar</div><div class="app"><div class="ic">◎</div>Camera</div><div class="app"><div class="ic">⏱</div>Clock</div>
+    <div class="app"><div class="ic">▦</div>Gallery</div><div class="app"><div class="ic">@</div>Gmail</div><div class="app"><div class="ic">⌖</div>Maps</div><div class="app"><div class="ic">⚙</div>Settings</div>
+    <div class="letter">— W–Y</div>
+    <div class="app"><div class="ic">◌</div>Wearable</div><div class="app"><div class="ic">✆</div>WhatsApp</div><div class="app"><div class="ic">▶</div>YouTube</div><div class="app"><div class="ic">☁</div>Weather</div>
+  </div>
+  <div class="handle" style="margin-top:auto"><b>﹀</b>HOME</div>
+</div></div><div class="label"><b>5 · APP DRAWER (any option)</b><br>Swipe up from 1–3. Search doubles as "ask ARES" when nothing matches. Same tinted glyphs; a scan line sweeps down as it opens.</div></div>
+
+</div>
+<script>
+const CY = '#3ee6ff', W = 375, H = 812;
+function reactor(ctx, cx, cy, r, t) {
+  const col = CY; ctx.save();
+  for (let i = 0; i < 90; i++) { const a = i * 4 * Math.PI / 180; const lit = Math.max(0, 1 - (((t * 80 - i * 4) % 360 + 360) % 360) / 70);
+    ctx.strokeStyle = col; ctx.globalAlpha = 0.18 + lit * 0.7; ctx.lineWidth = 1.2; const inner = i % 9 === 0 ? r * 0.9 : r * 0.945;
+    ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner); ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); ctx.stroke(); }
+  for (const [rad, on, off, sp, w] of [[0.86, 28, 14, 9, 3.5], [0.78, 7, 7, -16, 1.5], [0.66, 52, 30, 24, 4.2], [0.56, 12, 24, -38, 2]]) { const rr = r * rad, circ = 2 * Math.PI * rr;
+    ctx.setLineDash([circ * on / 360, circ * off / 360]); ctx.lineWidth = Math.max(1, w * r / 150); ctx.globalAlpha = 0.75; ctx.strokeStyle = col;
+    ctx.beginPath(); ctx.arc(cx, cy, rr, t * sp / 10, t * sp / 10 + Math.PI * 2); ctx.stroke(); }
+  ctx.setLineDash([]);
+  for (let i = 0; i < 10; i++) { const a = i * 36 * Math.PI / 180; const d = ((t * 200 - i * 36) % 360 + 360) % 360; const lit = Math.max(0, 1 - d / 110);
+    ctx.globalAlpha = 0.25 + lit * 0.7; ctx.lineWidth = r * 0.045; ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r * 0.365, cy + Math.sin(a) * r * 0.365); ctx.lineTo(cx + Math.cos(a) * r * 0.435, cy + Math.sin(a) * r * 0.435); ctx.stroke(); }
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 0.34); g.addColorStop(0, '#fff'); g.addColorStop(0.42, col); g.addColorStop(1, 'rgba(62,230,255,0)');
+  ctx.globalAlpha = 1; ctx.shadowColor = col; ctx.shadowBlur = r * 0.27; ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r * 0.3, 0, 7); ctx.fill();
+  ctx.restore();
+}
+function text(c, s, x, y, size = 8, alpha = 0.5, align = 'left', col = CY) { c.save(); c.globalAlpha = alpha; c.fillStyle = col; c.font = `${size}px ui-monospace, Menlo, monospace`; c.textAlign = align; c.fillText(s, x, y); c.restore(); }
+function sheet(c, cx, cy, R, t, k = 1) {
+  c.fillStyle = '#03080e'; c.fillRect(0, 0, W, H);
+  const v = c.createRadialGradient(cx, cy, 0, cx, cy, 460); v.addColorStop(0, `rgba(62,230,255,${0.11 * k})`); v.addColorStop(1, 'rgba(62,230,255,0)'); c.fillStyle = v; c.fillRect(0, 0, W, H);
+  c.save(); c.strokeStyle = CY; c.lineWidth = 1;
+  for (let x = 12; x < W; x += 18) for (let y = 12; y < H; y += 18) { c.globalAlpha = 0.06 * k; c.fillStyle = CY; c.fillRect(x, y, 1, 1); }
+  for (const [rr, a, dash] of [[1.3, 0.2, [1, 5]], [1.62, 0.14, []], [1.95, 0.1, [6, 10]], [2.4, 0.07, []]]) { c.globalAlpha = a * k; c.setLineDash(dash); c.beginPath(); c.arc(cx, cy, R * rr, 0, 7); c.stroke(); }
+  c.setLineDash([]); c.globalAlpha = 0.22 * k;
+  c.beginPath(); c.moveTo(cx, cy - R * 2.6); c.lineTo(cx, cy + R * 2.6); c.moveTo(cx - R * 2.6, cy); c.lineTo(cx + R * 2.6, cy); c.stroke();
+  for (let i = 0; i < 72; i++) { const a = i * 5 * Math.PI / 180, l = i % 18 === 0 ? 12 : i % 6 === 0 ? 7 : 3; c.globalAlpha = (i % 18 === 0 ? 0.55 : 0.2) * k;
+    c.beginPath(); c.moveTo(cx + Math.cos(a) * R * 1.3, cy + Math.sin(a) * R * 1.3); c.lineTo(cx + Math.cos(a) * (R * 1.3 + l), cy + Math.sin(a) * (R * 1.3 + l)); c.stroke(); }
+  if (c.createConicGradient) { const sg = c.createConicGradient(t * 0.6, cx, cy); sg.addColorStop(0, `rgba(62,230,255,${0.2 * k})`); sg.addColorStop(0.12, 'rgba(62,230,255,0)'); sg.addColorStop(1, 'rgba(62,230,255,0)');
+    c.globalAlpha = 1; c.fillStyle = sg; c.beginPath(); c.arc(cx, cy, R * 1.62, 0, 7); c.arc(cx, cy, R * 1.3, 0, 7, true); c.fill('evenodd'); }
+  c.restore();
+}
+function callout(c, ax, ay, bx, by, lines, align) { c.save(); c.strokeStyle = CY; c.globalAlpha = 0.45; c.lineWidth = 1; c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.lineTo(bx + (align === 'right' ? -70 : 70), by); c.stroke();
+  c.globalAlpha = 0.9; c.fillStyle = CY; c.beginPath(); c.arc(ax, ay, 2.5, 0, 7); c.fill(); c.restore();
+  lines.forEach((s, i) => text(c, s, bx, by - 6 + i * 12, i ? 9 : 8, i ? 0.6 : 0.9, align, i ? '#cfefff' : CY)); }
+function orb(c, x, y, s, label, amber) { const col = amber ? '#ffb648' : CY; c.save();
+  const g = c.createRadialGradient(x, y, 0, x, y, s); g.addColorStop(0, '#fff'); g.addColorStop(0.35, col); g.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = g; c.shadowColor = col; c.shadowBlur = 14; c.beginPath(); c.arc(x, y, s, 0, 7); c.fill(); c.restore();
+  text(c, label, x, y + s + 12, 8, 0.85, 'center', col); }
+function appNode(c, x, y, r, glyph, label, hot) { c.save(); c.fillStyle = '#03101a'; c.strokeStyle = CY; c.globalAlpha = hot ? 1 : 0.75; c.lineWidth = hot ? 1.6 : 1;
+  if (hot) { c.shadowColor = CY; c.shadowBlur = 16; } c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); c.stroke(); c.restore();
+  text(c, glyph, x, y + r * 0.36, r * 0.95, hot ? 1 : 0.85, 'center'); if (label) text(c, label, x, y + r + 13, 8, hot ? 0.95 : 0.5, 'center'); }
+
+const ctx = id => document.querySelector(`#${id} canvas`).getContext('2d');
+const c1 = ctx('p1'), c2 = ctx('p2'), c3 = ctx('p3'), c4 = ctx('p4'), c5 = ctx('p5');
+const inner = [['☎', 'PHONE'], ['✉', 'MESSAGES'], ['◍', 'CHROME'], ['♫', 'SPOTIFY'], ['◎', 'CAMERA']];
+const outer = [['@', 'GMAIL'], ['⌖', 'MAPS'], ['✆', 'WHATSAPP'], ['▦', 'GALLERY'], ['◷', 'CALENDAR'], ['▶', 'YOUTUBE'], ['⚙', 'SETTINGS']];
+
+function frame(ms) { const t = ms / 1000;
+  // 1 · reactor home
+  { const cx = 187.5, cy = 420, R = 112; sheet(c1, cx, cy, R, t);
+    callout(c1, cx - R * 0.6, cy + R * 0.75, 22, 640, ['NEXT', '10:30 Standup'], 'left');
+    callout(c1, cx + R * 0.6, cy + R * 0.75, W - 22, 640, ['CLAUDE', '5H 38%'], 'right');
+    reactor(c1, cx, cy, R, t);
+    const a1 = t * 0.35, a2 = t * 0.35 + 2.4; orb(c1, cx + Math.cos(a1) * R * 1.45, cy + Math.sin(a1) * R * 1.45, 9, 'SITE 72%');
+    orb(c1, cx + Math.cos(a2) * R * 1.45, cy + Math.sin(a2) * R * 1.45, 9, 'INBOX · OK?', true); }
+  // 2 · orbit
+  { const cx = 187.5, cy = 420, R = 66; sheet(c2, cx, cy, R * 1.2, t);
+    c2.save(); c2.strokeStyle = CY; c2.globalAlpha = 0.35; c2.beginPath(); c2.arc(cx, cy, 110, 0, 7); c2.stroke(); c2.globalAlpha = 0.22; c2.setLineDash([3, 5]); c2.beginPath(); c2.arc(cx, cy, 162, 0, 7); c2.stroke(); c2.restore();
+    reactor(c2, cx, cy, R, t);
+    const spin = Math.sin(t * 0.5) * 0.25;
+    inner.forEach(([g, l], i) => { const a = -Math.PI / 2 + i * 2 * Math.PI / 5 + spin; const hot = i === 0 && Math.abs(spin) < 0.12; appNode(c2, cx + Math.cos(a) * 110, cy + Math.sin(a) * 110, 21, g, hot ? l : '', hot); });
+    outer.forEach(([g, l], i) => { const a = -Math.PI / 2 + Math.PI / 7 + i * 2 * Math.PI / 7 - spin * 0.6; appNode(c2, cx + Math.cos(a) * 162, cy + Math.sin(a) * 162, 17, g, ''); }); }
+  // 3 · HUD stack
+  { const cx = 80, cy = 112, R = 54; sheet(c3, cx, cy, R, t, 0.7); reactor(c3, cx, cy, R, t); }
+  // 4 · command
+  { const cx = 187.5, cy = 140, R = 62; sheet(c4, cx, cy, R, t, 0.8); reactor(c4, cx, cy, R, t);
+    text(c4, '09:41 · WED 08 OCT', cx, cy + R + 34, 10, 0.75, 'center'); }
+  // 5 · drawer: a scan line sweeping down
+  { sheet(c5, 187.5, 900, 120, t, 0.5); const y = (t * 160) % (H + 200) - 100; const g = c5.createLinearGradient(0, y - 60, 0, y);
+    g.addColorStop(0, 'rgba(62,230,255,0)'); g.addColorStop(1, 'rgba(62,230,255,0.10)'); c5.fillStyle = g; c5.fillRect(0, y - 60, W, 60);
+    c5.save(); c5.globalAlpha = 0.5; c5.fillStyle = CY; c5.fillRect(0, y, W, 1); c5.restore(); }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body></html>
