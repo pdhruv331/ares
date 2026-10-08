@@ -61,7 +61,7 @@ class AppDrawer(
         override fun areAllItemsEnabled() = false
         override fun isEnabled(i: Int) = false // (cells take their own taps)
         override fun getView(i: Int, convert: View?, parent: ViewGroup): View = when (val r = rows[i]) {
-            is Row.Header -> ((convert as? TextView) ?: header()).apply { text = r.text }
+            is Row.Header -> ((convert as? TextView) ?: header()).apply { text = r.text; setTextColor(Scheme.color) }
             is Row.Line -> ((convert as? LinearLayout) ?: line()).also { bind(it, r.apps) }
             is Row.Ask -> ((convert as? TextView) ?: ask()).apply { text = "◉   Ask ARES: ${r.text}"; setOnClickListener { askNow(r.text) } }
         }
@@ -154,7 +154,7 @@ class AppDrawer(
         rail.removeAllViews()
         rail.visibility = if (q.isEmpty()) View.VISIBLE else View.GONE
         for (l in letterRow.keys) rail.addView(TextView(act).apply {
-            text = l; textSize = 9f; gravity = Gravity.CENTER; setTextColor(act.getColor(R.color.cyan)); alpha = 0.7f
+            text = l; textSize = 9f; gravity = Gravity.CENTER; setTextColor(Scheme.color); alpha = 0.7f
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
         })
     }
@@ -162,7 +162,7 @@ class AppDrawer(
     // ---- Rows ------------------------------------------------------------------------------------------------------
 
     private fun header() = TextView(act).apply {
-        textSize = 9f; letterSpacing = 0.3f; setTextColor(act.getColor(R.color.cyan)); alpha = 0.8f
+        textSize = 9f; letterSpacing = 0.3f; setTextColor(Scheme.color); alpha = 0.8f
         setPadding((8 * dp).toInt(), (16 * dp).toInt(), 0, (6 * dp).toInt())
     }
 

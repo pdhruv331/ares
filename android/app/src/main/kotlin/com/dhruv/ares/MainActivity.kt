@@ -331,23 +331,7 @@ class MainActivity : Activity(), Session.Ui {
     /** ⏻: the bottom sheet with SLIDE TO POWER DOWN. */
     private fun showPowerSheet() {
         powerSheet?.dismiss()
-        val d = Dialog(this, R.style.Theme_Ares_Sheet)
-        d.setContentView(R.layout.dialog_power)
-        d.window?.apply { setGravity(Gravity.BOTTOM); setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); setBackgroundDrawableResource(android.R.color.transparent) }
-        val jobs = JobStore.working
-        d.findViewById<TextView>(R.id.sheetSub).text = "${if (jobs > 0) "$jobs job${if (jobs == 1) "" else "s"} pause" else "Jobs pause"} · phone access stops"
-        val slide = d.findViewById<SlideView>(R.id.slide)
-        slide.onDetent = { Haptics.tick(this) }
-        slide.onSpringBack = { Haptics.tick(this) }
-        slide.onComplete = {
-            Haptics.heavy(this)
-            d.dismiss()
-            powerAct("powerdown")
-        }
-        d.findViewById<View>(R.id.sheetCancel).setOnClickListener { d.dismiss() }
-        d.setOnDismissListener { powerSheet = null }
-        powerSheet = d
-        d.show()
+        powerSheet = PowerSheet.show(this) { powerAct("powerdown") }.also { it.setOnDismissListener { powerSheet = null } }
     }
 
     /** The schedule chip: skip tonight's standby. */

@@ -15,6 +15,7 @@ class AresApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Notes.channels(this)
+        Scheme.load(this)
         Push.init(this)
     }
 }

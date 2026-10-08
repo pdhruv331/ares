@@ -1233,6 +1233,9 @@ async function phoneStatus() {
     battery: Number.isFinite(pct) ? { pct, charging: /charging|charged|AC Power/i.test(batt) && !/discharging/i.test(batt) } : null,
     claude: { fiveHour: usage.windows.five_hour?.pct ?? null, week: usage.windows.seven_day?.pct ?? null },
     reachable: readSettings().stayReachable !== false,
+    // The launcher's "at the Mac" mode (docs/launcher-v2-prompt.md §6): seconds since the last keyboard/mouse input, and the lock
+    idle: Math.round(powerMonitor.getSystemIdleTime()),
+    locked: powerMonitor.getSystemIdleState(1) === 'locked',
   };
 }
 

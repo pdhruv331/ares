@@ -77,6 +77,7 @@ class HomeActivity : Activity(), Session.Ui {
     private val jobsChanged = { showJobs() }
     private val powerChanged = { showPower() }
     private val appsChanged = { showDock(); drawer.refresh() }
+    private val schemeChanged = { applyScheme() }
     private val powerSave = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) = showPowerSave() }
 
     private data class Event(val id: Long, val title: String, val begin: Long, val end: Long, val allDay: Boolean, val where: String)
@@ -134,6 +135,7 @@ class HomeActivity : Activity(), Session.Ui {
         onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { back() }
         Apps.listen(appsChanged)
         Apps.load(this)
+        Scheme.listen(schemeChanged)
     }
 
     override fun onResume() {
@@ -146,7 +148,7 @@ class HomeActivity : Activity(), Session.Ui {
         registerReceiver(powerSave, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED))
         showPowerSave()
         showJobs()
-        showDock()
+        applyScheme()
         loadEvents()
         pollStatus()
         reactor.invalidate(); schematic.invalidate()
@@ -165,6 +167,7 @@ class HomeActivity : Activity(), Session.Ui {
 
     override fun onDestroy() {
         Apps.unlisten(appsChanged)
+        Scheme.unlisten(schemeChanged)
         session.release()
         super.onDestroy()
     }
@@ -326,10 +329,10 @@ class HomeActivity : Activity(), Session.Ui {
             PowerStore.mode == PowerStore.Mode.ONLINE -> "HOLD · TALK     TAP · OPEN"
             else -> PowerStore.header()
         }
-        hint.setTextColor(getColor(when (PowerStore.mode) {
-            PowerStore.Mode.ONLINE, PowerStore.Mode.UNKNOWN -> R.color.cyan; PowerStore.Mode.STANDBY -> R.color.blue
-            PowerStore.Mode.ASLEEP -> R.color.grey; else -> R.color.gold
-        }))
+        hint.setTextColor(when (PowerStore.mode) {
+            PowerStore.Mode.ONLINE, PowerStore.Mode.UNKNOWN -> Scheme.color; PowerStore.Mode.STANDBY -> getColor(R.color.blue)
+            PowerStore.Mode.ASLEEP -> getColor(R.color.grey); else -> getColor(R.color.gold)
+        })
     }
 
     private fun showCaption(text: String, fadeAfterMs: Long? = null) {
@@ -337,7 +340,7 @@ class HomeActivity : Activity(), Session.Ui {
         caption.animate().cancel()
         caption.text = text.replace(Regex("\\s+"), " ").trim()
         schematic.dimBottom = true
-        caption.alpha = 1f
+        caption.alpha = 0.75f // (subtle: small, muted, never at full strength)
         if (fadeAfterMs != null) caption.postDelayed(fadeCaption, fadeAfterMs)
     }
 
@@ -365,6 +368,8 @@ class HomeActivity : Activity(), Session.Ui {
         m.menu.add(0, 1, 0, "Open ARES")
         if (Ares.paired(this) && PowerStore.canStandby) m.menu.add(0, 2, 1, "Standby")
         if (Ares.paired(this) && (PowerStore.mode == PowerStore.Mode.STANDBY || PowerStore.mode == PowerStore.Mode.OFFLINE)) m.menu.add(0, 3, 1, "Wake ARES")
+        if (Ares.paired(this) && (PowerStore.mode == PowerStore.Mode.ONLINE || PowerStore.mode == PowerStore.Mode.STANDBY)) m.menu.add(0, 7, 1, "Power down…")
+        m.menu.add(1, 8, 2, "Colour scheme…")
         m.menu.add(1, 4, 2, "Original icons").apply { isCheckable = true; isChecked = Icons.original(this@HomeActivity) }
         m.menu.add(1, 5, 3, "Readouts on the reactor").apply { isCheckable = true; isChecked = p.getBoolean("homeCallouts", true) }
         m.menu.add(1, 6, 4, "Home screen app…")
@@ -373,6 +378,8 @@ class HomeActivity : Activity(), Session.Ui {
                 1 -> startActivity(Intent(this, MainActivity::class.java))
                 2 -> powerAct("standby")
                 3 -> powerAct("wake")
+                7 -> PowerSheet.show(this) { powerAct("powerdown") }
+                8 -> chooseScheme()
                 4 -> { p.edit().putBoolean("homeOriginalIcons", !Icons.original(this)).apply(); Icons.clear(); showDock(); drawer.refresh() }
                 5 -> { p.edit().putBoolean("homeCallouts", !p.getBoolean("homeCallouts", true)).apply(); showReadouts() }
                 6 -> AlertDialog.Builder(this).setTitle("Home screen app")
@@ -382,6 +389,26 @@ class HomeActivity : Activity(), Session.Ui {
             true
         }
         m.show()
+    }
+
+    /** The colour scheme (docs/launcher-v2-prompt.md §2); the power states keep their fixed colours. */
+    private fun chooseScheme() {
+        val ids = Scheme.names.keys.toList()
+        AlertDialog.Builder(this).setTitle("Colour scheme")
+            .setSingleChoiceItems(Scheme.names.values.toTypedArray(), ids.indexOf(Scheme.id())) { d, i -> Scheme.set(this, ids[i]); d.dismiss() }
+            .setNegativeButton("Cancel", null).show()
+    }
+
+    /** Everything on the home screen that wears the scheme's colour. */
+    private fun applyScheme() {
+        val c = Scheme.color
+        findViewById<TextView>(R.id.date).setTextColor(Scheme.alpha(179))
+        dots.setTextColor(c)
+        findViewById<TextView>(R.id.handle).setTextColor(Scheme.alpha(153))
+        state(session.state)
+        showDock(); drawer.refresh()
+        if (pager.page == 1) renderCards()
+        reactor.invalidate(); schematic.invalidate()
     }
 
     private fun powerAct(action: String) {
@@ -406,7 +433,7 @@ class HomeActivity : Activity(), Session.Ui {
             val cell = FrameLayout(this).apply { layoutParams = LinearLayout.LayoutParams(0, (60 * dp).toInt(), 1f) }
             if (app == null) {
                 cell.addView(TextView(this).apply {
-                    text = "+"; gravity = Gravity.CENTER; textSize = 18f; setTextColor(getColor(R.color.cyan)); alpha = 0.35f
+                    text = "+"; gravity = Gravity.CENTER; textSize = 18f; setTextColor(Scheme.color); alpha = 0.35f
                     background = getDrawable(R.drawable.bg_round); contentDescription = "Add an app to the dock"
                     layoutParams = FrameLayout.LayoutParams((44 * dp).toInt(), (44 * dp).toInt(), Gravity.CENTER)
                     setOnClickListener { pickSlot = i; drawer.open(pick = true) }
@@ -508,10 +535,10 @@ class HomeActivity : Activity(), Session.Ui {
         cards.removeAllViews()
         // NEXT
         if (!hasCalendar()) {
-            card("NEXT", "CALENDAR").also { c -> c.addView(row("Show your calendar here ›", null, R.color.cyan) { askCalendar() }) }
+            card("NEXT", "CALENDAR").also { c -> c.addView(row("Show your calendar here ›", null, Scheme.color) { askCalendar() }) }
         } else if (events.isNotEmpty()) {
             val c = card("NEXT", "CALENDAR")
-            for (e in events.take(4)) c.addView(row(if (e.allDay) "All day · ${e.title}" else "${time(e.begin)} ${e.title}", whenLabel(e), R.color.text) {
+            for (e in events.take(4)) c.addView(row(if (e.allDay) "All day · ${e.title}" else "${time(e.begin)} ${e.title}", whenLabel(e), getColor(R.color.text)) {
                 runCatching { startActivity(Intent(Intent.ACTION_VIEW, ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, e.id))
                     .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, e.begin).putExtra(CalendarContract.EXTRA_EVENT_END_TIME, e.end)) }
             })
@@ -522,20 +549,20 @@ class HomeActivity : Activity(), Session.Ui {
             val c = card("WORK", "${JobStore.working} RUNNING")
             for (j in active.take(5)) {
                 if (j.status == "approval") {
-                    c.addView(row(j.approvalWhat?.ifBlank { null } ?: j.title, null, R.color.amber) { startActivity(WorkActivity.intent(this, j.id)) })
+                    c.addView(row(j.approvalWhat?.ifBlank { null } ?: j.title, null, getColor(R.color.amber)) { startActivity(WorkActivity.intent(this, j.id)) })
                     c.addView(LinearLayout(this).apply {
                         orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END
                         setPadding(0, (2 * dp).toInt(), 0, (6 * dp).toInt())
-                        addView(pill("REVIEW", R.color.cyan, R.drawable.bg_chip) { startActivity(WorkActivity.intent(this@HomeActivity, j.id)) })
-                        addView(pill("OK", R.color.amber, R.drawable.bg_amber) { approve(j) })
+                        addView(pill("REVIEW", Scheme.color, null) { startActivity(WorkActivity.intent(this@HomeActivity, j.id)) })
+                        addView(pill("OK", getColor(R.color.amber), R.drawable.bg_amber) { approve(j) })
                     })
-                } else c.addView(row(j.title, if (j.status == "queued") "queued" else if (j.steps > 0) "${j.steps} steps" else "working", R.color.text) {
+                } else c.addView(row(j.title, if (j.status == "queued") "queued" else if (j.steps > 0) "${j.steps} steps" else "working", getColor(R.color.text)) {
                     startActivity(WorkActivity.intent(this, j.id))
                 })
             }
             c.addView(LinearLayout(this).apply {
                 gravity = Gravity.END; setPadding(0, (6 * dp).toInt(), 0, 0)
-                addView(pill("STOP ALL", R.color.amber, R.drawable.bg_amber) { stopAll() })
+                addView(pill("STOP ALL", getColor(R.color.amber), R.drawable.bg_amber) { stopAll() })
             })
         }
         if (cards.childCount == 0) cards.addView(TextView(this).apply {
@@ -548,26 +575,26 @@ class HomeActivity : Activity(), Session.Ui {
             val st = macStatus?.takeIf { PowerStore.reach } // (no stale readings while she can't be reached)
             val host = st?.optString("host")?.takeIf { it.isNotBlank() } ?: "Mac"
             val batt = st?.optJSONObject("battery")?.let { b -> "${b.optInt("pct")}% · ${if (b.optBoolean("charging")) "on power" else "battery"}" }
-            c.addView(row(host, listOfNotNull(PowerStore.header().lowercase(), batt).joinToString(" · "), R.color.text) { startActivity(Intent(this, MainActivity::class.java)) })
+            c.addView(row(host, listOfNotNull(PowerStore.header().lowercase(), batt).joinToString(" · "), getColor(R.color.text)) { startActivity(Intent(this, MainActivity::class.java)) })
             val claude = st?.optJSONObject("claude")?.let { cl -> listOfNotNull(cl.opt("fiveHour")?.takeIf { it != JSONObject.NULL }?.let { "5H $it%" }, cl.opt("week")?.takeIf { it != JSONObject.NULL }?.let { "WEEK $it%" }).joinToString(" · ") }?.ifBlank { null }
-            if (claude != null) c.addView(row("Claude", claude, R.color.text, null))
+            if (claude != null) c.addView(row("Claude", claude, getColor(R.color.text), null))
         }
         val phone = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         val pct = phone?.let { it.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) * 100 / it.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1) }
         val plugged = (phone?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
-        if (pct != null && pct >= 0) c.addView(row("This phone", "$pct%${if (plugged) " · charging" else ""}", R.color.text, null))
+        if (pct != null && pct >= 0) c.addView(row("This phone", "$pct%${if (plugged) " · charging" else ""}", getColor(R.color.text), null))
     }
 
     private fun card(title: String, right: String?): LinearLayout {
         val c = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; background = getDrawable(R.drawable.bg_card)
+            orientation = LinearLayout.VERTICAL; background = cardBg()
             setPadding((14 * dp).toInt(), (12 * dp).toInt(), (14 * dp).toInt(), (10 * dp).toInt())
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = (10 * dp).toInt() }
         }
         c.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; setPadding(0, 0, 0, (6 * dp).toInt())
-            addView(TextView(this@HomeActivity).apply { text = title; textSize = 9f; letterSpacing = 0.3f; setTextColor(getColor(R.color.cyan)); layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) })
-            if (right != null) addView(TextView(this@HomeActivity).apply { text = right; textSize = 9f; letterSpacing = 0.2f; setTextColor(getColor(R.color.cyan_dim)) })
+            addView(TextView(this@HomeActivity).apply { text = title; textSize = 9f; letterSpacing = 0.3f; setTextColor(Scheme.color); layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) })
+            if (right != null) addView(TextView(this@HomeActivity).apply { text = right; textSize = 9f; letterSpacing = 0.2f; setTextColor(Scheme.alpha(89)) })
         })
         cards.addView(c)
         return c
@@ -577,7 +604,7 @@ class HomeActivity : Activity(), Session.Ui {
         orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
         setPadding(0, (6 * dp).toInt(), 0, (6 * dp).toInt())
         addView(TextView(this@HomeActivity).apply {
-            text = left; textSize = 13f; setTextColor(getColor(colour)); maxLines = 2; ellipsize = TextUtils.TruncateAt.END
+            text = left; textSize = 13f; setTextColor(colour); maxLines = 2; ellipsize = TextUtils.TruncateAt.END
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         })
         if (right != null) addView(TextView(this@HomeActivity).apply {
@@ -586,8 +613,14 @@ class HomeActivity : Activity(), Session.Ui {
         if (onClick != null) setOnClickListener { onClick() }
     }
 
-    private fun pill(label: String, colour: Int, bg: Int, onClick: () -> Unit) = TextView(this).apply {
-        text = label; textSize = 10f; letterSpacing = 0.2f; setTextColor(getColor(colour)); background = getDrawable(bg); gravity = Gravity.CENTER
+    /** A card's background: dark glass with a hairline in the scheme's colour. */
+    private fun cardBg() = android.graphics.drawable.GradientDrawable().apply {
+        cornerRadius = 12 * dp; setColor(0xD906121B.toInt()); setStroke(dp.toInt().coerceAtLeast(1), Scheme.alpha(77))
+    }
+
+    private fun pill(label: String, colour: Int, bg: Int?, onClick: () -> Unit) = TextView(this).apply {
+        text = label; textSize = 10f; letterSpacing = 0.2f; setTextColor(colour); gravity = Gravity.CENTER
+        background = if (bg != null) getDrawable(bg) else android.graphics.drawable.GradientDrawable().apply { cornerRadius = 14 * dp; setColor(Scheme.alpha(20)); setStroke(dp.toInt().coerceAtLeast(1), Scheme.alpha(89)) }
         setPadding((14 * dp).toInt(), (7 * dp).toInt(), (14 * dp).toInt(), (7 * dp).toInt())
         layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = (8 * dp).toInt() }
         setOnClickListener { onClick() }

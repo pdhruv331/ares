@@ -118,12 +118,11 @@ object Apps {
 }
 
 /**
- * ARES's themed icons (docs/launcher-prompt.md §5): the app's monochrome layer (Android 13+) tinted reactor cyan on a dark
+ * ARES's themed icons (docs/launcher-prompt.md §5): the app's monochrome layer (Android 13+) tinted the scheme's colour (Scheme) on a dark
  * circle; apps without one get their own icon, desaturated, on the same circle. "Original icons" draws them as they are.
  * Rendered once per size off the main thread and cached.
  */
 object Icons {
-    private val cyan = Color.parseColor("#3EE6FF")
     private val cache = object : LruCache<String, Bitmap>(24 * 1024 * 1024) { override fun sizeOf(k: String, v: Bitmap) = v.byteCount }
     private val work = Executors.newFixedThreadPool(2) { Thread(it, "ares-icons").apply { isDaemon = true; priority = Thread.MIN_PRIORITY } }
     private val main = Handler(Looper.getMainLooper())
@@ -135,17 +134,18 @@ object Icons {
     /** The icon for `app` at `px`, now if cached, else later through `done` (on the main thread). */
     fun get(c: Context, app: Apps.App, px: Int, done: (Bitmap) -> Unit): Bitmap? {
         val orig = original(c)
-        val key = "${app.key}@$px${if (orig) "o" else ""}"
+        val tint = Scheme.color
+        val key = "${app.key}@$px${if (orig) "o" else "#$tint"}"
         cache.get(key)?.let { return it }
         val ctx = c.applicationContext
         work.execute {
-            val bmp = cache.get(key) ?: runCatching { render(ctx, app, px, orig) }.getOrNull()?.also { cache.put(key, it) } ?: return@execute
+            val bmp = cache.get(key) ?: runCatching { render(ctx, app, px, orig, tint) }.getOrNull()?.also { cache.put(key, it) } ?: return@execute
             main.post { done(bmp) }
         }
         return null
     }
 
-    private fun render(c: Context, app: Apps.App, px: Int, orig: Boolean): Bitmap {
+    private fun render(c: Context, app: Apps.App, px: Int, orig: Boolean, tint: Int): Bitmap {
         val bmp = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         val d = app.info.getIcon(c.resources.displayMetrics.densityDpi).mutate()
@@ -163,7 +163,7 @@ object Icons {
         if (mono != null) {
             // The layer is 108 units with the glyph in the middle; scaled so the glyph fills about half the circle
             val m = mono.mutate()
-            m.setTint(cyan)
+            m.setTint(tint)
             val size = px * 1.45f
             m.setBounds((h - size / 2).toInt(), (h - size / 2).toInt(), (h + size / 2).toInt(), (h + size / 2).toInt())
             m.draw(canvas)
@@ -177,7 +177,7 @@ object Icons {
             d.colorFilter = null; d.alpha = 255
         }
         canvas.restore()
-        val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = dp; color = cyan; alpha = 90 }
+        val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = dp; color = tint; alpha = 90 }
         canvas.drawCircle(h, h, h - dp, ring)
         return bmp
     }

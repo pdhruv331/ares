@@ -25,8 +25,8 @@
                     android:layout_gravity="top|center_horizontal" android:contentDescription="ARES"/>
                 <TextView android:id="@+id/caption" android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:layout_gravity="top" android:paddingStart="28dp" android:paddingEnd="28dp" android:gravity="center"
-                    android:textSize="15sp" android:textColor="@color/text" android:maxLines="4" android:ellipsize="end" android:alpha="0"
-                    android:shadowColor="#FF02060A" android:shadowRadius="12"/>
+                    android:textSize="12sp" android:textColor="@color/text_user" android:maxLines="3" android:ellipsize="end" android:alpha="0"
+                    android:lineSpacingMultiplier="1.1"/>
                 <TextView android:id="@+id/hint" android:layout_width="wrap_content" android:layout_height="wrap_content"
                     android:layout_gravity="bottom|center_horizontal" android:layout_marginBottom="6dp"
                     android:textSize="9sp" android:letterSpacing="0.3" android:textColor="#993EE6FF" android:text="HOLD · TALK     TAP · OPEN"/>

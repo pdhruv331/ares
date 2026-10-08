@@ -58,7 +58,6 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         set(v) { field = v.coerceIn(0f, 1f); invalidate() }
     var holdColor = Color.parseColor("#6096FF")
 
-    private val cyan = Color.parseColor("#3EE6FF")
     private val purple = Color.parseColor("#9D8CFF")
     private val amber = Color.parseColor("#FFB547")
     private val white = Color.parseColor("#F2FBFF")
@@ -80,7 +79,7 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     private var chase = 0f     // the lit coil travelling around the core
     private var energy = 0f    // 0 at rest → 1 fully alive (smooth state changes)
     private var alive = 1f     // 1 online → 0 cold: the rings' pace and brightness (power transitions)
-    private var hue = cyan     // current colour, eased towards the target
+    private var hue = Scheme.color     // current colour, eased towards the target
     private var bloom = 0f     // the wake's white bloom, fading
     private var shock = -1f    // the wake's shockwave radius (of r), -1 = none
     private var flickerAt = -1f
@@ -136,7 +135,7 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         return null
     }
 
-    private val stateHue get() = when (state) { State.THINKING -> purple; State.OFFLINE -> amber; State.SPEAKING -> white; else -> cyan }
+    private val stateHue get() = when (state) { State.THINKING -> purple; State.OFFLINE -> amber; State.SPEAKING -> white; else -> Scheme.color }
     private val target get() = when (power) {
         Power.ONLINE -> stateHue
         Power.STANDBY -> blue
