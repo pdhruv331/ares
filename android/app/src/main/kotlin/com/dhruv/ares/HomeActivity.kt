@@ -499,30 +499,36 @@ class HomeActivity : Activity(), Session.Ui {
 
     // ---- The dock ------------------------------------------------------------------------------------------------------
 
+    /** The dock: hold an app and drag it sideways to move it (the others slide over); hold without dragging = its menu. */
+    private var dockReorder: Reorder? = null
     private fun showDock() {
+        if (dockReorder?.dragging == true) { dockRow.postDelayed({ showDock() }, 400); return } // (not under the finger)
         val slots = Apps.dock(this)
         val px = (52 * dp).toInt()
         dockRow.removeAllViews()
-        for ((i, key) in slots.withIndex()) {
+        val reorder = Reorder(dockRow, vertical = false) { cells -> Apps.setDock(this, cells.map { it.tag as String? }); showDock(); drawer.refresh() }
+        dockReorder = reorder
+        reorder.onTap = { cell ->
+            val app = (cell.tag as String?)?.let(Apps::find)
+            if (app != null) Apps.open(this, app, (cell as FrameLayout).getChildAt(0)) else { pickSlot = dockRow.indexOfChild(cell); drawer.open(pick = true) }
+        }
+        reorder.onMenu = { cell -> (cell.tag as String?)?.let(Apps::find)?.let { dockMenu(cell, dockRow.indexOfChild(cell), it) } }
+        for (key in slots) {
             val app = key?.let(Apps::find)
-            val cell = FrameLayout(this).apply { layoutParams = LinearLayout.LayoutParams(0, (60 * dp).toInt(), 1f) }
+            val cell = FrameLayout(this).apply { layoutParams = LinearLayout.LayoutParams(0, (60 * dp).toInt(), 1f); tag = app?.key }
             if (app == null) {
                 cell.addView(TextView(this).apply {
                     text = "+"; gravity = Gravity.CENTER; textSize = 18f; setTextColor(Scheme.color); alpha = 0.35f
                     background = getDrawable(R.drawable.bg_round); contentDescription = "Add an app to the dock"
                     layoutParams = FrameLayout.LayoutParams((44 * dp).toInt(), (44 * dp).toInt(), Gravity.CENTER)
-                    setOnClickListener { pickSlot = i; drawer.open(pick = true) }
                 })
             } else {
-                val icon = ImageView(this).apply {
-                    layoutParams = FrameLayout.LayoutParams(px, px, Gravity.CENTER); contentDescription = app.label; tag = app.key
-                    setOnClickListener { Apps.open(this@HomeActivity, app, it) }
-                    setOnLongClickListener { dockMenu(it, i, app); true }
-                }
+                val icon = ImageView(this).apply { layoutParams = FrameLayout.LayoutParams(px, px, Gravity.CENTER); contentDescription = app.label; tag = app.key }
                 Icons.get(this, app, px) { bmp -> if (icon.tag == app.key) icon.setImageBitmap(bmp) }?.let(icon::setImageBitmap)
                 cell.addView(icon)
             }
             dockRow.addView(cell)
+            reorder.attach(cell)
         }
     }
 
@@ -605,47 +611,62 @@ class HomeActivity : Activity(), Session.Ui {
         }
     }
 
-    /** NEXT, WORK, SYSTEMS: each only when it has something to say. */
+    /** NEXT, WORK, SYSTEMS: each only when it has something to say, in the order you've put them (hold a header and drag). */
     private fun renderCards() {
+        if (cardsReorder.dragging) return // (rebuilt once it's dropped)
         cards.removeAllViews()
-        // NEXT
-        if (!hasCalendar()) {
-            card("NEXT", "CALENDAR").also { c -> c.addView(row("Show your calendar here ›", null, Scheme.color) { askCalendar() }) }
-        } else if (events.isNotEmpty()) {
-            val c = card("NEXT", "CALENDAR")
-            for (e in events.take(4)) c.addView(row(if (e.allDay) "All day · ${e.title}" else "${time(e.begin)} ${e.title}", whenLabel(e), getColor(R.color.text)) {
-                runCatching { startActivity(Intent(Intent.ACTION_VIEW, ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, e.id))
-                    .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, e.begin).putExtra(CalendarContract.EXTRA_EVENT_END_TIME, e.end)) }
-            })
-        }
-        // WORK
-        val active = JobStore.list().filter { it.active }
-        if (active.isNotEmpty()) {
-            val c = card("WORK", "${JobStore.working} RUNNING")
-            for (j in active.take(5)) {
-                if (j.status == "approval") {
-                    c.addView(row(j.approvalWhat?.ifBlank { null } ?: j.title, null, getColor(R.color.amber)) { startActivity(WorkActivity.intent(this, j.id)) })
-                    c.addView(LinearLayout(this).apply {
-                        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END
-                        setPadding(0, (2 * dp).toInt(), 0, (6 * dp).toInt())
-                        addView(pill("REVIEW", Scheme.color, null) { startActivity(WorkActivity.intent(this@HomeActivity, j.id)) })
-                        addView(pill("OK", getColor(R.color.amber), R.drawable.bg_amber) { approve(j) })
-                    })
-                } else c.addView(row(j.title, if (j.status == "queued") "queued" else if (j.steps > 0) "${j.steps} steps" else "working", getColor(R.color.text)) {
-                    startActivity(WorkActivity.intent(this, j.id))
-                })
-            }
-            c.addView(LinearLayout(this).apply {
-                gravity = Gravity.END; setPadding(0, (6 * dp).toInt(), 0, 0)
-                addView(pill("STOP ALL", getColor(R.color.amber), R.drawable.bg_amber) { stopAll() })
-            })
-        }
-        if (cards.childCount == 0) cards.addView(TextView(this).apply {
+        val built = mapOf("next" to nextCard(), "work" to workCard(), "systems" to systemsCard())
+        if (built["next"] == null && built["work"] == null) cards.addView(TextView(this).apply {
             text = "All quiet."; textSize = 13f; setTextColor(getColor(R.color.muted)); gravity = Gravity.CENTER
             setPadding(0, (28 * dp).toInt(), 0, (28 * dp).toInt())
         })
-        // SYSTEMS
-        val c = card("SYSTEMS", null)
+        for (id in cardOrder()) built[id]?.let { c -> c.tag = id; cards.addView(c); cardsReorder.attach(c.getChildAt(0), c) }
+    }
+
+    private val cardsReorder by lazy {
+        Reorder(cards, vertical = true) { views ->
+            val order = views.mapNotNull { it.tag as? String }
+            Ares.prefs(this).edit().putString("homeCards", (order + cardOrder().filter { it !in order }).joinToString(",")).apply()
+        }
+    }
+
+    private fun cardOrder() = (Ares.prefs(this).getString("homeCards", null)?.split(',') ?: emptyList()).filter { it in setOf("next", "work", "systems") }
+        .let { saved -> saved + listOf("next", "work", "systems").filter { it !in saved } }
+
+    private fun nextCard(): LinearLayout? {
+        if (!hasCalendar()) return card("NEXT", "CALENDAR", add = false).also { c -> c.addView(row("Show your calendar here ›", null, Scheme.color) { askCalendar() }) }
+        if (events.isEmpty()) return null
+        val c = card("NEXT", "CALENDAR", add = false)
+        for (e in events.take(4)) c.addView(row(if (e.allDay) "All day · ${e.title}" else "${time(e.begin)} ${e.title}", whenLabel(e), getColor(R.color.text)) { openEvent(e) })
+        return c
+    }
+
+    private fun workCard(): LinearLayout? {
+        val active = JobStore.list().filter { it.active }
+        if (active.isEmpty()) return null
+        val c = card("WORK", "${JobStore.working} RUNNING", add = false)
+        for (j in active.take(5)) {
+            if (j.status == "approval") {
+                c.addView(row(j.approvalWhat?.ifBlank { null } ?: j.title, null, getColor(R.color.amber)) { startActivity(WorkActivity.intent(this, j.id)) })
+                c.addView(LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END
+                    setPadding(0, (2 * dp).toInt(), 0, (6 * dp).toInt())
+                    addView(pill("REVIEW", Scheme.color, null) { startActivity(WorkActivity.intent(this@HomeActivity, j.id)) })
+                    addView(pill("OK", getColor(R.color.amber), R.drawable.bg_amber) { approve(j) })
+                })
+            } else c.addView(row(j.title, if (j.status == "queued") "queued" else if (j.steps > 0) "${j.steps} steps" else "working", getColor(R.color.text)) {
+                startActivity(WorkActivity.intent(this, j.id))
+            })
+        }
+        c.addView(LinearLayout(this).apply {
+            gravity = Gravity.END; setPadding(0, (6 * dp).toInt(), 0, 0)
+            addView(pill("STOP ALL", getColor(R.color.amber), R.drawable.bg_amber) { stopAll() })
+        })
+        return c
+    }
+
+    private fun systemsCard(): LinearLayout {
+        val c = card("SYSTEMS", null, add = false)
         if (Ares.paired(this)) {
             val st = macStatus?.takeIf { PowerStore.reach } // (no stale readings while she can't be reached)
             val host = st?.optString("host")?.takeIf { it.isNotBlank() } ?: "Mac"
@@ -658,6 +679,7 @@ class HomeActivity : Activity(), Session.Ui {
         val pct = phone?.let { it.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) * 100 / it.getIntExtra(BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1) }
         val plugged = (phone?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
         if (pct != null && pct >= 0) c.addView(row("This phone", "$pct%${if (plugged) " · charging" else ""}", getColor(R.color.text), null))
+        return c
     }
 
     private fun card(title: String, right: String?, add: Boolean = true): LinearLayout {
