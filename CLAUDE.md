@@ -317,3 +317,14 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   small fake phone server (ndjson `/api/events` hello + `job` messages; track lines with `res.on('close')`, not `req`). The emulator's
   software GPU pins RenderThread for the reactor (home 27 fps vs the app's 21): measure battery on the real phone. Saver mode needs
   `dumpsys battery unplug` first on the emulator.
+- Round 2 (docs/launcher-v2-prompt.md, built 2026-10-08): `Scheme` (colour schemes; the power states keep fixed blue/gold), Standby / Wake /
+  Power down… and Colour scheme… in the home long-press menu (`PowerSheet` shared with the app), readouts NEXT + SERVER that open in place,
+  `Reorder` (hold-drag for the dock and the cards; a drop must happen once: rebuilding the row CANCELs the touched view), the drawer's
+  YOUR ORDER (`DragFrame`, prefs drawerOrder/drawerSort), `AresNotifs` + `NotifStore` (Notification access; orbs, spark, reply by voice through
+  the notification's own action, SUMMARISE is the only path to the Mac, calls via CATEGORY_CALL) drawn by `HomeOverlay` (also the meeting
+  ring, the Mac link, the Buds earpieces), modes (morning / meeting soon / night / at the Mac from /api/status idle+locked), Buds via
+  AudioDeviceCallback, and assistant summons listen on the home screen (`HomeActivity.listenHere`). Captions are small and muted on purpose.
+- Debug-only hooks: `adb shell am broadcast -a com.dhruv.ares.TEST_CALL [--es name Mom]`, `…TEST_MODE --es mode night|morning|meeting|desk|none`,
+  `"am broadcast -a com.dhruv.ares.TEST_BUDS --es name 'Galaxy Buds Pro 4'"` (quote names with spaces inside the adb shell string).
+  Notification access on the emulator: `adb shell cmd notification allow_listener com.dhruv.ares/com.dhruv.ares.AresNotifs` (again after
+  each reinstall); test notifications with `cmd notification post` (they come from "Shell").
