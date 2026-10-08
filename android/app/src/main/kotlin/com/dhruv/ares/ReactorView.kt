@@ -112,6 +112,9 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     /** A colour that wins over the state and power colours while set (the home screen: green for an incoming call). */
     var tintOverride: Int? = null
         set(v) { field = v; invalidate() }
+    /** How alive she is while online (1 = fully; the home screen's night mode winds her nearly still). */
+    var ambient = 1f
+        set(v) { field = v.coerceIn(0f, 1f); invalidate() }
     /** A brief flare of the core (a notification landing). */
     fun pulse() { bloom = max(bloom, 0.35f); burst(10); invalidate() }
     /** Frames per second to aim for: 0 = every vsync (the app), lower where she's ambient (the home screen). */
@@ -148,7 +151,7 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         Power.ASLEEP -> grey
         Power.CHARGING -> mix(gold, white, chargeK * chargeK)
     }
-    private val wantAlive get() = when (power) { Power.ONLINE -> 1f; Power.STANDBY -> 0.08f; Power.CHARGING -> 0.15f + 0.85f * chargeK; else -> 0f }
+    private val wantAlive get() = when (power) { Power.ONLINE -> ambient; Power.STANDBY -> 0.08f; Power.CHARGING -> 0.15f + 0.85f * chargeK; else -> 0f }
     private fun mix(a: Int, b: Int, t: Float): Int {
         val k = t.coerceIn(0f, 1f)
         return Color.argb(255, (Color.red(a) + (Color.red(b) - Color.red(a)) * k).toInt(), (Color.green(a) + (Color.green(b) - Color.green(a)) * k).toInt(), (Color.blue(a) + (Color.blue(b) - Color.blue(a)) * k).toInt())

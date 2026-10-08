@@ -91,9 +91,22 @@ class HomeActivity : Activity(), Session.Ui {
     private val appsChanged = { showDock(); drawer.refresh() }
     private val schemeChanged = { applyScheme() }
     private val powerSave = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) = showPowerSave() }
-    private val testCall = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) = NotifStore.testCall(i.getStringExtra("name")) }
+    private val testCall = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            if (i.action == "com.dhruv.ares.TEST_MODE") { testMode = i.getStringExtra("mode")?.let { m -> Mode.entries.firstOrNull { it.name.equals(m, true) } }; updateMode() }
+            else NotifStore.testCall(i.getStringExtra("name"))
+        }
+    }
 
-    private data class Event(val id: Long, val title: String, val begin: Long, val end: Long, val allDay: Boolean, val where: String)
+    private data class Event(val id: Long, val title: String, val begin: Long, val end: Long, val allDay: Boolean, val where: String, val about: String = "")
+
+    // Modes (docs/launcher-v2-prompt.md §6)
+    private enum class Mode { NONE, MORNING, MEETING, NIGHT, DESK }
+    private var mode = Mode.NONE
+    private var modeBox: View? = null
+    private lateinit var nightLine: TextView
+    private var testMode: Mode? = null // (debug builds: adb shell am broadcast -a com.dhruv.ares.TEST_MODE --es mode night|morning|meeting|desk|none)
+    private val modeTick = object : Runnable { override fun run() { updateMode(); page0.postDelayed(this, 30_000) } }
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -128,7 +141,7 @@ class HomeActivity : Activity(), Session.Ui {
 
         pager.onScroll = { k ->
             schematic.translationX = -k * pager.width * 0.35f
-            schematic.alpha = 1f - 0.65f * k.coerceIn(0f, 1f)
+            schematic.alpha = (1f - 0.65f * k.coerceIn(0f, 1f)) * (if (mode == Mode.NIGHT) 0.35f else 1f)
             dots.text = if (k < 0.5f) "● ○" else "○ ●"
         }
         pager.onPage = { p -> closeReadout(); if (p == 1) { if (!askedCalendar()) askCalendar(); loadEvents(); renderCards() } }
@@ -138,6 +151,10 @@ class HomeActivity : Activity(), Session.Ui {
         findViewById<View>(R.id.handle).setOnClickListener { openDrawer() }
         page0.setOnLongClickListener { homeMenu(hint); true }
         page0.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> placeReactor() }
+        nightLine = TextView(this).apply {
+            textSize = 10f; letterSpacing = 0.25f; gravity = Gravity.CENTER; visibility = View.GONE; setPadding(0, (10 * dp).toInt(), 0, 0)
+            (this@HomeActivity.findViewById<View>(R.id.clock).parent as LinearLayout).addView(this)
+        }
         overlay = findViewById(R.id.overlay)
         overlay.onTap = { openNote(it) }
         overlay.onDismiss = { NotifStore.dismiss(it); showCaption("Dismissed · ${it.app}", 1800) }
@@ -177,8 +194,9 @@ class HomeActivity : Activity(), Session.Ui {
         NotifStore.listen(notesChanged)
         if (AresNotifs.enabled(this) && AresNotifs.live == null) runCatching { android.service.notification.NotificationListenerService.requestRebind(android.content.ComponentName(this, AresNotifs::class.java)) }
         showNotes(null)
+        page0.removeCallbacks(modeTick); page0.post(modeTick)
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) // (a ringing call on the emulator: adb shell am broadcast -a com.dhruv.ares.TEST_CALL [--es name Mom])
-            registerReceiver(testCall, IntentFilter("com.dhruv.ares.TEST_CALL"), Context.RECEIVER_EXPORTED)
+            registerReceiver(testCall, IntentFilter("com.dhruv.ares.TEST_CALL").apply { addAction("com.dhruv.ares.TEST_MODE") }, Context.RECEIVER_EXPORTED)
         registerReceiver(powerSave, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED))
         showPowerSave()
         showJobs()
@@ -195,6 +213,7 @@ class HomeActivity : Activity(), Session.Ui {
         JobStore.unlisten(jobsChanged)
         PowerStore.unlisten(powerChanged)
         NotifStore.unlisten(notesChanged)
+        page0.removeCallbacks(modeTick)
         runCatching { unregisterReceiver(powerSave) }
         runCatching { unregisterReceiver(testCall) }
         statusPoll?.interrupt()
@@ -483,11 +502,12 @@ class HomeActivity : Activity(), Session.Ui {
 
     /** A ringing call: the rings go green and ripple out; ANSWER / DECLINE are the call's own buttons. */
     private fun showCall(call: NotifStore.Call?) {
-        reactor.tintOverride = if (call != null) GREEN else null
-        schematic.tintOverride = if (call != null) GREEN else null
+        val modeTint = if (mode == Mode.NIGHT) getColor(R.color.blue) else null
+        reactor.tintOverride = if (call != null) GREEN else modeTint
+        schematic.tintOverride = if (call != null) GREEN else modeTint
         overlay.ringing = call != null
         callBox?.let(page0::removeView); callBox = null
-        if (call == null) { schematic.dimBottom = readCard != null; return }
+        if (call == null) { schematic.dimBottom = readCard != null || modeBox != null; return }
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
             layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { bottomMargin = (40 * dp).toInt() }
@@ -502,6 +522,87 @@ class HomeActivity : Activity(), Session.Ui {
         callBox = box
         schematic.dimBottom = true
         summarise.visibility = View.GONE
+    }
+
+    // ---- Modes (docs/launcher-v2-prompt.md §6) ----------------------------------------------------------------------------
+
+    private val meetingLink = Regex("(https?://)?[\\w.-]*(zoom\\.us|meet\\.google\\.com|teams\\.microsoft\\.com|teams\\.live\\.com|webex\\.com)/[^\\s<>\"]*", RegexOption.IGNORE_CASE)
+
+    /** Which mode the home screen is in now: a meeting soon, night, the morning brief, at the Mac, or none. */
+    private fun updateMode() {
+        if (!::nightLine.isInitialized) return
+        val now = System.currentTimeMillis()
+        val cal = Calendar.getInstance()
+        val minute = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+        val today = "${cal.get(Calendar.YEAR)}-${cal.get(Calendar.DAY_OF_YEAR)}"
+        val soon = events.firstOrNull { !it.allDay && it.begin > now && it.begin - now <= 15 * 60_000 }
+        val st = macStatus?.takeIf { PowerStore.reach }
+        val atMac = PowerStore.mode == PowerStore.Mode.ONLINE && st != null && st.has("idle") && st.optInt("idle", 9999) < 120 && !st.optBoolean("locked")
+        val next = testMode ?: when {
+            soon != null -> Mode.MEETING
+            minute >= 22 * 60 + 30 || minute < 6 * 60 -> Mode.NIGHT
+            minute in 5 * 60 until 12 * 60 && Ares.prefs(this).getString("homeMorning", null) != today -> Mode.MORNING
+            atMac -> Mode.DESK
+            else -> Mode.NONE
+        }
+        showMode(next, soon, today)
+    }
+
+    private fun showMode(m: Mode, soon: Event?, today: String) {
+        val was = mode
+        mode = m
+        // Night: dim blue, the reactor almost still, a quiet clock with the next alarm, the dock stepped back
+        val night = m == Mode.NIGHT
+        if (NotifStore.call == null) { reactor.tintOverride = if (night) getColor(R.color.blue) else null; schematic.tintOverride = if (night) getColor(R.color.blue) else null }
+        reactor.ambient = if (night) 0.12f else 1f
+        schematic.alpha = (1f - 0.65f * pager.page) * (if (night) 0.35f else 1f)
+        findViewById<View>(R.id.clock).alpha = if (night) 0.5f else 1f
+        findViewById<View>(R.id.date).visibility = if (night) View.GONE else View.VISIBLE
+        nightLine.visibility = if (night) View.VISIBLE else View.GONE
+        if (night) {
+            val alarm = getSystemService(android.app.AlarmManager::class.java).nextAlarmClock?.triggerTime
+            nightLine.setTextColor(getColor(R.color.blue))
+            nightLine.text = if (alarm == null || alarm - System.currentTimeMillis() > 20 * 3600_000L) "NO ALARM SET"
+                else ((alarm - System.currentTimeMillis()) / 60_000).let { mins -> "ALARM ${time(alarm)} · ${mins / 60}H ${mins % 60}M OF SLEEP".uppercase() }
+        }
+        findViewById<View>(R.id.bottom).alpha = if (night) 0.4f else 1f
+        overlay.alpha = if (night) 0.45f else 1f; summarise.alpha = if (night) 0.45f else 1f
+        overlay.deskLink = m == Mode.DESK
+        overlay.countdown = soon?.let { 1f - ((it.begin - System.currentTimeMillis()) / (15 * 60_000f)) }
+        if (was != m || m == Mode.MEETING) {
+            modeBox?.let(page0::removeView); modeBox = null
+            when (m) {
+                Mode.MEETING -> soon?.let { e ->
+                    val mins = ((e.begin - System.currentTimeMillis()) / 60_000).coerceAtLeast(1)
+                    val link = meetingLink.find(e.where + " " + e.about + " " + e.title)?.value?.let { if (it.startsWith("http")) it else "https://$it" }
+                    modeBox = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+                        layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { bottomMargin = (40 * dp).toInt() }
+                        addView(TextView(this@HomeActivity).apply { text = "${e.title.uppercase().take(22)} · IN $mins MIN"; textSize = 12f; letterSpacing = 0.25f; setTextColor(getColor(R.color.amber)); gravity = Gravity.CENTER })
+                        addView(LinearLayout(this@HomeActivity).apply {
+                            gravity = Gravity.CENTER; setPadding(0, (12 * dp).toInt(), 0, 0)
+                            addView(pill(if (link != null) "JOIN" else "OPEN", getColor(R.color.amber), R.drawable.bg_amber) { if (link != null) Ares.open(this@HomeActivity, link) else openEvent(e) })
+                        })
+                    }
+                }
+                Mode.MORNING -> {
+                    val c = card("GOOD MORNING", null, add = false)
+                    val todays = events.filter { !it.allDay && android.text.format.DateUtils.isToday(it.begin) }
+                    c.addView(row(if (todays.isEmpty()) "Nothing on the calendar today" else "${todays.size} event${if (todays.size == 1) "" else "s"} · first at ${time(todays.first().begin)}", null, getColor(R.color.text), null))
+                    val done = JobStore.list().count { it.status == "done" && !it.seen }
+                    if (done > 0) c.addView(row("$done job${if (done == 1) "" else "s"} finished overnight", null, getColor(R.color.text)) { startActivity(WorkActivity.intent(this)) })
+                    if (Ares.paired(this)) c.addView(row("Server ${PowerStore.header().lowercase()}", null, getColor(R.color.text_user), null))
+                    c.layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { leftMargin = (16 * dp).toInt(); rightMargin = (16 * dp).toInt(); bottomMargin = (34 * dp).toInt() }
+                    c.setOnClickListener { Ares.prefs(this).edit().putString("homeMorning", today).apply(); updateMode() }
+                    modeBox = c
+                }
+                else -> {}
+            }
+            modeBox?.let(page0::addView)
+        }
+        schematic.dimBottom = readCard != null || callBox != null || modeBox != null
+        readTaps.forEach { it?.isEnabled = modeBox == null }
+        if (was != m) state(session.state)
     }
 
     private fun notificationsMenu() {
@@ -524,7 +625,7 @@ class HomeActivity : Activity(), Session.Ui {
         statusPoll = thread(name = "ares-home-status", isDaemon = true) {
             while (!Thread.currentThread().isInterrupted) {
                 runCatching { AresClient(this).status() }.onSuccess { macStatus = it }
-                runOnUiThread { showReadouts(); if (pager.page == 1) renderCards() }
+                runOnUiThread { showReadouts(); updateMode(); if (pager.page == 1) renderCards() }
                 try { Thread.sleep(60_000) } catch (e: InterruptedException) { return@thread }
                 runOnUiThread { loadEvents() }
             }
@@ -543,11 +644,13 @@ class HomeActivity : Activity(), Session.Ui {
             s == State.THINKING -> "THINKING"
             s == State.SPEAKING -> "SPEAKING · TAP TO STOP"
             !Ares.paired(this) -> "TAP TO SET UP ARES"
+            mode == Mode.NIGHT -> "GOOD NIGHT"
+            mode == Mode.DESK && PowerStore.mode == PowerStore.Mode.ONLINE -> "LINKED TO THE MAC"
             PowerStore.mode == PowerStore.Mode.ONLINE -> "HOLD · TALK     TAP · OPEN"
             else -> PowerStore.header()
         }
         hint.setTextColor(when (PowerStore.mode) {
-            PowerStore.Mode.ONLINE, PowerStore.Mode.UNKNOWN -> Scheme.color; PowerStore.Mode.STANDBY -> getColor(R.color.blue)
+            PowerStore.Mode.ONLINE, PowerStore.Mode.UNKNOWN -> if (mode == Mode.NIGHT) getColor(R.color.blue) else Scheme.color; PowerStore.Mode.STANDBY -> getColor(R.color.blue)
             PowerStore.Mode.ASLEEP -> getColor(R.color.grey); else -> getColor(R.color.gold)
         })
     }
@@ -732,13 +835,13 @@ class HomeActivity : Activity(), Session.Ui {
             val end = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 2); set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0) }.timeInMillis
             val uri = CalendarContract.Instances.CONTENT_URI.buildUpon().also { ContentUris.appendId(it, now - 6 * 3600_000L); ContentUris.appendId(it, end) }.build()
             val cols = arrayOf(CalendarContract.Instances.EVENT_ID, CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN,
-                CalendarContract.Instances.END, CalendarContract.Instances.ALL_DAY, CalendarContract.Instances.EVENT_LOCATION)
+                CalendarContract.Instances.END, CalendarContract.Instances.ALL_DAY, CalendarContract.Instances.EVENT_LOCATION, CalendarContract.Instances.DESCRIPTION)
             val list = runCatching {
                 contentResolver.query(uri, cols, "${CalendarContract.Instances.VISIBLE} = 1", null, "${CalendarContract.Instances.BEGIN} ASC")?.use { c ->
-                    buildList { while (c.moveToNext()) add(Event(c.getLong(0), c.getString(1).orEmpty().ifBlank { "(no title)" }, c.getLong(2), c.getLong(3), c.getInt(4) == 1, c.getString(5).orEmpty())) }
+                    buildList { while (c.moveToNext()) add(Event(c.getLong(0), c.getString(1).orEmpty().ifBlank { "(no title)" }, c.getLong(2), c.getLong(3), c.getInt(4) == 1, c.getString(5).orEmpty(), c.getString(6).orEmpty())) }
                 }.orEmpty()
             }.getOrDefault(emptyList()).filter { it.end > now }
-            runOnUiThread { events = list; showReadouts(); if (pager.page == 1) renderCards() }
+            runOnUiThread { events = list; showReadouts(); updateMode(); if (pager.page == 1) renderCards() }
         }
     }
 
