@@ -300,3 +300,20 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   Live: `window.ares.orb.test('state'|'act'|'card'|'call'|'usage'|'drag'|'caret'|'context'|'portal'|'reload'|'metrics', arg)` from the
   harness; `ARES_HARNESS_PAGE=orb.html node scripts/harness.mjs eval …` reads the orb's page; screenshot with
   `screencapture -l <id>` (id from `test('state').media`). Idle renderer CPU measured 0% (2026-10-06).
+
+## The ARES launcher (docs/launcher-prompt.md; Android, built 2026-10-08)
+
+- `HomeActivity` (HOME category, own task affinity) is the home screen only if chosen in the system's Home app picker
+  (`HomeActivity.chooseHome`, also in MainActivity's menu and the home long-press menu). MainActivity and the app icon are unchanged.
+- `HomePager` = the two pages (0 reactor, 1 cards) + the upward swipe to the drawer (the dock reuses it with `pages = false`).
+  `Apps` (LauncherApps listing, dock slots in prefs `dock`), `Icons` (monochrome layer tinted cyan, else desaturated; prefs
+  `homeOriginalIcons`), `AppDrawer` (rows of four, letter rail, search → "Ask ARES", long-press shortcuts/dock/info/uninstall).
+- The reactor and schematic are the app's own views with `maxFps` (30/20 on home) and `still` (Power Saving). Hold-to-talk only inside
+  the circle; the view's corners belong to the page's long-press menu. `Bubble.home(true)` hides the floating bubble while home is up.
+- Cards: NEXT from the phone's calendar (READ_CALENDAR, asked when page 1 first opens), WORK from JobStore (OK = `/api/jobs/<id>/answer`,
+  STOP ALL = `/api/autonomy/stop` after a confirm), SYSTEMS from `/api/status` (hidden while unreachable) + the phone's battery.
+- Testing: emulator recipe as in "Power from the phone"; `adb shell cmd package set-home-activity com.dhruv.ares/.HomeActivity`, and back to
+  `com.google.android.apps.nexuslauncher/.NexusLauncherActivity` after. For jobs/approvals without Claude, point the app's `url` pref at a
+  small fake phone server (ndjson `/api/events` hello + `job` messages; track lines with `res.on('close')`, not `req`). The emulator's
+  software GPU pins RenderThread for the reactor (home 27 fps vs the app's 21): measure battery on the real phone. Saver mode needs
+  `dumpsys battery unplug` first on the emulator.
