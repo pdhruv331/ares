@@ -23,6 +23,8 @@
                 </LinearLayout>
                 <com.dhruv.ares.ReactorView android:id="@+id/reactor" android:layout_width="240dp" android:layout_height="240dp"
                     android:layout_gravity="top|center_horizontal" android:contentDescription="ARES"/>
+                <!-- Notification orbs, the call ripples, the meeting ring, the Mac link, the Buds (docs/launcher-v2-prompt.md §5–7) -->
+                <com.dhruv.ares.HomeOverlay android:id="@+id/overlay" android:layout_width="match_parent" android:layout_height="match_parent"/>
                 <TextView android:id="@+id/caption" android:layout_width="match_parent" android:layout_height="wrap_content"
                     android:layout_gravity="top" android:paddingStart="28dp" android:paddingEnd="28dp" android:gravity="center"
                     android:textSize="12sp" android:textColor="@color/text_user" android:maxLines="3" android:ellipsize="end" android:alpha="0"

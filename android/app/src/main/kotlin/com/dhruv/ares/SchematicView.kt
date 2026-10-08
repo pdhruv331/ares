@@ -37,6 +37,9 @@ class SchematicView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet?
     private val ringA = intArrayOf(70, 50, 36, 26, 18, 50)
     /** While a caption shows, the bottom callouts step back so the words have the floor. */
     var dimBottom = false
+    /** As ReactorView: wins over the scheme while set. */
+    var tintOverride: Int? = null
+        set(v) { field = v; glow = null; invalidate() }
     /** As ReactorView: a lower frame rate where it's ambient, or held still. */
     var maxFps = 0
     var still = false
@@ -56,11 +59,11 @@ class SchematicView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet?
         bottomAlpha += ((if (dimBottom) 0.15f else 1f) - bottomAlpha) * (dt * 6f).coerceAtMost(1f)
         val (cx, cy, r) = center.let { Triple(it[0], it[1], it[2]) }
         if (r <= 0f) return
-        val sc = Scheme.color // (the colour scheme: the paints follow it, alphas are set before each draw)
+        val sc = tintOverride ?: Scheme.color // (the colour scheme, or the home screen's call green: the paints follow it, alphas are set before each draw)
         if (line.color or (0xFF shl 24) != sc or (0xFF shl 24)) { line.color = sc; fill.color = sc; text.color = sc; glow = null }
 
         // A soft glow in the middle of the sheet
-        if (glow == null || glowKey != r) { glowKey = r; glow = RadialGradient(0f, 0f, r * 3.1f, Scheme.alpha(30), Color.TRANSPARENT, Shader.TileMode.CLAMP) }
+        if (glow == null || glowKey != r) { glowKey = r; glow = RadialGradient(0f, 0f, r * 3.1f, Color.argb(30, Color.red(sc), Color.green(sc), Color.blue(sc)), Color.TRANSPARENT, Shader.TileMode.CLAMP) }
         canvas.save(); canvas.translate(cx, cy); fill.shader = glow; canvas.drawCircle(0f, 0f, r * 3.1f, fill); fill.shader = null; canvas.restore()
 
         // Construction rings
@@ -87,7 +90,7 @@ class SchematicView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet?
             if (i % 18 == 0) { text.alpha = 150; canvas.drawText("${i * 5}°", cx + cos(a).toFloat() * (r0 + 26 * dp), cy + sin(a).toFloat() * (r0 + 26 * dp) + 3 * dp, text) }
         }
         // The radar sweep between the 1.3 and 1.62 rings
-        val sg = SweepGradient(cx, cy, intArrayOf(Scheme.alpha(60), Color.TRANSPARENT, Color.TRANSPARENT), floatArrayOf(0f, 0.14f, 1f))
+        val sg = SweepGradient(cx, cy, intArrayOf(Color.argb(60, Color.red(sc), Color.green(sc), Color.blue(sc)), Color.TRANSPARENT, Color.TRANSPARENT), floatArrayOf(0f, 0.14f, 1f))
         canvas.save(); canvas.rotate(sweep, cx, cy)
         fill.shader = sg; line.pathEffect = null
         val ring = Paint(fill).apply { style = Paint.Style.STROKE; strokeWidth = r * 0.32f }

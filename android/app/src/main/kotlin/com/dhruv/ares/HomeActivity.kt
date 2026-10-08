@@ -52,6 +52,8 @@ class HomeActivity : Activity(), Session.Ui {
         }
         private const val CALENDAR = 7
         private const val MIC = 8
+        private const val REPLY = 9
+        private val GREEN = android.graphics.Color.parseColor("#4ADE80")
     }
 
     private lateinit var session: Session
@@ -77,12 +79,19 @@ class HomeActivity : Activity(), Session.Ui {
     private val readTaps = arrayOfNulls<View>(2)
     private var readCard: View? = null
     private var readScrim: View? = null
-    private val fadeCaption = Runnable { caption.animate().alpha(0f).setDuration(600).start(); schematic.dimBottom = false }
+    // Notifications (docs/launcher-v2-prompt.md §5)
+    private lateinit var overlay: HomeOverlay
+    private lateinit var summarise: TextView
+    private var callBox: View? = null
+    private var replyTo: NotifStore.Item? = null
+    private val notesChanged: (NotifStore.Item?) -> Unit = { arrived -> showNotes(arrived) }
+    private val fadeCaption = Runnable { caption.animate().alpha(0f).setDuration(600).start(); schematic.dimBottom = readCard != null || callBox != null; showNotes(null) }
     private val jobsChanged = { showJobs() }
     private val powerChanged = { showPower() }
     private val appsChanged = { showDock(); drawer.refresh() }
     private val schemeChanged = { applyScheme() }
     private val powerSave = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) = showPowerSave() }
+    private val testCall = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) = NotifStore.testCall(i.getStringExtra("name")) }
 
     private data class Event(val id: Long, val title: String, val begin: Long, val end: Long, val allDay: Boolean, val where: String)
 
@@ -129,6 +138,16 @@ class HomeActivity : Activity(), Session.Ui {
         findViewById<View>(R.id.handle).setOnClickListener { openDrawer() }
         page0.setOnLongClickListener { homeMenu(hint); true }
         page0.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> placeReactor() }
+        overlay = findViewById(R.id.overlay)
+        overlay.onTap = { openNote(it) }
+        overlay.onDismiss = { NotifStore.dismiss(it); showCaption("Dismissed · ${it.app}", 1800) }
+        summarise = TextView(this).apply {
+            text = "SUMMARISE"; textSize = 9f; letterSpacing = 0.3f; gravity = Gravity.CENTER; visibility = View.GONE
+            setPadding((12 * dp).toInt(), (6 * dp).toInt(), (12 * dp).toInt(), (6 * dp).toInt())
+            layoutParams = FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL)
+            setOnClickListener { summariseNotes() }
+            page0.addView(this)
+        }
         for (i in 0..1) readTaps[i] = View(this).apply {
             contentDescription = if (i == 0) "Next events" else "Server"
             layoutParams = FrameLayout.LayoutParams((140 * dp).toInt(), (48 * dp).toInt(), Gravity.TOP or Gravity.START)
@@ -155,6 +174,11 @@ class HomeActivity : Activity(), Session.Ui {
         if (Ares.paired(this)) AresService.start(this)
         JobStore.listen(jobsChanged)
         PowerStore.listen(powerChanged)
+        NotifStore.listen(notesChanged)
+        if (AresNotifs.enabled(this) && AresNotifs.live == null) runCatching { android.service.notification.NotificationListenerService.requestRebind(android.content.ComponentName(this, AresNotifs::class.java)) }
+        showNotes(null)
+        if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) // (a ringing call on the emulator: adb shell am broadcast -a com.dhruv.ares.TEST_CALL [--es name Mom])
+            registerReceiver(testCall, IntentFilter("com.dhruv.ares.TEST_CALL"), Context.RECEIVER_EXPORTED)
         registerReceiver(powerSave, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED))
         showPowerSave()
         showJobs()
@@ -170,7 +194,9 @@ class HomeActivity : Activity(), Session.Ui {
         session.setHandsFree(false, "left")
         JobStore.unlisten(jobsChanged)
         PowerStore.unlisten(powerChanged)
+        NotifStore.unlisten(notesChanged)
         runCatching { unregisterReceiver(powerSave) }
+        runCatching { unregisterReceiver(testCall) }
         statusPoll?.interrupt()
         super.onPause()
     }
@@ -233,6 +259,9 @@ class HomeActivity : Activity(), Session.Ui {
             val ox = sl[0] - schematic.translationX - (pl[0] - page0.translationX); val oy = (sl[1] - pl[1]).toFloat()
             readTaps[0]?.apply { translationX = ox + 6 * dp; translationY = oy + by - 26 * dp }
             readTaps[1]?.apply { translationX = ox + schematic.width - 146 * dp; translationY = oy + by - 26 * dp }
+            val pcx = reactor.left + reactor.width / 2f; val pcy = reactor.top + reactor.height / 2f
+            overlay.place(pcx, pcy, r)
+            summarise.translationY = pcy + r * 1.2f
         }
     }
 
@@ -301,7 +330,7 @@ class HomeActivity : Activity(), Session.Ui {
 
     private fun showPowerSave() {
         val save = getSystemService(PowerManager::class.java).isPowerSaveMode
-        reactor.still = save; schematic.still = save
+        reactor.still = save; schematic.still = save; overlay.still = save
     }
 
     private fun showJobs() {
@@ -343,10 +372,16 @@ class HomeActivity : Activity(), Session.Ui {
             val claude = st?.optJSONObject("claude")?.let { cl -> listOfNotNull(cl.opt("fiveHour")?.takeIf { it != JSONObject.NULL }?.let { "5H $it%" }, cl.opt("week")?.takeIf { it != JSONObject.NULL }?.let { "week $it%" }).joinToString(" · ") }?.ifBlank { null }
             if (claude != null) c.addView(row("Claude", claude, getColor(R.color.text), null))
         }
-        val tap = readTaps[which] ?: return
+        showCard(c, if (which == 0) 0 else 1)
+    }
+
+    /** A card over the bottom of the reactor page (a readout, a notification), growing out of the left or right readout or the middle (2). */
+    private fun showCard(c: LinearLayout, from: Int) {
+        if (readCard != null) closeReadout()
+        val tap = readTaps[0] ?: return
         val scrim = View(this).apply { setOnClickListener { closeReadout() }; layoutParams = FrameLayout.LayoutParams(-1, -1) }
         page0.addView(scrim)
-        // The card's bottom sits just under the callout's text; it grows out of that corner
+        // The card's bottom sits just under the readouts' text
         c.layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
             leftMargin = (16 * dp).toInt(); rightMargin = (16 * dp).toInt()
             bottomMargin = (page0.height - (tap.translationY + tap.height)).toInt().coerceAtLeast(0)
@@ -354,9 +389,10 @@ class HomeActivity : Activity(), Session.Ui {
         page0.addView(c)
         readCard = c; readScrim = scrim
         schematic.dimBottom = true
+        summarise.visibility = View.GONE
         c.alpha = 0f
         c.post {
-            c.pivotX = if (which == 0) 0f else c.width.toFloat(); c.pivotY = c.height.toFloat()
+            c.pivotX = when (from) { 0 -> 0f; 1 -> c.width.toFloat(); else -> c.width / 2f }; c.pivotY = if (from == 2) 0f else c.height.toFloat()
             c.scaleX = 0.15f; c.scaleY = 0.15f
             c.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(android.view.animation.DecelerateInterpolator(1.6f)).start()
         }
@@ -367,8 +403,114 @@ class HomeActivity : Activity(), Session.Ui {
         val s = readScrim
         readCard = null; readScrim = null
         schematic.dimBottom = false
+        showNotes(null)
         c.animate().alpha(0f).scaleX(0.15f).scaleY(0.15f).setDuration(200).withEndAction { page0.removeView(c) }.start()
         s?.let(page0::removeView)
+    }
+
+    // ---- Notifications (docs/launcher-v2-prompt.md §5) -------------------------------------------------------------------
+
+    private fun showNotes(arrived: NotifStore.Item?) {
+        val items = NotifStore.items
+        overlay.notes = items
+        summarise.visibility = if (items.size >= 2 && readCard == null && callBox == null && Ares.paired(this)) View.VISIBLE else View.GONE
+        summarise.setTextColor(Scheme.color)
+        summarise.background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = 14 * dp; setColor(Scheme.alpha(18)); setStroke(dp.toInt().coerceAtLeast(1), Scheme.alpha(90)) }
+        summarise.text = "SUMMARISE · ${items.size}"
+        showCall(NotifStore.call)
+        if (arrived != null && resumed && pager.page == 0) overlay.spark {
+            reactor.pulse()
+            showCaption("${arrived.app} · ${arrived.title}", 2600)
+        }
+    }
+
+    /** A notification orb tapped: what it says, and reply by voice / open / dismiss. */
+    private fun openNote(n: NotifStore.Item) {
+        Haptics.tick(this)
+        val accent = if (n.person) getColor(R.color.amber) else Scheme.color
+        val c = card(n.app.uppercase(), DateFormat.getTimeFormat(this).format(java.util.Date(n.time)), add = false)
+        if (n.title.isNotEmpty()) c.addView(TextView(this).apply { text = n.title; textSize = 14f; setTextColor(getColor(R.color.text)); setPadding(0, (2 * dp).toInt(), 0, (4 * dp).toInt()) })
+        if (n.text.isNotEmpty()) c.addView(TextView(this).apply { text = n.text; textSize = 12f; setTextColor(getColor(R.color.text_user)); maxLines = 5; ellipsize = TextUtils.TruncateAt.END })
+        c.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END; setPadding(0, (10 * dp).toInt(), 0, 0)
+            addView(pill("DISMISS", Scheme.color, null) { closeReadout(); NotifStore.dismiss(n) })
+            addView(pill("OPEN", Scheme.color, null) { closeReadout(); NotifStore.open(this@HomeActivity, n) })
+            if (n.reply != null) addView(pill("REPLY BY VOICE", accent, if (n.person) R.drawable.bg_amber else null) { closeReadout(); startReply(n) })
+        })
+        showCard(c, 2)
+    }
+
+    private fun startReply(n: NotifStore.Item) {
+        replyTo = n
+        runCatching {
+            startActivityForResult(Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Reply to ${n.title.ifBlank { n.app }}"), REPLY)
+        }.onFailure { Toast.makeText(this, "No speech recogniser on this phone.", Toast.LENGTH_SHORT).show() }
+    }
+
+    @Deprecated("Activity result for the voice reply")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REPLY) return
+        val n = replyTo ?: return
+        val said = data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.trim()
+        if (resultCode != RESULT_OK || said.isNullOrEmpty()) return
+        // The words are shown before anything is sent
+        val c = card("REPLY", n.title.ifBlank { n.app }.uppercase().take(24), add = false)
+        c.addView(TextView(this).apply { text = "“$said”"; textSize = 14f; setTextColor(getColor(R.color.text)) })
+        c.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END; setPadding(0, (10 * dp).toInt(), 0, 0)
+            addView(pill("CANCEL", Scheme.color, null) { closeReadout() })
+            addView(pill("SEND", getColor(R.color.amber), R.drawable.bg_amber) {
+                closeReadout()
+                val ok = NotifStore.reply(this@HomeActivity, n, said)
+                showCaption(if (ok) "Sent to ${n.title.ifBlank { n.app }}." else "That reply didn't go through.", 2500)
+            })
+        })
+        showCard(c, 2)
+    }
+
+    /** SUMMARISE: the only path that sends the notifications' text to ARES (on the Mac), and only on a tap. */
+    private fun summariseNotes() {
+        val items = NotifStore.items
+        if (items.isEmpty()) return
+        val lines = items.take(12).joinToString("\n") { "- ${it.app}: ${it.title}${if (it.text.isNotBlank()) " — " + it.text.take(200) else ""}" }
+        if (!Ares.paired(this) || PowerStore.mode != PowerStore.Mode.ONLINE) { Haptics.error(this); showCaption(notReady(), 3500); return }
+        Haptics.tick(this)
+        session.ask("Summarise my phone's notifications in a sentence or two, and tell me if anyone is waiting for an answer:\n$lines", voice = true)
+    }
+
+    /** A ringing call: the rings go green and ripple out; ANSWER / DECLINE are the call's own buttons. */
+    private fun showCall(call: NotifStore.Call?) {
+        reactor.tintOverride = if (call != null) GREEN else null
+        schematic.tintOverride = if (call != null) GREEN else null
+        overlay.ringing = call != null
+        callBox?.let(page0::removeView); callBox = null
+        if (call == null) { schematic.dimBottom = readCard != null; return }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL
+            layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { bottomMargin = (40 * dp).toInt() }
+            addView(TextView(this@HomeActivity).apply { text = "INCOMING · ${call.name.uppercase()}"; textSize = 12f; letterSpacing = 0.3f; setTextColor(GREEN); gravity = Gravity.CENTER })
+            addView(LinearLayout(this@HomeActivity).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(0, (14 * dp).toInt(), 0, 0)
+                addView(pill("DECLINE", android.graphics.Color.parseColor("#FF6050"), null) { NotifStore.fire(this@HomeActivity, call.decline) })
+                addView(pill("ANSWER", GREEN, null) { NotifStore.fire(this@HomeActivity, call.answer ?: call.content) })
+            })
+        }
+        page0.addView(box)
+        callBox = box
+        schematic.dimBottom = true
+        summarise.visibility = View.GONE
+    }
+
+    private fun notificationsMenu() {
+        val on = AresNotifs.enabled(this)
+        AlertDialog.Builder(this).setTitle("Notifications on the home screen")
+            .setMessage(if (on) "On: your notifications gather around the reactor. They stay on the phone; only Summarise sends their text to ARES on your Mac.\n\nTo turn it off, switch ARES off on the next screen."
+                else "Your notifications can gather as orbs around the reactor: tap one to read it and reply by voice, drag it into the core to dismiss it. Calls make the rings pulse green.\n\nThey stay on the phone; only Summarise (when you tap it) sends their text to ARES on your Mac.\n\nOn the next screen, allow Notification access for ARES.")
+            .setPositiveButton("Open settings") { _, _ -> runCatching { startActivity(AresNotifs.settings(this)) }.onFailure { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) } }
+            .setNegativeButton("Not now", null).show()
     }
 
     private fun openEvent(e: Event) {
@@ -416,6 +558,7 @@ class HomeActivity : Activity(), Session.Ui {
         caption.text = text.replace(Regex("\\s+"), " ").trim()
         schematic.dimBottom = true
         caption.alpha = 0.75f // (subtle: small, muted, never at full strength)
+        summarise.visibility = View.GONE
         if (fadeAfterMs != null) caption.postDelayed(fadeCaption, fadeAfterMs)
     }
 
@@ -445,6 +588,7 @@ class HomeActivity : Activity(), Session.Ui {
         if (Ares.paired(this) && (PowerStore.mode == PowerStore.Mode.STANDBY || PowerStore.mode == PowerStore.Mode.OFFLINE)) m.menu.add(0, 3, 1, "Wake ARES")
         if (Ares.paired(this) && (PowerStore.mode == PowerStore.Mode.ONLINE || PowerStore.mode == PowerStore.Mode.STANDBY)) m.menu.add(0, 7, 1, "Power down…")
         m.menu.add(1, 8, 2, "Colour scheme…")
+        m.menu.add(1, 9, 2, "Notifications on the home screen…")
         m.menu.add(1, 4, 2, "Original icons").apply { isCheckable = true; isChecked = Icons.original(this@HomeActivity) }
         m.menu.add(1, 5, 3, "Readouts on the reactor").apply { isCheckable = true; isChecked = p.getBoolean("homeCallouts", true) }
         m.menu.add(1, 6, 4, "Home screen app…")
@@ -455,6 +599,7 @@ class HomeActivity : Activity(), Session.Ui {
                 3 -> powerAct("wake")
                 7 -> PowerSheet.show(this) { powerAct("powerdown") }
                 8 -> chooseScheme()
+                9 -> notificationsMenu()
                 4 -> { p.edit().putBoolean("homeOriginalIcons", !Icons.original(this)).apply(); Icons.clear(); showDock(); drawer.refresh() }
                 5 -> { p.edit().putBoolean("homeCallouts", !p.getBoolean("homeCallouts", true)).apply(); showReadouts() }
                 6 -> AlertDialog.Builder(this).setTitle("Home screen app")

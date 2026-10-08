@@ -109,6 +109,11 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     private var orbs: List<Pair<Float, Boolean>> = emptyList()
     private var orbIds: List<String> = emptyList()
     private var orbSpin = 0f
+    /** A colour that wins over the state and power colours while set (the home screen: green for an incoming call). */
+    var tintOverride: Int? = null
+        set(v) { field = v; invalidate() }
+    /** A brief flare of the core (a notification landing). */
+    fun pulse() { bloom = max(bloom, 0.35f); burst(10); invalidate() }
     /** Frames per second to aim for: 0 = every vsync (the app), lower where she's ambient (the home screen). */
     var maxFps = 0
     /** Draw once and hold still (Power Saving on the home screen). */
@@ -136,7 +141,7 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     }
 
     private val stateHue get() = when (state) { State.THINKING -> purple; State.OFFLINE -> amber; State.SPEAKING -> white; else -> Scheme.color }
-    private val target get() = when (power) {
+    private val target: Int get() = tintOverride ?: when (power) {
         Power.ONLINE -> stateHue
         Power.STANDBY -> blue
         Power.OFFLINE, Power.SPINDOWN -> gold

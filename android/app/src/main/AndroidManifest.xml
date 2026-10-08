@@ -112,6 +112,12 @@
             <meta-data android:name="android.speech" android:resource="@xml/recognizer"/>
         </service>
 
+        <!-- Notifications around the reactor on the home screen (docs/launcher-v2-prompt.md §5); only with the user's Notification access -->
+        <service android:name=".AresNotifs" android:exported="true" android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter><action android:name="android.service.notification.NotificationListenerService"/></intent-filter>
+        </service>
+
         <activity android:name=".CallsActivity" android:exported="false" android:launchMode="singleTask" android:windowSoftInputMode="stateAlwaysHidden|adjustResize"/>
 
         <!-- Firebase Cloud Messaging, for pushes only: started by the app with the config from the Mac (AresApp),
