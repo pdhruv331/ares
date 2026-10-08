@@ -73,6 +73,10 @@ class HomeActivity : Activity(), Session.Ui {
     private var events: List<Event> = emptyList()
     private var pickSlot = -1
     private var lastState = State.IDLE
+    // Readouts that open in place (docs/launcher-v2-prompt.md §4): two tap targets over the callouts, and the open card
+    private val readTaps = arrayOfNulls<View>(2)
+    private var readCard: View? = null
+    private var readScrim: View? = null
     private val fadeCaption = Runnable { caption.animate().alpha(0f).setDuration(600).start(); schematic.dimBottom = false }
     private val jobsChanged = { showJobs() }
     private val powerChanged = { showPower() }
@@ -118,13 +122,19 @@ class HomeActivity : Activity(), Session.Ui {
             schematic.alpha = 1f - 0.65f * k.coerceIn(0f, 1f)
             dots.text = if (k < 0.5f) "● ○" else "○ ●"
         }
-        pager.onPage = { p -> if (p == 1) { if (!askedCalendar()) askCalendar(); loadEvents(); renderCards() } }
+        pager.onPage = { p -> closeReadout(); if (p == 1) { if (!askedCalendar()) askCalendar(); loadEvents(); renderCards() } }
         pager.onSwipeUp = { openDrawer() }
         pager.canSwipeUp = { _, _ -> pager.page == 0 || !page1.canScrollVertically(1) }
         findViewById<HomePager>(R.id.bottom).apply { pages = false; onSwipeUp = { openDrawer() } }
         findViewById<View>(R.id.handle).setOnClickListener { openDrawer() }
         page0.setOnLongClickListener { homeMenu(hint); true }
         page0.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> placeReactor() }
+        for (i in 0..1) readTaps[i] = View(this).apply {
+            contentDescription = if (i == 0) "Next events" else "Server"
+            layoutParams = FrameLayout.LayoutParams((140 * dp).toInt(), (48 * dp).toInt(), Gravity.TOP or Gravity.START)
+            setOnClickListener { openReadout(i) }
+            page0.addView(this)
+        }
 
         drawer = AppDrawer(this, drawerView,
             onAsk = { q -> pager.go(0); ask(q) },
@@ -177,6 +187,7 @@ class HomeActivity : Activity(), Session.Ui {
         super.onNewIntent(intent)
         // Home always comes back to the reactor: gliding if you're here already, straight there coming back from elsewhere
         if (intent.hasCategory(Intent.CATEGORY_HOME)) {
+            closeReadout()
             if (drawer.isOpen) drawer.close(animate = resumed)
             pager.go(0, animate = resumed)
         }
@@ -184,6 +195,7 @@ class HomeActivity : Activity(), Session.Ui {
 
     private fun back() {
         when {
+            readCard != null -> closeReadout()
             drawer.isOpen -> drawer.close()
             pager.page != 0 -> pager.go(0)
         }
@@ -214,6 +226,13 @@ class HomeActivity : Activity(), Session.Ui {
             val x = rl[0] - page0.translationX - (sl[0] - schematic.translationX) + reactor.width / 2f
             val y = (rl[1] - sl[1]) + reactor.height / 2f
             schematic.center = floatArrayOf(x, y, reactor.width / 2f * 0.92f)
+            // The callouts' text boxes, as SchematicView draws them (14dp in from the edges, 1.72 r below the centre), in page coordinates
+            val r = reactor.width / 2f * 0.92f
+            val by = (y + r * 1.72f).coerceIn(60 * dp, schematic.height - 20 * dp)
+            val pl = IntArray(2).also(page0::getLocationInWindow)
+            val ox = sl[0] - schematic.translationX - (pl[0] - page0.translationX); val oy = (sl[1] - pl[1]).toFloat()
+            readTaps[0]?.apply { translationX = ox + 6 * dp; translationY = oy + by - 26 * dp }
+            readTaps[1]?.apply { translationX = ox + schematic.width - 146 * dp; translationY = oy + by - 26 * dp }
         }
     }
 
@@ -287,18 +306,74 @@ class HomeActivity : Activity(), Session.Ui {
 
     private fun showJobs() {
         reactor.jobs(JobStore.list())
+        showReadouts()
         if (pager.page == 1) renderCards()
     }
 
-    /** The bottom two callouts: NEXT (the next event) and CLAUDE (5-hour usage); each hides with nothing to say. */
+    /** The bottom two callouts: NEXT (the next event) and SERVER (the Mac's state and jobs); each hides with nothing to say. */
     private fun showReadouts() {
         val on = Ares.prefs(this).getBoolean("homeCallouts", true)
         val now = System.currentTimeMillis()
         val next = events.firstOrNull { !it.allDay && it.end > now }?.let { "${time(it.begin)} ${it.title}".take(24) }
-        val five = macStatus?.takeIf { PowerStore.reach }?.optJSONObject("claude")?.opt("fiveHour")?.takeIf { it != JSONObject.NULL }
-        val claude = if (Ares.paired(this) && five != null) "5H $five%" else null
+        val jobs = JobStore.working + JobStore.waiting
+        val server = if (!Ares.paired(this)) null else if (PowerStore.mode == PowerStore.Mode.ONLINE && jobs > 0) "ONLINE · $jobs JOB${if (jobs == 1) "" else "S"}" else PowerStore.header()
         val empty = "" to ""
-        schematic.readouts = listOf(empty, empty, if (on && next != null) "NEXT" to next else empty, if (on && claude != null) "CLAUDE" to claude else empty)
+        schematic.readouts = listOf(empty, empty, if (on && next != null) "NEXT" to next else empty, if (on && server != null) "SERVER" to server else empty)
+        readTaps[0]?.visibility = if (on && next != null) View.VISIBLE else View.GONE
+        readTaps[1]?.visibility = if (on && server != null) View.VISIBLE else View.GONE
+    }
+
+    /** A readout grows into a card where it is (left = NEXT, right = SERVER); a tap anywhere else folds it back. */
+    private fun openReadout(which: Int) {
+        if (readCard != null) return closeReadout()
+        Haptics.tick(this)
+        val c = card(if (which == 0) "NEXT" else "SERVER", if (which == 0) "CALENDAR" else macStatus?.optString("host")?.takeIf { it.isNotBlank() && PowerStore.reach }?.uppercase(), add = false)
+        if (which == 0) {
+            val now = System.currentTimeMillis()
+            val list = events.filter { it.end > now }.take(3)
+            if (!hasCalendar()) c.addView(row("Show your calendar here ›", null, Scheme.color) { closeReadout(); askCalendar() })
+            else if (list.isEmpty()) c.addView(row("Nothing coming up.", null, getColor(R.color.muted), null))
+            for (e in list) c.addView(row(if (e.allDay) "All day · ${e.title}" else "${time(e.begin)} ${e.title}", whenLabel(e), getColor(R.color.text)) { openEvent(e) })
+        } else {
+            val st = macStatus?.takeIf { PowerStore.reach }
+            val batt = st?.optJSONObject("battery")?.let { b -> "${b.optInt("pct")}% · ${if (b.optBoolean("charging")) "on power" else "battery"}" }
+            c.addView(row("Status", listOfNotNull(PowerStore.header().lowercase(), batt).joinToString(" · "), getColor(R.color.text)) { closeReadout(); startActivity(Intent(this, MainActivity::class.java)) })
+            val jobs = listOfNotNull(JobStore.working.takeIf { it > 0 }?.let { "$it running" }, JobStore.waiting.takeIf { it > 0 }?.let { "$it need${if (it == 1) "s" else ""} OK" }).joinToString(" · ").ifBlank { "none" }
+            c.addView(row("Jobs", jobs, getColor(R.color.text)) { closeReadout(); startActivity(WorkActivity.intent(this)) })
+            val claude = st?.optJSONObject("claude")?.let { cl -> listOfNotNull(cl.opt("fiveHour")?.takeIf { it != JSONObject.NULL }?.let { "5H $it%" }, cl.opt("week")?.takeIf { it != JSONObject.NULL }?.let { "week $it%" }).joinToString(" · ") }?.ifBlank { null }
+            if (claude != null) c.addView(row("Claude", claude, getColor(R.color.text), null))
+        }
+        val tap = readTaps[which] ?: return
+        val scrim = View(this).apply { setOnClickListener { closeReadout() }; layoutParams = FrameLayout.LayoutParams(-1, -1) }
+        page0.addView(scrim)
+        // The card's bottom sits just under the callout's text; it grows out of that corner
+        c.layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
+            leftMargin = (16 * dp).toInt(); rightMargin = (16 * dp).toInt()
+            bottomMargin = (page0.height - (tap.translationY + tap.height)).toInt().coerceAtLeast(0)
+        }
+        page0.addView(c)
+        readCard = c; readScrim = scrim
+        schematic.dimBottom = true
+        c.alpha = 0f
+        c.post {
+            c.pivotX = if (which == 0) 0f else c.width.toFloat(); c.pivotY = c.height.toFloat()
+            c.scaleX = 0.15f; c.scaleY = 0.15f
+            c.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(android.view.animation.DecelerateInterpolator(1.6f)).start()
+        }
+    }
+
+    private fun closeReadout() {
+        val c = readCard ?: return
+        val s = readScrim
+        readCard = null; readScrim = null
+        schematic.dimBottom = false
+        c.animate().alpha(0f).scaleX(0.15f).scaleY(0.15f).setDuration(200).withEndAction { page0.removeView(c) }.start()
+        s?.let(page0::removeView)
+    }
+
+    private fun openEvent(e: Event) {
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, e.id))
+            .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, e.begin).putExtra(CalendarContract.EXTRA_EVENT_END_TIME, e.end)) }
     }
 
     private fun pollStatus() {
@@ -585,7 +660,7 @@ class HomeActivity : Activity(), Session.Ui {
         if (pct != null && pct >= 0) c.addView(row("This phone", "$pct%${if (plugged) " · charging" else ""}", getColor(R.color.text), null))
     }
 
-    private fun card(title: String, right: String?): LinearLayout {
+    private fun card(title: String, right: String?, add: Boolean = true): LinearLayout {
         val c = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; background = cardBg()
             setPadding((14 * dp).toInt(), (12 * dp).toInt(), (14 * dp).toInt(), (10 * dp).toInt())
@@ -596,7 +671,7 @@ class HomeActivity : Activity(), Session.Ui {
             addView(TextView(this@HomeActivity).apply { text = title; textSize = 9f; letterSpacing = 0.3f; setTextColor(Scheme.color); layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) })
             if (right != null) addView(TextView(this@HomeActivity).apply { text = right; textSize = 9f; letterSpacing = 0.2f; setTextColor(Scheme.alpha(89)) })
         })
-        cards.addView(c)
+        if (add) cards.addView(c)
         return c
     }
 
