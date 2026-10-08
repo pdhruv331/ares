@@ -650,11 +650,29 @@ class HomeActivity : Activity(), Session.Ui {
 
     private fun notificationsMenu() {
         val on = AresNotifs.enabled(this)
-        AlertDialog.Builder(this).setTitle("Notifications on the home screen")
-            .setMessage(if (on) "On: your notifications gather around the reactor. They stay on the phone; only Summarise sends their text to ARES on your Mac.\n\nTo turn it off, switch ARES off on the next screen."
-                else "Your notifications can gather as orbs around the reactor: tap one to read it and reply by voice, drag it into the core to dismiss it. Calls make the rings pulse green.\n\nThey stay on the phone; only Summarise (when you tap it) sends their text to ARES on your Mac.\n\nOn the next screen, allow Notification access for ARES.")
+        val b = AlertDialog.Builder(this).setTitle("Notifications on the home screen")
+            .setMessage(if (on) "On: your notifications gather around the reactor. They stay on the phone; only Summarise sends their text to ARES on your Mac.\n\nIf one doesn't show as an orb, \"What ARES sees\" says why.\n\nTo turn it off, switch ARES off on the next screen."
+                else "Your notifications can gather as orbs around the reactor: tap one to read it and reply by voice, drag it into the core to dismiss it. Calls make the rings pulse green.\n\nThey stay on the phone; only Summarise (when you tap it) sends their text to ARES on your Mac.\n\nOn the next screen, allow Notification access for ARES.\n\nIf the switch is greyed out (\"Restricted setting\"): ARES wasn't installed from the Play Store, so Android asks once. Tap App info, then ⋮ at the top right → Allow restricted settings, and come back here.")
             .setPositiveButton("Open settings") { _, _ -> runCatching { startActivity(AresNotifs.settings(this)) }.onFailure { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) } }
-            .setNegativeButton("Not now", null).show()
+        if (on) b.setNeutralButton("What ARES sees") { _, _ -> notificationCheck() }
+        else b.setNeutralButton("App info") { _, _ -> startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$packageName"))) }
+        b.setNegativeButton("Close", null).show()
+    }
+
+    /** What the listener sees (apps, categories, buttons; never the words), and why each did or didn't become an orb. */
+    private fun notificationCheck() {
+        if (AresNotifs.enabled(this) && AresNotifs.live == null) runCatching { android.service.notification.NotificationListenerService.requestRebind(android.content.ComponentName(this, AresNotifs::class.java)) }
+        val report = NotifStore.explain(this)
+        val text = TextView(this).apply {
+            this.text = report; textSize = 11f; typeface = android.graphics.Typeface.MONOSPACE; setTextColor(getColor(R.color.text)); setTextIsSelectable(true)
+            setPadding((20 * dp).toInt(), (12 * dp).toInt(), (20 * dp).toInt(), (12 * dp).toInt())
+        }
+        AlertDialog.Builder(this).setTitle("What ARES sees").setView(ScrollView(this).apply { addView(text) })
+            .setPositiveButton("Copy") { _, _ ->
+                getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("What ARES sees", report))
+                Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Close", null).show()
     }
 
     private fun openEvent(e: Event) {
@@ -735,7 +753,7 @@ class HomeActivity : Activity(), Session.Ui {
         if (Ares.paired(this) && (PowerStore.mode == PowerStore.Mode.STANDBY || PowerStore.mode == PowerStore.Mode.OFFLINE)) m.menu.add(0, 3, 1, "Wake ARES")
         if (Ares.paired(this) && (PowerStore.mode == PowerStore.Mode.ONLINE || PowerStore.mode == PowerStore.Mode.STANDBY)) m.menu.add(0, 7, 1, "Power down…")
         m.menu.add(1, 8, 2, "Colour scheme…")
-        m.menu.add(1, 9, 2, "Notifications on the home screen…")
+        m.menu.add(1, 9, 2, "Notifications on the home screen…" + if (AresNotifs.enabled(this)) "" else " (off)")
         m.menu.add(1, 4, 2, "Original icons").apply { isCheckable = true; isChecked = Icons.original(this@HomeActivity) }
         m.menu.add(1, 5, 3, "Readouts on the reactor").apply { isCheckable = true; isChecked = p.getBoolean("homeCallouts", true) }
         m.menu.add(1, 6, 4, "Home screen app…")

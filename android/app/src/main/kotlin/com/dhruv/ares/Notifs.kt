@@ -64,10 +64,7 @@ object NotifStore {
         val active = runCatching { svc.activeNotifications }.getOrNull() ?: return
         val ranking = runCatching { svc.currentRanking }.getOrNull()
         val r = NotificationListenerService.Ranking()
-        val list = active.mapNotNull { sbn ->
-            val important = ranking == null || !ranking.getRanking(sbn.key, r) || r.importance >= android.app.NotificationManager.IMPORTANCE_DEFAULT
-            if (important) parse(svc, sbn) else null
-        }.sortedByDescending { it.time }.take(8)
+        val list = active.mapNotNull { sbn -> check(svc, sbn, importance(ranking, r, sbn)).first }.sortedByDescending { it.time }.take(8)
         call = active.firstNotNullOfOrNull { parseCall(it) }
         val arrived = posted?.let { k -> list.firstOrNull { it.key == k && k !in seen } }
         items = list
@@ -82,19 +79,58 @@ object NotifStore {
     /** Development only (HomeActivity's TEST_CALL broadcast in debug builds): pretend a call is ringing, or stop. */
     fun testCall(name: String?) { call = name?.let { Call("test", it, null, null, null) }; main.post { for (l in listeners) l(null) } }
 
-    private fun parse(c: Context, sbn: StatusBarNotification): Item? {
+    private fun importance(ranking: NotificationListenerService.RankingMap?, r: NotificationListenerService.Ranking, sbn: StatusBarNotification) =
+        if (ranking != null && ranking.getRanking(sbn.key, r)) r.importance else -1
+
+    /** An orb for this notification, or why not (the reason is what "What ARES sees" shows). */
+    private fun check(c: Context, sbn: StatusBarNotification, importance: Int): Pair<Item?, String> {
         val n = sbn.notification
-        if (sbn.packageName == c.packageName) return null // (her own: the status line, job notices)
-        if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return null
-        if (sbn.isOngoing || n.category in QUIET) return null
+        if (sbn.packageName == c.packageName) return null to "ARES's own"
+        if (sbn.packageName == "android" || sbn.packageName == "com.android.systemui") return null to "the system's own"
+        if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return null to "group summary (its messages are separate)"
+        if (sbn.isOngoing) return null to "ongoing"
+        if (n.category in QUIET) return null to "category ${n.category}"
+        if (importance in 0 until android.app.NotificationManager.IMPORTANCE_DEFAULT) return null to "silent (importance $importance)"
         val x = n.extras
         val title = (x.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE) ?: x.getCharSequence(Notification.EXTRA_TITLE))?.toString()?.trim().orEmpty()
-        val text = (x.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: x.getCharSequence(Notification.EXTRA_TEXT))?.toString()?.trim().orEmpty()
-        if (title.isEmpty() && text.isEmpty()) return null
+        val text = (x.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: x.getCharSequence(Notification.EXTRA_TEXT)
+            ?: lastMessage(x))?.toString()?.trim().orEmpty()
+        if (title.isEmpty() && text.isEmpty()) return null to "no title or text"
         val person = n.category == Notification.CATEGORY_MESSAGE || x.getString(Notification.EXTRA_TEMPLATE)?.contains("MessagingStyle") == true
         val reply = n.actions?.firstOrNull { a -> a.remoteInputs?.any { it.allowFreeFormInput } == true }
         val app = runCatching { c.packageManager.getApplicationLabel(c.packageManager.getApplicationInfo(sbn.packageName, 0)).toString() }.getOrDefault(sbn.packageName)
-        return Item(sbn.key, sbn.packageName, app, title, text, sbn.postTime, person, n.contentIntent, reply, n.flags and Notification.FLAG_AUTO_CANCEL != 0)
+        return Item(sbn.key, sbn.packageName, app, title, text, sbn.postTime, person, n.contentIntent, reply, n.flags and Notification.FLAG_AUTO_CANCEL != 0) to "orb"
+    }
+
+    /** MessagingStyle's newest message, for notifications that keep their text only there. */
+    private fun lastMessage(x: Bundle): CharSequence? = runCatching {
+        @Suppress("DEPRECATION") val ms = x.getParcelableArray(Notification.EXTRA_MESSAGES)
+        (ms?.lastOrNull() as? Bundle)?.getCharSequence("text")
+    }.getOrNull()
+
+    /**
+     * What the listener sees right now, for the home menu's check: per notification only the app, category, style, flags,
+     * importance and button labels, never its words; and whether it made an orb (or a call), or why not.
+     */
+    fun explain(c: Context): String {
+        val svc = AresNotifs.live
+        val head = "Access: ${if (AresNotifs.enabled(c)) "allowed" else "NOT allowed"} · listener: ${if (svc != null) "connected" else "NOT connected"}"
+        if (svc == null) return head
+        val active = runCatching { svc.activeNotifications }.getOrNull() ?: return "$head\n(couldn't read the notifications)"
+        val ranking = runCatching { svc.currentRanking }.getOrNull()
+        val r = NotificationListenerService.Ranking()
+        val lines = active.filter { it.packageName != c.packageName }.sortedByDescending { it.postTime }.take(20).map { sbn ->
+            val n = sbn.notification; val x = n.extras
+            val app = runCatching { c.packageManager.getApplicationLabel(c.packageManager.getApplicationInfo(sbn.packageName, 0)).toString() }.getOrDefault(sbn.packageName)
+            val style = x.getString(Notification.EXTRA_TEMPLATE)?.substringAfterLast('$')?.removeSuffix("Style") ?: "plain"
+            val flags = listOfNotNull("ongoing".takeIf { sbn.isOngoing }, "summary".takeIf { n.flags and Notification.FLAG_GROUP_SUMMARY != 0 },
+                "fullscreen".takeIf { n.fullScreenIntent != null }, x.getInt(Notification.EXTRA_CALL_TYPE, -1).takeIf { it >= 0 }?.let { "calltype $it" })
+            val buttons = n.actions.orEmpty().mapNotNull { it.title?.toString() }.joinToString(", ")
+            val result = if (parseCall(sbn) != null) "INCOMING CALL" else check(c, sbn, importance(ranking, r, sbn)).second.let { if (it == "orb") "ORB" else "no orb: $it" }
+            "• $app · ${n.category ?: "no category"} · $style · imp ${importance(ranking, r, sbn)}${if (flags.isEmpty()) "" else " · " + flags.joinToString(" ")}" +
+                (if (buttons.isEmpty()) "" else "\n   buttons: $buttons") + "\n   → $result"
+        }
+        return head + "\n\n" + (if (lines.isEmpty()) "(no notifications from other apps)" else lines.joinToString("\n"))
     }
 
     private fun parseCall(sbn: StatusBarNotification): Call? {
@@ -106,8 +142,9 @@ object NotifStore {
         fun action(vararg words: String) = actions.firstOrNull { a -> words.any { a.title?.toString()?.contains(it, ignoreCase = true) == true } }?.actionIntent
         val answer = x.getParcelable(Notification.EXTRA_ANSWER_INTENT, PendingIntent::class.java) ?: action("answer", "accept")
         val decline = x.getParcelable(Notification.EXTRA_DECLINE_INTENT, PendingIntent::class.java) ?: action("decline", "reject")
-        // Ringing: CallStyle's incoming type, or (older dialers) a full-screen notification with an answer button
-        if (type != 1 && !(type == -1 && n.fullScreenIntent != null && answer != null)) return null
+        // Ringing: CallStyle's incoming type, or any call notification with an answer button (Samsung's dialer may not use CallStyle;
+        // an ongoing call's notification has hang-up, not answer)
+        if (type != 1 && !(type == -1 && answer != null)) return null
         val name = x.getParcelable(Notification.EXTRA_CALL_PERSON, Person::class.java)?.name?.toString()
             ?: x.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: "Unknown caller"
         return Call(sbn.key, name, answer, decline, n.contentIntent)
