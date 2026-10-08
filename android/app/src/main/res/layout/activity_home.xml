@@ -66,14 +66,21 @@
                 android:textColor="@color/text" android:textColorHint="@color/muted" android:singleLine="true" android:imeOptions="actionGo"
                 android:inputType="text|textNoSuggestions"/>
         </LinearLayout>
-        <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:layout_marginTop="6dp">
+        <!-- A–Z (letter headers and rail) or YOUR ORDER (hold an app and drag it) -->
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="18dp" android:layout_marginTop="10dp" android:orientation="horizontal">
+            <TextView android:id="@+id/sortAz" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="A–Z"
+                android:textSize="10sp" android:letterSpacing="0.25" android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingTop="6dp" android:paddingBottom="6dp"/>
+            <TextView android:id="@+id/sortMine" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:text="YOUR ORDER"
+                android:textSize="10sp" android:letterSpacing="0.25" android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingTop="6dp" android:paddingBottom="6dp"/>
+        </LinearLayout>
+        <com.dhruv.ares.DragFrame android:id="@+id/dragFrame" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:layout_marginTop="2dp">
             <ListView android:id="@+id/apps" android:layout_width="match_parent" android:layout_height="match_parent"
                 android:paddingStart="10dp" android:paddingEnd="30dp" android:clipToPadding="false" android:divider="@null"
                 android:dividerHeight="0dp" android:scrollbars="none" android:overScrollMode="never" android:listSelector="@android:color/transparent"/>
             <LinearLayout android:id="@+id/rail" android:layout_width="26dp" android:layout_height="match_parent" android:layout_gravity="end"
                 android:orientation="vertical" android:gravity="center_horizontal" android:paddingTop="8dp" android:paddingBottom="8dp"/>
             <View android:id="@+id/scan" android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/cyan" android:alpha="0"/>
-        </FrameLayout>
+        </com.dhruv.ares.DragFrame>
         <TextView android:id="@+id/drawerHome" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center"
             android:paddingTop="8dp" android:paddingBottom="10dp" android:textSize="9sp" android:letterSpacing="0.35" android:textColor="#993EE6FF"
             android:text="HOME\n﹀" android:lineSpacingMultiplier="0.9"/>

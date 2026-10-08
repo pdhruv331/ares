@@ -26,6 +26,8 @@ import android.widget.TextView
  * The home screen's app drawer (docs/launcher-prompt.md §4): a search field that falls back to asking ARES, the
  * pinned (dock) apps, then every app A–Z in rows of four under letter headers, with a letter rail to jump. Long-press
  * an app for its shortcuts, Add to dock, App info and Uninstall. `pick` mode fills an empty dock slot instead of opening.
+ * YOUR ORDER (docs/launcher-v2-prompt.md §8): hold an app and drag it; the first drag starts from the A–Z order, new apps
+ * join at the end, and the A–Z chip goes back (the order is kept for next time).
  */
 class AppDrawer(
     private val act: Activity,
@@ -38,6 +40,18 @@ class AppDrawer(
     private val search: EditText = root.findViewById(R.id.search)
     private val rail: LinearLayout = root.findViewById(R.id.rail)
     private val scan: View = root.findViewById(R.id.scan)
+    private val frame: DragFrame = root.findViewById(R.id.dragFrame)
+    private val sortAz: TextView = root.findViewById(R.id.sortAz)
+    private val sortMine: TextView = root.findViewById(R.id.sortMine)
+    private val prefs = Ares.prefs(act)
+    private val slop = android.view.ViewConfiguration.get(act).scaledTouchSlop
+    private var mine: Boolean
+        get() = prefs.getString("drawerSort", "az") == "mine"
+        set(v) { prefs.edit().putString("drawerSort", if (v) "mine" else "az").apply() }
+    // While an app is being dragged: the order as it's being rearranged, the dragged app, its floating icon
+    private var dragOrder: MutableList<Apps.App>? = null
+    private var dragKey: String? = null
+    private var floater: ImageView? = null
     private val dp = act.resources.displayMetrics.density
     private val iconPx = (52 * dp).toInt()
     private var picking = false
@@ -46,7 +60,7 @@ class AppDrawer(
 
     private sealed class Row {
         class Header(val text: String) : Row()
-        class Line(val apps: List<Apps.App>) : Row()
+        class Line(val apps: List<Apps.App>, val pinned: Boolean = false) : Row()
         class Ask(val text: String) : Row()
     }
     private var rows: List<Row> = emptyList()
@@ -62,7 +76,7 @@ class AppDrawer(
         override fun isEnabled(i: Int) = false // (cells take their own taps)
         override fun getView(i: Int, convert: View?, parent: ViewGroup): View = when (val r = rows[i]) {
             is Row.Header -> ((convert as? TextView) ?: header()).apply { text = r.text; setTextColor(Scheme.color) }
-            is Row.Line -> ((convert as? LinearLayout) ?: line()).also { bind(it, r.apps) }
+            is Row.Line -> ((convert as? LinearLayout) ?: line()).also { bind(it, r.apps, r.pinned) }
             is Row.Ask -> ((convert as? TextView) ?: ask()).apply { text = "◉   Ask ARES: ${r.text}"; setOnClickListener { askNow(r.text) } }
         }
     }
@@ -91,6 +105,8 @@ class AppDrawer(
             }
             false
         }
+        sortAz.setOnClickListener { if (mine) { mine = false; build(search.text.toString()); list.setSelection(0) } }
+        sortMine.setOnClickListener { if (!mine) { mine = true; build(search.text.toString()); list.setSelection(0) } }
         rail.setOnTouchListener { v, e ->
             if (e.actionMasked == MotionEvent.ACTION_DOWN || e.actionMasked == MotionEvent.ACTION_MOVE) {
                 val letters = letterRow.keys.toList()
@@ -137,8 +153,11 @@ class AppDrawer(
         val all = Apps.all
         if (q.isEmpty()) {
             val pinned = Apps.dock(act).mapNotNull { it?.let(Apps::find) }
-            if (pinned.isNotEmpty() && !picking) { out += Row.Header("— PINNED"); pinned.chunked(4).forEach { out += Row.Line(it) } }
-            for ((letter, apps) in all.groupBy { it.letter }) {
+            if (pinned.isNotEmpty() && !picking) { out += Row.Header("— PINNED"); pinned.chunked(4).forEach { out += Row.Line(it, pinned = true) } }
+            if (mine && !picking) {
+                out += Row.Header("— YOUR ORDER")
+                (dragOrder ?: customOrder()).chunked(4).forEach { out += Row.Line(it) }
+            } else for ((letter, apps) in all.groupBy { it.letter }) {
                 letterRow[letter] = out.size
                 out += Row.Header("— $letter")
                 apps.chunked(4).forEach { out += Row.Line(it) }
@@ -152,7 +171,12 @@ class AppDrawer(
         rows = out
         adapter.notifyDataSetChanged()
         rail.removeAllViews()
-        rail.visibility = if (q.isEmpty()) View.VISIBLE else View.GONE
+        rail.visibility = if (q.isEmpty() && letterRow.isNotEmpty()) View.VISIBLE else View.GONE
+        (sortAz.parent as View).visibility = if (q.isEmpty() && !picking) View.VISIBLE else View.GONE
+        for ((chip, on) in listOf(sortAz to !mine, sortMine to mine)) {
+            chip.setTextColor(if (on) Scheme.color else act.getColor(R.color.muted))
+            chip.background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = 14 * dp; setColor(if (on) Scheme.alpha(26) else 0); setStroke(dp.toInt().coerceAtLeast(1), if (on) Scheme.alpha(110) else Scheme.alpha(40)) }
+        }
         for (l in letterRow.keys) rail.addView(TextView(act).apply {
             text = l; textSize = 9f; gravity = Gravity.CENTER; setTextColor(Scheme.color); alpha = 0.7f
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
@@ -189,11 +213,11 @@ class AppDrawer(
         }
     }
 
-    private fun bind(row: LinearLayout, apps: List<Apps.App>) {
+    private fun bind(row: LinearLayout, apps: List<Apps.App>, pinned: Boolean) {
         for (i in 0 until 4) {
             val cell = row.getChildAt(i) as LinearLayout
             val app = apps.getOrNull(i)
-            cell.visibility = if (app == null) View.INVISIBLE else View.VISIBLE
+            cell.visibility = if (app == null || app.key == dragKey) View.INVISIBLE else View.VISIBLE // (the dragged app's place stays open)
             if (app == null) { cell.setOnClickListener(null); cell.setOnLongClickListener(null); continue }
             val icon = cell.getChildAt(0) as ImageView
             (cell.getChildAt(1) as TextView).text = app.label
@@ -202,8 +226,102 @@ class AppDrawer(
             val now = Icons.get(act, app, iconPx) { bmp -> if (icon.tag == app.key) icon.setImageBitmap(bmp) }
             if (now != null) icon.setImageBitmap(now) else icon.setImageDrawable(null)
             cell.setOnClickListener { if (picking) { onPick(app); close() } else launch(app, icon) }
-            cell.setOnLongClickListener { menu(it, app); true }
+            cell.setOnLongClickListener { hold(it, app, pinned); true }
         }
+    }
+
+    // ---- YOUR ORDER: hold and drag ----------------------------------------------------------------------------------
+
+    /** Every app in your order: the saved order, then apps installed since (A–Z among themselves). */
+    private fun customOrder(): MutableList<Apps.App> {
+        val saved = prefs.getString("drawerOrder", null)?.split('\n').orEmpty()
+        val byKey = Apps.all.associateBy { it.key }
+        val out = saved.mapNotNull(byKey::get).toMutableList()
+        val known = saved.toHashSet()
+        Apps.all.filter { it.key !in known }.forEach(out::add)
+        return out
+    }
+
+    private fun rebuildKeepingScroll() {
+        val first = list.firstVisiblePosition
+        val top = list.getChildAt(0)?.top ?: 0
+        build(search.text.toString())
+        list.setSelectionFromTop(first, top)
+    }
+
+    /** A held app: drag it to rearrange (not in search, the pinned row or picking), or let go for its menu. */
+    private fun hold(cell: View, app: Apps.App, pinned: Boolean) {
+        if (picking || pinned || search.text.isNotBlank()) return menu(cell, app)
+        Haptics.click(act)
+        cell.animate().scaleX(1.12f).scaleY(1.12f).setDuration(120).start()
+        val x0 = frame.downX; val y0 = frame.downY
+        var moved = false; var lastX = x0; var lastY = y0
+        val edge = object : Runnable {
+            override fun run() {
+                val zone = 64 * dp
+                val dy = when { lastY < zone -> -(zone - lastY) / 3; lastY > frame.height - zone -> (lastY - (frame.height - zone)) / 3; else -> 0f }
+                if (dy != 0f && floater != null) { list.scrollListBy(dy.toInt()); retarget(lastX, lastY); frame.postOnAnimation(this) }
+            }
+        }
+        frame.grab = { e ->
+            lastX = e.x; lastY = e.y
+            when (e.actionMasked) {
+                MotionEvent.ACTION_MOVE -> {
+                    if (!moved && kotlin.math.hypot(e.x - x0, e.y - y0) > slop) { moved = true; startDrag(cell, app) }
+                    if (moved) {
+                        floater?.apply { translationX = e.x - width / 2f; translationY = e.y - height / 2f }
+                        retarget(e.x, e.y)
+                        frame.removeCallbacks(edge); frame.postOnAnimation(edge)
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    frame.grab = null
+                    frame.removeCallbacks(edge)
+                    cell.animate().scaleX(1f).scaleY(1f).setDuration(120).start()
+                    if (moved) finishDrag() else if (e.actionMasked == MotionEvent.ACTION_UP) menu(cell, app)
+                }
+            }
+        }
+    }
+
+    private fun startDrag(cell: View, app: Apps.App) {
+        if (!mine) mine = true // (the first drag turns A–Z into your order, starting from A–Z)
+        dragOrder = customOrder()
+        dragKey = app.key
+        floater = ImageView(act).apply {
+            layoutParams = android.widget.FrameLayout.LayoutParams(iconPx, iconPx)
+            Icons.get(act, app, iconPx) { setImageBitmap(it) }?.let(::setImageBitmap)
+            scaleX = 1.15f; scaleY = 1.15f; translationZ = 12 * dp
+        }
+        frame.addView(floater)
+        val loc = IntArray(2).also(cell::getLocationInWindow); val fl = IntArray(2).also(frame::getLocationInWindow)
+        floater?.translationX = (loc[0] - fl[0] + (cell.width - iconPx) / 2).toFloat(); floater?.translationY = (loc[1] - fl[1]).toFloat()
+        rebuildKeepingScroll()
+    }
+
+    /** The app under the finger takes the dragged app's place in the order; the rest move along by one. */
+    private fun retarget(x: Float, y: Float) {
+        val order = dragOrder ?: return
+        val pos = list.pointToPosition((x - list.left).toInt(), (y - list.top).toInt())
+        val row = rows.getOrNull(pos) as? Row.Line ?: return
+        if (row.pinned) return
+        val w = (list.width - list.paddingLeft - list.paddingRight).coerceAtLeast(1)
+        val col = ((x - list.left - list.paddingLeft) / (w / 4f)).toInt().coerceIn(0, 3)
+        val target = row.apps.getOrNull(col) ?: row.apps.last()
+        if (target.key == dragKey) return
+        val from = order.indexOfFirst { it.key == dragKey }
+        val to = order.indexOf(target)
+        if (from < 0 || to < 0) return
+        order.add(to, order.removeAt(from))
+        Haptics.tick(act)
+        rebuildKeepingScroll()
+    }
+
+    private fun finishDrag() {
+        dragOrder?.let { order -> prefs.edit().putString("drawerOrder", order.joinToString("\n") { it.key }).apply() }
+        dragOrder = null; dragKey = null
+        floater?.let(frame::removeView); floater = null
+        rebuildKeepingScroll()
     }
 
     private fun launch(app: Apps.App, from: View?) {
