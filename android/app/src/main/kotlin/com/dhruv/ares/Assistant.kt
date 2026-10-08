@@ -47,6 +47,8 @@ class AresSession(ctx: Context) : VoiceInteractionSession(ctx) {
         got = 0
         home = false
         ScreenContext.clear()
+        // Summoned (a Bud hold, the side key) while the ARES home screen is in front: she listens right there
+        if (Ares.paired(context) && HomeActivity.listenHere()) { main.post { hide() }; return }
         startAssistantActivity(
             if (Ares.paired(context)) AskActivity.intent(context, listen = true).putExtra("assist", sharing)
             else Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

@@ -50,6 +50,12 @@ class HomeActivity : Activity(), Session.Ui {
         fun chooseHome(c: Context) {
             runCatching { c.startActivity(Intent(Settings.ACTION_HOME_SETTINGS)) }.onFailure { c.startActivity(Intent(Settings.ACTION_SETTINGS)) }
         }
+        /** The home screen while it's in front (the assistant summon listens there instead of opening the panel). */
+        private var front: java.lang.ref.WeakReference<HomeActivity>? = null
+        /** Called by the assistant session: true if the home screen took the summon. */
+        fun listenHere(): Boolean = front?.get()?.takeIf { it.resumed }?.summoned() ?: false
+        private val EARBUDS = setOf(android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, android.media.AudioDeviceInfo.TYPE_BLE_HEADSET,
+            android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO, android.media.AudioDeviceInfo.TYPE_HEARING_AID)
         private const val CALENDAR = 7
         private const val MIC = 8
         private const val REPLY = 9
@@ -93,6 +99,7 @@ class HomeActivity : Activity(), Session.Ui {
     private val powerSave = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) = showPowerSave() }
     private val testCall = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
+            if (i.action == "com.dhruv.ares.TEST_BUDS") { testBuds = i.getStringExtra("name"); checkBuds(testBuds != null); return }
             if (i.action == "com.dhruv.ares.TEST_MODE") { testMode = i.getStringExtra("mode")?.let { m -> Mode.entries.firstOrNull { it.name.equals(m, true) } }; updateMode() }
             else NotifStore.testCall(i.getStringExtra("name"))
         }
@@ -105,6 +112,13 @@ class HomeActivity : Activity(), Session.Ui {
     private var mode = Mode.NONE
     private var modeBox: View? = null
     private lateinit var nightLine: TextView
+    // Buds (docs/launcher-v2-prompt.md §7): earbuds connected → the earpiece ring and "HOLD A BUD · TALK"
+    private var buds: String? = null
+    private var holding = false // the reactor is held (push to talk), not a summon
+    private val audioDevices = object : android.media.AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(added: Array<out android.media.AudioDeviceInfo>) = checkBuds(added.any { it.type in EARBUDS })
+        override fun onAudioDevicesRemoved(removed: Array<out android.media.AudioDeviceInfo>) = checkBuds(false)
+    }
     private var testMode: Mode? = null // (debug builds: adb shell am broadcast -a com.dhruv.ares.TEST_MODE --es mode night|morning|meeting|desk|none)
     private val modeTick = object : Runnable { override fun run() { updateMode(); page0.postDelayed(this, 30_000) } }
 
@@ -187,7 +201,10 @@ class HomeActivity : Activity(), Session.Ui {
     override fun onResume() {
         super.onResume()
         resumed = true
+        front = java.lang.ref.WeakReference(this)
         Bubble.home(true)
+        getSystemService(android.media.AudioManager::class.java).registerAudioDeviceCallback(audioDevices, null)
+        checkBuds(false)
         if (Ares.paired(this)) AresService.start(this)
         JobStore.listen(jobsChanged)
         PowerStore.listen(powerChanged)
@@ -196,7 +213,7 @@ class HomeActivity : Activity(), Session.Ui {
         showNotes(null)
         page0.removeCallbacks(modeTick); page0.post(modeTick)
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) // (a ringing call on the emulator: adb shell am broadcast -a com.dhruv.ares.TEST_CALL [--es name Mom])
-            registerReceiver(testCall, IntentFilter("com.dhruv.ares.TEST_CALL").apply { addAction("com.dhruv.ares.TEST_MODE") }, Context.RECEIVER_EXPORTED)
+            registerReceiver(testCall, IntentFilter("com.dhruv.ares.TEST_CALL").apply { addAction("com.dhruv.ares.TEST_MODE"); addAction("com.dhruv.ares.TEST_BUDS") }, Context.RECEIVER_EXPORTED)
         registerReceiver(powerSave, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED))
         showPowerSave()
         showJobs()
@@ -209,6 +226,7 @@ class HomeActivity : Activity(), Session.Ui {
     override fun onPause() {
         resumed = false
         Bubble.home(false)
+        getSystemService(android.media.AudioManager::class.java).unregisterAudioDeviceCallback(audioDevices)
         session.setHandsFree(false, "left")
         JobStore.unlisten(jobsChanged)
         PowerStore.unlisten(powerChanged)
@@ -292,7 +310,7 @@ class HomeActivity : Activity(), Session.Ui {
         val start = Runnable {
             if (!Ares.paired(this) || PowerStore.mode != PowerStore.Mode.ONLINE) { Haptics.error(this); showCaption(notReady(), 3500); return@Runnable }
             if (!needMic()) return@Runnable
-            talking = true
+            talking = true; holding = true
             reactor.parent.requestDisallowInterceptTouchEvent(true) // keep the finger: no page swipe while talking
             Haptics.click(this)
             if (session.state == State.SPEAKING) session.hush()
@@ -309,10 +327,10 @@ class HomeActivity : Activity(), Session.Ui {
                 MotionEvent.ACTION_MOVE -> if (!talking && (abs(e.x - x0) > slop || abs(e.y - y0) > slop)) v.removeCallbacks(start)
                 MotionEvent.ACTION_UP -> {
                     v.removeCallbacks(start)
-                    if (talking) { talking = false; if (session.listening) session.stopListening() }
+                    if (talking) { talking = false; holding = false; if (session.listening) session.stopListening() }
                     else if (System.currentTimeMillis() - downAt < 320) tapReactor(e.x, e.y)
                 }
-                MotionEvent.ACTION_CANCEL -> { v.removeCallbacks(start); if (talking) { talking = false; session.cancelListening() } }
+                MotionEvent.ACTION_CANCEL -> { v.removeCallbacks(start); if (talking) { talking = false; holding = false; session.cancelListening() } }
             }
             true
         }
@@ -524,6 +542,31 @@ class HomeActivity : Activity(), Session.Ui {
         summarise.visibility = View.GONE
     }
 
+    // ---- Buds (docs/launcher-v2-prompt.md §7) -----------------------------------------------------------------------------
+
+    /** Which earbuds are connected now (by their name), shown as the earpiece ring; `arrived` = they just connected. */
+    private fun checkBuds(arrived: Boolean) {
+        val am = getSystemService(android.media.AudioManager::class.java)
+        val dev = am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type in EARBUDS }
+        val was = buds
+        buds = testBuds ?: dev?.productName?.toString()?.ifBlank { "Earbuds" }
+        overlay.buds = buds?.let { "$it · connected" }
+        if (buds != null && was == null && arrived) { Haptics.soft(this); reactor.pulse(); showCaption("$buds connected", 2500) }
+        state(session.state)
+    }
+    private var testBuds: String? = null // (debug builds: adb shell am broadcast -a com.dhruv.ares.TEST_BUDS [--es name 'Galaxy Buds Pro 4'])
+
+    /** The assistant was summoned while the home screen is in front: listen here, on the home screen's own session. */
+    private fun summoned(): Boolean {
+        if (PowerStore.mode != PowerStore.Mode.ONLINE) return false // (the panel explains what's wrong)
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return false
+        pager.go(0); closeReadout(); if (drawer.isOpen) drawer.close()
+        Haptics.click(this)
+        if (session.state == State.SPEAKING) session.hush()
+        if (!session.listening) session.startListening()
+        return true
+    }
+
     // ---- Modes (docs/launcher-v2-prompt.md §6) ----------------------------------------------------------------------------
 
     private val meetingLink = Regex("(https?://)?[\\w.-]*(zoom\\.us|meet\\.google\\.com|teams\\.microsoft\\.com|teams\\.live\\.com|webex\\.com)/[^\\s<>\"]*", RegexOption.IGNORE_CASE)
@@ -640,11 +683,12 @@ class HomeActivity : Activity(), Session.Ui {
         if (s == State.THINKING) { caption.removeCallbacks(fadeCaption); caption.postDelayed(fadeCaption, 2500) }
         lastState = s
         hint.text = when {
-            s == State.LISTENING -> "LISTENING · LET GO TO SEND"
+            s == State.LISTENING -> if (holding) "LISTENING · LET GO TO SEND" else "LISTENING"
             s == State.THINKING -> "THINKING"
             s == State.SPEAKING -> "SPEAKING · TAP TO STOP"
             !Ares.paired(this) -> "TAP TO SET UP ARES"
             mode == Mode.NIGHT -> "GOOD NIGHT"
+            buds != null && PowerStore.mode == PowerStore.Mode.ONLINE && mode != Mode.DESK -> "HOLD A BUD · TALK"
             mode == Mode.DESK && PowerStore.mode == PowerStore.Mode.ONLINE -> "LINKED TO THE MAC"
             PowerStore.mode == PowerStore.Mode.ONLINE -> "HOLD · TALK     TAP · OPEN"
             else -> PowerStore.header()

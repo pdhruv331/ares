@@ -40,7 +40,7 @@ class HomeOverlay @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         set(v) { field = v; invalidate() }
     var deskLink = false
         set(v) { field = v; invalidate() }
-    var buds: String? = null // the earbuds' name while connected
+    var buds: String? = null // the earbuds' name while connected (the earpieces show; the name is a caption on connect)
         set(v) { field = v; invalidate() }
     var still = false
         set(v) { field = v; invalidate() }
@@ -122,7 +122,7 @@ class HomeOverlay @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         }
 
         // Buds: two earpieces either side of the reactor, breathing
-        buds?.let { name ->
+        buds?.let { _ ->
             stroke.color = c; stroke.strokeWidth = 3 * dp; stroke.pathEffect = null
             stroke.alpha = (140 + 90 * sin(t * 2.5f)).toInt().coerceIn(0, 255)
             arc.set(cx - r * 1.18f, cy - r * 1.18f, cx + r * 1.18f, cy + r * 1.18f)
@@ -134,8 +134,6 @@ class HomeOverlay @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
                 fill.color = Color.parseColor("#06121B"); fill.alpha = 255; canvas.drawRoundRect(arc, 6 * dp, 6 * dp, fill)
                 stroke.alpha = 255; stroke.strokeWidth = 1.5f * dp; canvas.drawRoundRect(arc, 6 * dp, 6 * dp, stroke)
             }
-            text.color = c; text.alpha = 210; text.textSize = 9 * dp
-            canvas.drawText(name.uppercase().take(26), cx, cy - r * 1.42f, text)
             animate = true
         }
 
