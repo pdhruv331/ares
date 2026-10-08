@@ -59,6 +59,7 @@ class HomeActivity : Activity(), Session.Ui {
         private const val CALENDAR = 7
         private const val MIC = 8
         private const val REPLY = 9
+        private const val CALLS = 10
         private val GREEN = android.graphics.Color.parseColor("#4ADE80")
     }
 
@@ -90,6 +91,8 @@ class HomeActivity : Activity(), Session.Ui {
     private lateinit var summarise: TextView
     private var callBox: View? = null
     private var replyTo: NotifStore.Item? = null
+    private var replyField: android.widget.EditText? = null // the open notification card's reply box
+    private var imeBottom = 0
     private val notesChanged: (NotifStore.Item?) -> Unit = { arrived -> showNotes(arrived) }
     private val fadeCaption = Runnable { caption.animate().alpha(0f).setDuration(600).start(); schematic.dimBottom = readCard != null || callBox != null; showNotes(null) }
     private val jobsChanged = { showJobs() }
@@ -119,6 +122,17 @@ class HomeActivity : Activity(), Session.Ui {
         override fun onAudioDevicesAdded(added: Array<out android.media.AudioDeviceInfo>) = checkBuds(added.any { it.type in EARBUDS })
         override fun onAudioDevicesRemoved(removed: Array<out android.media.AudioDeviceInfo>) = checkBuds(false)
     }
+    // Calls: the phone's own ringing state (with the Phone permission), so the green reactor doesn't depend on the dialer's notification
+    private val callState = object : android.telephony.TelephonyCallback(), android.telephony.TelephonyCallback.CallStateListener {
+        override fun onCallStateChanged(state: Int) = NotifStore.setRinging(state == android.telephony.TelephonyManager.CALL_STATE_RINGING)
+    }
+    private var callStateOn = false
+    private fun watchCalls(on: Boolean) {
+        val tm = getSystemService(android.telephony.TelephonyManager::class.java) ?: return
+        if (on && !callStateOn && checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) {
+            callStateOn = runCatching { tm.registerTelephonyCallback(mainExecutor, callState); true }.getOrDefault(false)
+        } else if (!on && callStateOn) { runCatching { tm.unregisterTelephonyCallback(callState) }; callStateOn = false; NotifStore.setRinging(false) }
+    }
     private var testMode: Mode? = null // (debug builds: adb shell am broadcast -a com.dhruv.ares.TEST_MODE --es mode night|morning|meeting|desk|none)
     private val modeTick = object : Runnable { override fun run() { updateMode(); page0.postDelayed(this, 30_000) } }
 
@@ -143,6 +157,8 @@ class HomeActivity : Activity(), Session.Ui {
             val ime = insets.getInsets(WindowInsets.Type.ime())
             content.setPadding(bars.left, bars.top, bars.right, bars.bottom)
             drawerView.setPadding(bars.left, bars.top, bars.right, max(bars.bottom, ime.bottom))
+            imeBottom = ime.bottom
+            liftCard()
             WindowInsets.CONSUMED
         }
 
@@ -209,6 +225,7 @@ class HomeActivity : Activity(), Session.Ui {
         JobStore.listen(jobsChanged)
         PowerStore.listen(powerChanged)
         NotifStore.listen(notesChanged)
+        watchCalls(true)
         if (AresNotifs.enabled(this) && AresNotifs.live == null) runCatching { android.service.notification.NotificationListenerService.requestRebind(android.content.ComponentName(this, AresNotifs::class.java)) }
         showNotes(null)
         page0.removeCallbacks(modeTick); page0.post(modeTick)
@@ -231,6 +248,7 @@ class HomeActivity : Activity(), Session.Ui {
         JobStore.unlisten(jobsChanged)
         PowerStore.unlisten(powerChanged)
         NotifStore.unlisten(notesChanged)
+        watchCalls(false)
         page0.removeCallbacks(modeTick)
         runCatching { unregisterReceiver(powerSave) }
         runCatching { unregisterReceiver(testCall) }
@@ -439,6 +457,8 @@ class HomeActivity : Activity(), Session.Ui {
         val c = readCard ?: return
         val s = readScrim
         readCard = null; readScrim = null
+        replyField?.let { getSystemService(android.view.inputmethod.InputMethodManager::class.java).hideSoftInputFromWindow(it.windowToken, 0) }
+        replyField = null
         schematic.dimBottom = false
         showNotes(null)
         c.animate().alpha(0f).scaleX(0.15f).scaleY(0.15f).setDuration(200).withEndAction { page0.removeView(c) }.start()
@@ -468,13 +488,54 @@ class HomeActivity : Activity(), Session.Ui {
         val c = card(n.app.uppercase(), DateFormat.getTimeFormat(this).format(java.util.Date(n.time)), add = false)
         if (n.title.isNotEmpty()) c.addView(TextView(this).apply { text = n.title; textSize = 14f; setTextColor(getColor(R.color.text)); setPadding(0, (2 * dp).toInt(), 0, (4 * dp).toInt()) })
         if (n.text.isNotEmpty()) c.addView(TextView(this).apply { text = n.text; textSize = 12f; setTextColor(getColor(R.color.text_user)); maxLines = 5; ellipsize = TextUtils.TruncateAt.END })
+        // Reply right here: type it (or say it with the mic, which fills the box), then SEND through the app's own reply action
+        if (n.reply != null) {
+            val field = android.widget.EditText(this).apply {
+                hint = "Reply to ${n.title.ifBlank { n.app }}"; textSize = 14f; setTextColor(getColor(R.color.text)); setHintTextColor(getColor(R.color.muted))
+                background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = 20 * dp; setColor(0x0DFFFFFF); setStroke(dp.toInt().coerceAtLeast(1), Scheme.alpha(90)) }
+                setPadding((14 * dp).toInt(), (9 * dp).toInt(), (14 * dp).toInt(), (9 * dp).toInt())
+                maxLines = 4; inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                setOnEditorActionListener { _, id, _ -> if (id == android.view.inputmethod.EditorInfo.IME_ACTION_SEND) { sendReply(n); true } else false }
+            }
+            replyField = field
+            c.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, (12 * dp).toInt(), 0, 0)
+                addView(field)
+                addView(pill("MIC", Scheme.color, null) { startReply(n) }.apply { contentDescription = "Say the reply" })
+                addView(pill("SEND", accent, if (n.person) R.drawable.bg_amber else null) { sendReply(n) })
+            })
+        }
         c.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END; setPadding(0, (10 * dp).toInt(), 0, 0)
             addView(pill("DISMISS", Scheme.color, null) { closeReadout(); NotifStore.dismiss(n) })
             addView(pill("OPEN", Scheme.color, null) { closeReadout(); NotifStore.open(this@HomeActivity, n) })
-            if (n.reply != null) addView(pill("REPLY BY VOICE", accent, if (n.person) R.drawable.bg_amber else null) { closeReadout(); startReply(n) })
         })
         showCard(c, 2)
+    }
+
+    private fun sendReply(n: NotifStore.Item) {
+        val field = replyField ?: return
+        val text = field.text.toString().trim()
+        if (text.isEmpty()) { field.requestFocus(); getSystemService(android.view.inputmethod.InputMethodManager::class.java).showSoftInput(field, 0); return }
+        val ok = NotifStore.reply(this, n, text)
+        Haptics.click(this)
+        closeReadout()
+        showCaption(if (ok) "Sent to ${n.title.ifBlank { n.app }}." else "That reply didn't go through. Open the app to reply.", 2500)
+    }
+
+    /** With the keyboard up, an open card sits just above it (the window doesn't resize: the reactor stays put). */
+    private fun liftCard() {
+        val c = readCard ?: return
+        c.post {
+            val root = findViewById<View>(R.id.root)
+            val loc = IntArray(2).also(c::getLocationInWindow)
+            val bottom = loc[1] - c.translationY + c.height
+            val room = root.height - imeBottom - 10 * dp
+            val lift = if (imeBottom > 0) min(0f, room - bottom) else 0f
+            c.animate().translationY(lift).setDuration(160).start()
+        }
     }
 
     private fun startReply(n: NotifStore.Item) {
@@ -493,6 +554,7 @@ class HomeActivity : Activity(), Session.Ui {
         val n = replyTo ?: return
         val said = data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.trim()
         if (resultCode != RESULT_OK || said.isNullOrEmpty()) return
+        replyField?.takeIf { it.isAttachedToWindow }?.let { f -> f.setText(said); f.setSelection(f.text.length); return } // (the words show in the box; SEND sends)
         // The words are shown before anything is sent
         val c = card("REPLY", n.title.ifBlank { n.app }.uppercase().take(24), add = false)
         c.addView(TextView(this).apply { text = "“$said”"; textSize = 14f; setTextColor(getColor(R.color.text)) })
@@ -532,8 +594,8 @@ class HomeActivity : Activity(), Session.Ui {
             addView(TextView(this@HomeActivity).apply { text = "INCOMING · ${call.name.uppercase()}"; textSize = 12f; letterSpacing = 0.3f; setTextColor(GREEN); gravity = Gravity.CENTER })
             addView(LinearLayout(this@HomeActivity).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER; setPadding(0, (14 * dp).toInt(), 0, 0)
-                addView(pill("DECLINE", android.graphics.Color.parseColor("#FF6050"), null) { NotifStore.fire(this@HomeActivity, call.decline) })
-                addView(pill("ANSWER", GREEN, null) { NotifStore.fire(this@HomeActivity, call.answer ?: call.content) })
+                addView(pill("DECLINE", android.graphics.Color.parseColor("#FF6050"), null) { if (!NotifStore.decline(this@HomeActivity, call)) callsMenu() })
+                addView(pill("ANSWER", GREEN, null) { if (!NotifStore.answer(this@HomeActivity, call)) { if (!NotifStore.fire(this@HomeActivity, call.content)) callsMenu() } })
             })
         }
         page0.addView(box)
@@ -659,6 +721,20 @@ class HomeActivity : Activity(), Session.Ui {
         b.setNegativeButton("Close", null).show()
     }
 
+    private fun callsAllowed() = checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED &&
+        checkSelfPermission(Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED
+
+    /** Calls on the home screen: the two phone permissions, and Samsung's own call screen. */
+    private fun callsMenu() {
+        val on = callsAllowed()
+        AlertDialog.Builder(this).setTitle("Calls on the home screen")
+            .setMessage((if (on) "On: when the phone rings, the reactor turns green with ANSWER and DECLINE." else
+                "When the phone rings, the reactor can turn green with ANSWER and DECLINE. ARES needs two permissions for that: Phone (to know it's ringing) and Answer calls. Nothing about your calls leaves the phone.") +
+                "\n\nSamsung's own call screen still opens on top: only the default Phone app can replace it. To keep the home screen visible, set Phone → ⋮ → Settings → Call display while using apps → Small or Mini pop-up.")
+            .setPositiveButton(if (on) "OK" else "Allow") { _, _ -> if (!on) requestPermissions(arrayOf(Manifest.permission.READ_PHONE_STATE, Manifest.permission.ANSWER_PHONE_CALLS), CALLS) }
+            .setNegativeButton("Close", null).show()
+    }
+
     /** What the listener sees (apps, categories, buttons; never the words), and why each did or didn't become an orb. */
     private fun notificationCheck() {
         if (AresNotifs.enabled(this) && AresNotifs.live == null) runCatching { android.service.notification.NotificationListenerService.requestRebind(android.content.ComponentName(this, AresNotifs::class.java)) }
@@ -754,6 +830,7 @@ class HomeActivity : Activity(), Session.Ui {
         if (Ares.paired(this) && (PowerStore.mode == PowerStore.Mode.ONLINE || PowerStore.mode == PowerStore.Mode.STANDBY)) m.menu.add(0, 7, 1, "Power down…")
         m.menu.add(1, 8, 2, "Colour scheme…")
         m.menu.add(1, 9, 2, "Notifications on the home screen…" + if (AresNotifs.enabled(this)) "" else " (off)")
+        m.menu.add(1, 10, 2, "Calls on the home screen…" + if (callsAllowed()) "" else " (off)")
         m.menu.add(1, 4, 2, "Original icons").apply { isCheckable = true; isChecked = Icons.original(this@HomeActivity) }
         m.menu.add(1, 5, 3, "Readouts on the reactor").apply { isCheckable = true; isChecked = p.getBoolean("homeCallouts", true) }
         m.menu.add(1, 6, 4, "Home screen app…")
@@ -765,6 +842,7 @@ class HomeActivity : Activity(), Session.Ui {
                 7 -> PowerSheet.show(this) { powerAct("powerdown") }
                 8 -> chooseScheme()
                 9 -> notificationsMenu()
+                10 -> callsMenu()
                 4 -> { p.edit().putBoolean("homeOriginalIcons", !Icons.original(this)).apply(); Icons.clear(); showDock(); drawer.refresh() }
                 5 -> { p.edit().putBoolean("homeCallouts", !p.getBoolean("homeCallouts", true)).apply(); showReadouts() }
                 6 -> AlertDialog.Builder(this).setTitle("Home screen app")
@@ -887,6 +965,7 @@ class HomeActivity : Activity(), Session.Ui {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == CALENDAR) loadEvents()
+        if (requestCode == CALLS) watchCalls(true)
     }
 
     /** Today's and tomorrow's events, read on the phone (works with the Mac off). */

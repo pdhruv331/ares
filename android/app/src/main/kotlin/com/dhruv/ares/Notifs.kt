@@ -49,15 +49,22 @@ object NotifStore {
 
     @Volatile var items: List<Item> = emptyList()
         private set
-    @Volatile var call: Call? = null
-        private set
+    /** The ringing call: from the dialer's notification when it can be read, else from the phone's own call state. */
+    val call: Call? get() = notifCall ?: if (ringing) Call("tel", callTitle ?: "Incoming call", null, null, null) else null
+    @Volatile private var notifCall: Call? = null
+    @Volatile private var ringing = false // (TelephonyCallback, with the Phone permission)
+    @Volatile private var callTitle: String? = null // a dialer notification's title while one is up (the caller's name)
+    private val DIALERS = setOf("com.samsung.android.incallui", "com.samsung.android.dialer", "com.google.android.dialer", "com.android.dialer", "com.android.server.telecom")
     private var seen = emptySet<String>()
     private val main = Handler(Looper.getMainLooper())
     private val listeners = CopyOnWriteArraySet<(arrived: Item?) -> Unit>()
     fun listen(l: (Item?) -> Unit) { listeners += l }
     fun unlisten(l: (Item?) -> Unit) { listeners -= l }
 
-    fun clear() { items = emptyList(); call = null; seen = emptySet(); main.post { for (l in listeners) l(null) } }
+    fun clear() { items = emptyList(); notifCall = null; callTitle = null; seen = emptySet(); main.post { for (l in listeners) l(null) } }
+
+    /** The phone's call state (HomeActivity's TelephonyCallback): ringing or not. */
+    fun setRinging(on: Boolean) { if (ringing != on) { ringing = on; main.post { for (l in listeners) l(null) } } }
 
     /** Re-read what's showing; `posted` = the key that just arrived (a spark if it's new and makes an orb). */
     fun sync(svc: NotificationListenerService, posted: String?) {
@@ -65,7 +72,10 @@ object NotifStore {
         val ranking = runCatching { svc.currentRanking }.getOrNull()
         val r = NotificationListenerService.Ranking()
         val list = active.mapNotNull { sbn -> check(svc, sbn, importance(ranking, r, sbn)).first }.sortedByDescending { it.time }.take(8)
-        call = active.firstNotNullOfOrNull { parseCall(it) }
+        notifCall = active.firstNotNullOfOrNull { parseCall(it) }
+        val dialer = active.filter { it.notification.category == Notification.CATEGORY_CALL || it.packageName in DIALERS }
+        callTitle = dialer.firstNotNullOfOrNull { d -> d.notification.extras.getParcelable(Notification.EXTRA_CALL_PERSON, Person::class.java)?.name?.toString() ?: d.notification.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() }
+        dialer.firstOrNull()?.let { remember(svc, it) }
         val arrived = posted?.let { k -> list.firstOrNull { it.key == k && k !in seen } }
         items = list
         seen = list.map { it.key }.toSet()
@@ -77,7 +87,29 @@ object NotifStore {
         Notification.CATEGORY_SERVICE, Notification.CATEGORY_PROGRESS, Notification.CATEGORY_STATUS)
 
     /** Development only (HomeActivity's TEST_CALL broadcast in debug builds): pretend a call is ringing, or stop. */
-    fun testCall(name: String?) { call = name?.let { Call("test", it, null, null, null) }; main.post { for (l in listeners) l(null) } }
+    fun testCall(name: String?) { notifCall = name?.let { Call("test", it, null, null, null) }; main.post { for (l in listeners) l(null) } }
+
+    /** The last call notification's shape (no words: package, category, style, flags, button labels), for What ARES sees. */
+    private fun remember(c: Context, sbn: StatusBarNotification) {
+        val n = sbn.notification; val x = n.extras
+        val shape = "${sbn.packageName} · ${n.category ?: "no category"} · ${x.getString(Notification.EXTRA_TEMPLATE)?.substringAfterLast('$') ?: "plain"}" +
+            " · calltype ${x.getInt(Notification.EXTRA_CALL_TYPE, -1)}${if (n.fullScreenIntent != null) " · fullscreen" else ""}${if (sbn.isOngoing) " · ongoing" else ""}" +
+            " · answer intent ${x.containsKey(Notification.EXTRA_ANSWER_INTENT)} · buttons: ${n.actions.orEmpty().mapNotNull { it.title?.toString() }.joinToString(", ").ifBlank { "none" }}" +
+            " · custom view ${n.bigContentView != null || n.contentView != null || n.headsUpContentView != null}"
+        Ares.prefs(c).edit().putString("lastCallNotif", java.text.DateFormat.getDateTimeInstance().format(java.util.Date(sbn.postTime)) + "\n   " + shape).apply()
+    }
+
+    /** ANSWER: the call notification's own button if it has one, else Android's telecom (the answer-calls permission). */
+    fun answer(c: Context, call: Call): Boolean {
+        if (fire(c, call.answer)) return true
+        return runCatching { @Suppress("DEPRECATION", "MissingPermission") c.getSystemService(android.telecom.TelecomManager::class.java).acceptRingingCall(); true }.getOrDefault(false)
+    }
+
+    /** DECLINE: likewise. */
+    fun decline(c: Context, call: Call): Boolean {
+        if (fire(c, call.decline)) return true
+        return runCatching { @Suppress("DEPRECATION", "MissingPermission") c.getSystemService(android.telecom.TelecomManager::class.java).endCall() }.getOrDefault(false)
+    }
 
     private fun importance(ranking: NotificationListenerService.RankingMap?, r: NotificationListenerService.Ranking, sbn: StatusBarNotification) =
         if (ranking != null && ranking.getRanking(sbn.key, r)) r.importance else -1
@@ -130,7 +162,10 @@ object NotifStore {
             "• $app · ${n.category ?: "no category"} · $style · imp ${importance(ranking, r, sbn)}${if (flags.isEmpty()) "" else " · " + flags.joinToString(" ")}" +
                 (if (buttons.isEmpty()) "" else "\n   buttons: $buttons") + "\n   → $result"
         }
-        return head + "\n\n" + (if (lines.isEmpty()) "(no notifications from other apps)" else lines.joinToString("\n"))
+        val calls = "Calls: phone state ${if (c.checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED) "allowed" else "NOT allowed"}" +
+            " · answer calls ${if (c.checkSelfPermission(android.Manifest.permission.ANSWER_PHONE_CALLS) == android.content.pm.PackageManager.PERMISSION_GRANTED) "allowed" else "NOT allowed"}" +
+            "\nLast call notification: ${Ares.prefs(c).getString("lastCallNotif", null) ?: "none seen yet"}"
+        return head + "\n" + calls + "\n\n" + (if (lines.isEmpty()) "(no notifications from other apps)" else lines.joinToString("\n"))
     }
 
     private fun parseCall(sbn: StatusBarNotification): Call? {
