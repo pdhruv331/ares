@@ -21,64 +21,9 @@ const DRY = args.includes('--dry');
 const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
 const DIR = opt('--dir', path.join(SUPPORT, 'voice-lab', `session-${stamp}`));
 
-// ---- The lines ---------------------------------------------------------------------------------------------------
-// Personal names come from this Mac (contacts, apps, ARES projects) and stay in the local labels file only.
-function locals() {
-  let contacts = [];
-  try {
-    contacts = JSON.parse(fs.readFileSync(path.join(SUPPORT, 'contacts.json'), 'utf8'))
-      .map((c) => (c.nickname || c.name || '').trim()).filter((n) => /^[A-Z][a-z]+( [A-Z][a-z]+)?$/.test(n));
-  } catch {}
-  const apps = fs.readdirSync('/Applications').filter((a) => a.endsWith('.app')).map((a) => a.replace(/\.app$/, '')).filter((a) => /^[A-Za-z][A-Za-z ]{2,15}$/.test(a));
-  let projects = [];
-  try { projects = fs.readdirSync(path.join(os.homedir(), 'ARES Projects')).filter((p) => !p.startsWith('.')).map((p) => p.replace(/[-_]/g, ' ')); } catch {}
-  const pick = (list, n, d) => { const out = []; for (let i = 0; i < n; i++) out.push(list.length ? list[(i * 7919 + 13) % list.length] : d[i % d.length]); return out; };
-  return { contacts: pick(contacts, 12, ['Sam', 'Priya', 'Tom']), apps: pick(apps, 8, ['Notes', 'Safari', 'Music']), projects: pick(projects, 3, ['weather app']) };
-}
-const L = locals();
+import { BLOCKS, fillIn } from './session-lines.mjs';
 
-const WAKE = [
-  'Hey ARES, what time is it?', 'Hey ARES, set a timer for five minutes.', 'Hey ARES, what\'s the weather like?', 'Hey ARES, pause the music.',
-  'Hey ARES, how are my jobs doing?', 'Hey ARES, open {app0}.', 'Hey ARES, remind me to call {c0} at six.', 'Hey ARES.',
-  'Hey ARES, are you there?', 'Hey ARES, turn the volume down.', 'ARES, what\'s next on my calendar?', 'ARES, stop.',
-];
-const COMMANDS = [
-  'What\'s on my calendar tomorrow morning?', 'Text {c1} that I\'ll be ten minutes late.', 'Call {c2}.', 'Open {app1} and {app2}.',
-  'Quit {app3}.', 'Set a timer for twenty-five minutes.', 'Remind me to take the bins out at eight tonight.', 'What\'s the weather in Manchester this weekend?',
-  'Play something relaxing.', 'Skip this track.', 'Turn the volume up to sixty percent.', 'Lock the screen.', 'How much battery have I got left?',
-  'Send the last screenshot to my phone.', 'Find the PDF I downloaded yesterday.', 'Read me my latest email from {c3}.', 'Email {c4} about Friday\'s meeting.',
-  'What\'s my {p0} project doing?', 'Start a new project for a habit tracker app.', 'Stop everything.', 'Go quiet.', 'Stay awake.',
-  'How\'s my Claude usage looking?', 'Show me my week.', 'What\'s on the twentieth?', 'Add oat milk to my shopping list.',
-  'Take a note: ask the landlord about the boiler.', 'Convert eighty kilos to pounds.', 'How do you spell rhythm?', 'What\'s fifteen percent of two hundred and forty?',
-  'Turn on do not disturb for an hour.', 'Mute yourself for twenty minutes.', 'Who is {c5}?', 'When did I last talk to {c6}?',
-  'Summarise my unread emails.', 'What did Dhruv say about the launcher yesterday?', 'Tell ARES to forget my old address.', 'Never mind.',
-  'Say that again.', 'Thanks, that\'s all.', 'Explain how a heat pump works, briefly.', 'Is it going to rain before five?',
-  'Move my three o\'clock to four.', 'Cancel the timer.', 'Open the Downloads folder.', 'What\'s the time in Tokyo?',
-  'Text {c7} happy birthday.', 'Search the web for the best standing desks.', 'Put the reactor look back on.', 'Power down.',
-];
-const PAUSES = [ // say these the way you'd think out loud: pause where the dots are
-  'Remind me to... um... call {c8} tomorrow at... nine.', 'Can you find the... the file I was working on for {p0}... yesterday afternoon.',
-  'What\'s the... hmm... weather going to be like on Saturday?', 'Send {c9} a message saying... I\'ll be there around... half seven.',
-  'Set a timer for... let\'s say... twelve minutes.', 'Open {app4} and then... actually also {app5}.', 'I want to plan... a weekend in... Edinburgh, maybe.',
-  'Tell me about... the history of... the London Underground.', 'Add to my list... eggs, bread... and coffee.', 'How long would it take to... drive to... Bristol from here?',
-  'What was the name of that... the restaurant {c10} recommended?', 'Move my... meeting with {c11}... to Thursday.', 'Turn the volume... down a bit.',
-  'So... what\'s on today?', 'And then... remind me about it at four.',
-];
-const fillIn = (t) => t.replace(/\{c(\d+)\}/g, (_, i) => L.contacts[i % L.contacts.length]).replace(/\{app(\d+)\}/g, (_, i) => L.apps[i % L.apps.length])
-  .replace(/\{p(\d+)\}/g, (_, i) => L.projects[i % L.projects.length]);
-
-// Each block: where you sit, what's going on in the room, and the lines
-const BLOCKS = {
-  wake: { title: 'Wake word, at the desk (about half a metre)', distance: 0.5, condition: 'quiet', lines: WAKE },
-  commands: { title: 'Commands, at the desk', distance: 0.5, condition: 'quiet', lines: COMMANDS },
-  pauses: { title: 'Thinking out loud: pause where the dots are, the way you would', distance: 0.5, condition: 'quiet', lines: PAUSES },
-  lean: { title: 'Wake word, leaning back (about 1 metre)', distance: 1, condition: 'quiet', lines: WAKE },
-  far: { title: 'Across the room (about 3 metres): wake word, then a few commands', distance: 3, condition: 'quiet', lines: [...WAKE, ...COMMANDS.slice(0, 15)] },
-  music: { title: 'At the desk with music playing at your normal level (start it yourself now)', distance: 0.5, condition: 'music', lines: [...WAKE, ...COMMANDS.slice(15, 30)] },
-  tv: { title: 'At the desk with a TV show or YouTube talking in the background (start it yourself now)', distance: 0.5, condition: 'tv', lines: [...WAKE, ...COMMANDS.slice(30, 40)] },
-  speaking: { title: 'While ARES is talking (the backup voice plays through the speakers): cut in with the wake word', distance: 0.5, condition: 'speaking', lines: WAKE, voice: true },
-};
-const ORDER = opt('--blocks', 'wake,commands,pauses,lean,far,music,tv,speaking').split(',');
+const ORDER = opt('--blocks', 'wake,commands,pauses,lean,far,music,tv,speaking,others').split(',');
 
 // ---- Kokoro lines playing while she "speaks" (another process, the way the window plays her) -------------------------
 async function makeVoiceClips() {
@@ -103,6 +48,7 @@ const rl = readline.createInterface({ input: process.stdin });
 const keys = [];
 const typed = []; // lines typed ahead of the prompt
 rl.on('line', (l) => { const w = keys.shift(); if (w) w(l.trim().toLowerCase()); else typed.push(l.trim().toLowerCase()); });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const key = () => (typed.length ? Promise.resolve(typed.shift()) : new Promise((r) => keys.push(r)));
 
 function makeRecorder() {
@@ -113,7 +59,7 @@ function makeRecorder() {
 async function runBlock(name, rec, labels, clips) {
   const b = BLOCKS[name];
   const file = path.join(DIR, `${name}.wav`);
-  console.log(`\n=== ${b.title} ===\n${b.lines.length} lines. Press Enter to start.`);
+  console.log(`\n=== ${b.title} ===\n${b.timed ? `${b.timed} s of room audio` : `${b.lines.length} lines`}. Press Enter to start.`);
   await key();
   rec.send(`rec ${file}`);
   const t0 = Date.now();
@@ -121,6 +67,15 @@ async function runBlock(name, rec, labels, clips) {
   let clipIdx = 0;
   const playNext = () => { if (!clips) return; player = spawn('afplay', [clips[clipIdx++ % clips.length]]); player.on('exit', (code, sig) => { if (sig !== 'SIGTERM') setTimeout(playNext, 400); }); };
   if (b.voice) playNext();
+  if (b.timed) { // a stretch of room audio, not lines: counts down, then stops
+    for (let left = b.timed; left > 0; left--) { // (lines typed meanwhile wait in `typed`; q + Enter ends it early)
+      process.stdout.write(`\r  recording… ${left} s left (q + Enter to stop early) `);
+      await sleep(1000);
+      if (typed.includes('q')) { typed.splice(typed.indexOf('q'), 1); break; }
+    }
+    labels.write(JSON.stringify({ block: name, file: path.basename(file), i: 0, text: '', start: 0, end: +((Date.now() - t0) / 1000).toFixed(2), distance: b.distance, condition: b.condition, featuresOnly: true }) + '\n');
+    console.log();
+  }
   for (let i = 0; i < b.lines.length; i++) {
     const text = fillIn(b.lines[i]);
     const start = (Date.now() - t0) / 1000;
