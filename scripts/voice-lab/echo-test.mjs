@@ -11,9 +11,17 @@ import { createRequire } from 'module';
 import { recorder, readWav, transcribe } from './lab.mjs';
 
 if (!process.argv.includes('--go')) { console.error('Plays audio through the speakers for ~3 minutes. Mute the installed ARES, keep the room quiet, then pass --go.'); process.exit(1); }
-const OUT = path.join(os.homedir(), 'Library/Application Support/ARES/voice-lab', `echo-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}`);
+const OUT = path.join(os.homedir(), 'Library/Application Support/ARES/voice-lab', `echo-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}`);
+try { if (execFileSync('pgrep', ['-f', 'echo-test.mjs --go'], { encoding: 'utf8' }).trim().split('\n').length > 1) { console.error('Another echo test is already running.'); process.exit(1); } } catch {}
 fs.mkdirSync(OUT, { recursive: true });
 const TEXT = 'Your next meeting is at three with the design team. I checked the forecast and it should stay dry until about five, then light rain moves in from the west. Three jobs are running, and the weather app project is waiting for your OK.';
+const volume = execFileSync('osascript', ['-e', 'output volume of (get volume settings)'], { encoding: 'utf8' }).trim();
+const muted = execFileSync('osascript', ['-e', 'output muted of (get volume settings)'], { encoding: 'utf8' }).trim() === 'true';
+if (muted || Number(volume) < 20) { // nothing (or almost nothing) would reach the mic: the numbers would be meaningless
+  console.error(`The speakers are ${muted ? 'muted' : `at ${volume}%`}. Unmute and set the volume where you normally have ARES (about 50%), then run this again.`);
+  fs.rmSync(OUT, { recursive: true, force: true });
+  process.exit(1);
+}
 const require = createRequire(import.meta.url);
 const sherpa = require(path.join(import.meta.dirname, '../../node_modules/sherpa-onnx-node'));
 const k = path.join(os.homedir(), 'Library/Application Support/ARES/models/kokoro-v1_0');
@@ -24,7 +32,6 @@ const passage = path.join(OUT, 'passage.wav');
   const a = tts.generate({ text: TEXT, sid: 21, speed: 1 });
   sherpa.writeWave(passage, { samples: a.samples, sampleRate: a.sampleRate });
 }
-const volume = execFileSync('osascript', ['-e', 'output volume of (get volume settings)'], { encoding: 'utf8' }).trim();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const energy = (file) => { const { s } = readWav(file); let a = 0; for (const v of s) a += v * v; return a / Math.max(1, s.length); };
 
