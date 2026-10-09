@@ -26,6 +26,7 @@ for (const file of [path.join(app.getPath('userData'), '.env'), path.join(__dirn
 const claude = require('./claude'); // after .env so it sees ARES_CLAUDE_MODEL
 const { WakeListener, listenerPath } = require('./listener');
 const { VoiceId } = require('./voiceid');
+const { Latency } = require('./latency');
 const { startBridge } = require('./bridge');
 const { TelegramRemote } = require('./telegram');
 const { PhoneServer } = require('./phone');
@@ -76,6 +77,7 @@ let ignition, power, wakeLines; // ignition.js / power.js / wakeline.js (docs/ig
 const HOTKEY_STANDBY = 'Alt+Shift+Space';
 let listener;
 let voiceId;
+let latency = { begin() {}, ensure() {}, mark() {}, once() {}, note() {}, flush() {} }; // per-stage voice turn timing (latency.js), made once the support folder is known
 let bridge;
 let remote;
 let phone;
@@ -812,7 +814,11 @@ function createListener() {
 }
 
 async function onCommand(evt) {
+  const nWords = (evt.text || '').split(/\s+/).filter(Boolean).length;
+  latency.begin(evt.trusted ? 'ptt' : evt.addressed === false ? 'desk' : Date.now() - lastBargeAt < 8000 ? 'barge' : 'wake', evt.timing, { words: nWords });
+  latency.mark('heard');
   const r = await classify(evt.text || '');
+  latency.mark('intent', Date.now(), { intent: r.intent, intentMs: r.ms });
   rememberIntent(evt.text, r);
   // Speaker check: push-to-talk is trusted; everything else must sound like the owner. Being told to stop
   // (or, just after cutting her off, to never mind) authorises nothing, so it needs no Voice ID.
@@ -822,7 +828,9 @@ async function onCommand(evt) {
   // Heard without the wake word (desk mode / "stay awake"): only the owner's voice counts (checked against the
   // voiceprint even with Voice ID off), and only when it's clearly said TO her. Otherwise she stays quiet, and
   // nothing of it goes to the brain or the log.
+  const tTrust = Date.now();
   const check = evt.trusted || harmless ? { ok: true, score: null } : voiceId.verify(evt.audio, { force: !addressed });
+  latency.mark('trust', Date.now(), { trustMs: Date.now() - tTrust, trusted: check.ok, voiceScore: check.score == null ? null : +check.score.toFixed(3) });
   if (manualAwake) touchAwake();
   learnVoice(evt, check);
   // In always-listening mode, other people's voices are ignored quietly rather than refused aloud. A voice close to
@@ -832,11 +840,14 @@ async function onCommand(evt) {
     if (voiceId.drifting) refreshTray();
     win?.webContents.send('listener-event', { type: 'ignored' }); // the screen stops "listening…" for it
     orb?.listenerEvent({ type: 'ignored' });
+    latency.flush('not the owner');
     return log('voice-id', { ignored: true, score: check.score });
   }
   if (!addressed && !harmless) {
     const j = judgeAddressed(evt.text, talk);
+    latency.mark('addressed', Date.now(), { verdict: j.verdict, why: j.why });
     if (j.verdict !== 'yes') {
+      latency.flush('not for her');
       win?.webContents.send('listener-event', { type: 'ignored' }); // not for her: the screen goes back to standby
       orb?.listenerEvent({ type: 'ignored' });
       return log('overheard', { words: (evt.text || '').split(/\s+/).filter(Boolean).length, verdict: j.verdict, why: j.why });
@@ -919,6 +930,13 @@ ipcMain.on('listener-unmute', () => listener.unmute());
 ipcMain.on('listener-listen', (_e, ms, trusted) => listener.listen(ms, trusted));
 ipcMain.on('listener-pause', () => { log('pause'); listener.pause(); });
 ipcMain.on('log', (_e, ...parts) => log(...parts));
+// The window's stages of a turn (latency.js): handle (a typed turn starts here), plan, firstSentence, firstAudio; 'end' writes it
+ipcMain.on('latency', (_e, stage, t, info) => {
+  if (stage === 'end') return latency.turn?.marks.handle === info?.handleAt && latency.flush(info.end); // (not a newer turn's)
+  if (stage === 'handle') latency.ensure('typed');
+  if (info) latency.note(info);
+  latency.once(stage, t || Date.now());
+});
 ipcMain.on('listener-resume', () => { log('resume'); listener.resume(); });
 ipcMain.on('listener-speaking', (_e, on) => listener.speaking(on));
 ipcMain.handle('native-playback', () => listener.canPlay);
@@ -1415,9 +1433,15 @@ ipcMain.on('tts-stream', async (e, id, text, native) => {
   if (cancelledClips.has(id)) return finish('cancelled'); // cut off before it started
   const ctrl = new AbortController();
   ttsAborts.set(id, () => ctrl.abort());
+  const firstClip = latency.turn && latency.turn.marks.ttsRequest == null;
+  if (firstClip) latency.mark('ttsRequest');
   try {
-    await speech.speak(text, { signal: ctrl.signal, source: 'mac',
-      onChunk: (value) => (toListener ? listener.play(id, value) : send('tts-chunk', id, value)) });
+    const said = await speech.speak(text, { signal: ctrl.signal, source: 'mac',
+      onChunk: (value) => {
+        if (firstClip) latency.once('ttsFirstByte');
+        return toListener ? listener.play(id, value) : send('tts-chunk', id, value);
+      } });
+    if (firstClip) latency.note({ ttsEngine: said?.engine });
     finish(cancelledClips.has(id) ? 'cancelled' : null);
   } catch (err) {
     if (!cancelledClips.has(id) && err.kind !== 'cancelled') log('tts error', err.message);
@@ -1563,10 +1587,13 @@ async function askBrain(said, prompt, onDelta, source = 'mac', images = [], veri
   if (hint) prompt = hint + prompt;
   if (JOB_PHRASE.test(said)) prompt = JOB_NOTE + prompt;
   if (callNotes.length) prompt = `(ARES note: since the last message, you told the user about phone calls: ${callNotes.splice(0).join(' | ')})\n\n${prompt}`;
+  const mac = source === 'mac';
   const result = await claude.ask(prompt, (delta) => {
+    if (first == null && mac) latency.mark('brainFirstToken');
     first ??= Date.now() - t0;
     onDelta?.(delta);
-  }, { onStart: () => bridge?.userSaid(said, source, verified), images, said });
+  }, { onStart: () => { if (mac) { latency.mark('brainSent'); latency.note({ tools: 0 }); } bridge?.userSaid(said, source, verified); }, images, said });
+  if (mac) latency.mark('brainDone', Date.now(), { model: result.model, why: result.why, replyChars: (result.text || '').length, brainOk: result.ok });
   log('timing brain', { firstTextMs: first, doneMs: Date.now() - t0, ok: result.ok, source, model: result.model, why: result.why });
   if (source === 'mac' && orb?.turnActive && result.ok && (result.text || '').length > 320) orb.portal(true, 'long answer'); // asked from the orb: a long result needs the screen
   toDash({ type: 'health', key: 'brain', ok: result.ok, reason: result.ok ? '' : /log in/i.test(result.error) ? 'Claude login expired' : /limit/i.test(result.error) ? 'Claude usage limit' : 'Claude error' });
@@ -2227,6 +2254,7 @@ function toolActivity(name) {
   return own[tool] || (server === 'ares' ? `${tool.replace(/_/g, ' ')}…` : 'working on it…');
 }
 claude.onTool((name) => toDash({ type: 'activity', text: toolActivity(name) }));
+claude.onTool(() => { if (latency.turn?.info.tools != null) latency.turn.info.tools++; });
 // Asked from the corner orb: a tool that puts something on screen (a panel, a job, a search result) opens the portal
 const SCREEN_TOOLS = /calendar_show|panel_preview|panel_keep|start_job|start_project|find_files|list_windows|tasks_list|search|show_|open_url|read_file|job_result|list_jobs/;
 claude.onTool((name) => { if (orb?.turnActive && SCREEN_TOOLS.test(name)) orb.portal(true, `tool ${name.replace(/^mcp__.+?__/, '')}`); });
@@ -2461,6 +2489,7 @@ app.whenReady().then(async () => {
   if (app.isPackaged && readSettings().launchAtLogin === undefined) setLaunchAtLogin(true);
   const openedAtLogin = app.getLoginItemSettings().wasOpenedAtLogin;
 
+  latency = new Latency(path.join(app.getPath('userData'), 'latency.jsonl'));
   voiceId = new VoiceId({
     modelPath: app.isPackaged
       ? path.join(process.resourcesPath, 'speaker-titanet-small.onnx')

@@ -74,6 +74,7 @@ contextBridge.exposeInMainWorld('ares', {
   resumeListening: () => ipcRenderer.send('listener-resume'),
   onListener: (fn) => ipcRenderer.on('listener-event', (_e, evt) => fn(evt)),
   log: (...parts) => ipcRenderer.send('log', ...parts),
+  latency: (stage, t, info) => ipcRenderer.send('latency', stage, t, info), // a stage of this turn (latency.js)
   scene: (msg) => ipcRenderer.send('scene', msg), // to the wallpaper (renderer/scene-link.js)
   // The ARES theme (theme.js): the status pill for its menu bar, and the views its bar, dock and notifications open
   theme: {

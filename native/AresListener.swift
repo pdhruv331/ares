@@ -32,6 +32,8 @@ import Speech
 
 setvbuf(stdout, nil, _IOLBF, 0)
 
+func wallMs(_ d: Date = Date()) -> Double { (d.timeIntervalSince1970 * 1000).rounded() }
+
 func emit(_ obj: [String: Any]) {
     guard let data = try? JSONSerialization.data(withJSONObject: obj),
           let line = String(data: data, encoding: .utf8) else { return }
@@ -102,6 +104,10 @@ final class Listener {
     private var lastVoiceAt = Date.distantPast
     private var captureStartedAt = Date()
     private var lastTranscriptChangeAt = Date()
+    // Latency log (voice v2 A1): wall-clock ms of each stage of the capture, sent with the command (times only, no words)
+    private var speechStartWall: Double? = nil   // when the user started speaking (wake phrase or first word)
+    private var wakeSaidWall: Double? = nil      // when the wake phrase was said / heard
+    private var wakeWall: Double? = nil
     var debug = false                  // --debug: report mic level + what was heard (diagnostics only)
     var startMuted = false   // --muted: no audio engine until unmute
     private var debugPeak: Float = 0
@@ -294,6 +300,7 @@ final class Listener {
         command = ""
         captureStartSample = currentSample()
         captureStartedAt = Date()
+        resetTiming()
         armDeadline(timeout)
     }
 
@@ -510,6 +517,8 @@ final class Listener {
         captureStartSample = taskStartSample
         captureStartedAt = Date()
         lastTranscriptChangeAt = Date()
+        resetTiming()
+        speechStartWall = bargeVoiceStart.map { wallMs($0) }
         emit(["type": "listening"])
         updateCommand(from: bargeText)
         armDeadline(6)
@@ -562,6 +571,7 @@ final class Listener {
         if rms > max(0.006, noiseFloor * 3) {
             lastVoiceAt = Date()
             if mode == .speaking, bargeVoiceStart == nil { bargeVoiceStart = Date() }
+            if mode == .capturing, speechStartWall == nil { speechStartWall = wallMs() }
         }
     }
 
@@ -687,6 +697,8 @@ final class Listener {
                 captureStartSample = taskStartSample + Int((first.timestamp - 0.3) * Listener.rate)
                 captureStartedAt = Date()
                 command = ""
+                resetTiming()
+                speechStartWall = wallMs(taskStartedAt.addingTimeInterval(first.timestamp))
                 emit(["type": "listening"])
                 updateCommand(from: text)
                 return
@@ -710,6 +722,10 @@ final class Listener {
             captureStartSample = taskStartSample + Int((wake.time - 0.3) * Listener.rate)
             captureStartedAt = Date()
             command = ""
+            resetTiming()
+            speechStartWall = wallMs(taskStartedAt.addingTimeInterval(wake.time))
+            wakeSaidWall = speechStartWall
+            wakeWall = wallMs()
             emit(["type": "wake"])
             armDeadline(6)
             updateCommand(from: text)
@@ -778,7 +794,20 @@ final class Listener {
         mode = .idle
         startTask() // fresh transcript so the command can't retrigger the wake word
         if text.isEmpty { emit(["type": "timeout"]) }
-        else { emit(["type": "command", "text": text, "audio": audio, "trusted": trustedCapture, "addressed": addressed]) }
+        else { emit(["type": "command", "text": text, "audio": audio, "trusted": trustedCapture, "addressed": addressed, "timing": timing()]) }
+    }
+
+    private func resetTiming() { speechStartWall = nil; wakeSaidWall = nil; wakeWall = nil }
+
+    /// The capture's stages in wall-clock ms: speech start, wake (said, detected), the mic going quiet (VAD stop), the last
+    /// transcript change (the text the command ends up with), and the end-of-turn decision (now). Times only.
+    private func timing() -> [String: Any] {
+        var t: [String: Any] = ["eot": wallMs(), "lastText": wallMs(lastTranscriptChangeAt), "endSilence": endSilence]
+        if lastVoiceAt > captureStartedAt { t["vadStop"] = wallMs(lastVoiceAt) }
+        if let v = speechStartWall { t["speechStart"] = v }
+        if let v = wakeSaidWall { t["wakeSaid"] = v }
+        if let v = wakeWall { t["wake"] = v }
+        return t
     }
 }
 

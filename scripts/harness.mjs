@@ -8,6 +8,7 @@ import { spawn, execSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 const PORT = Number(process.env.ARES_HARNESS_PORT) || 9334;
 const DIR = process.env.ARES_USER_DATA || '/private/tmp/ares-harness-panels';
@@ -30,7 +31,7 @@ if (cmd === 'start') {
   if (fs.existsSync(kokoro) && !fs.existsSync(path.join(DIR, 'models/kokoro-v1_0'))) fs.symlinkSync(kokoro, path.join(DIR, 'models/kokoro-v1_0'));
   const log = fs.openSync(path.join(DIR, 'harness.log'), 'a');
   const child = spawn('npx', ['electron', '.', `--remote-debugging-port=${PORT}`], {
-    cwd: path.join(path.dirname(new URL(import.meta.url).pathname), '..'), detached: true, stdio: ['ignore', log, log],
+    cwd: path.join(path.dirname(fileURLToPath(import.meta.url)), '..'), detached: true, stdio: ['ignore', log, log],
     env: { ...process.env, ARES_USER_DATA: DIR, ARES_PHONE_PORT: '8799', ARES_TEST_PAIR_CODE: '123456' },
   });
   child.unref();

@@ -135,6 +135,7 @@ const Voice = (() => {
           at = Math.max(at, soonest);
           if (turnStart) {
             window.ares.log('timing first-sound', { ms: Math.round(performance.now() - turnStart + (at - audioCtx.currentTime) * 1000) });
+            window.ares.latency('firstAudio', Date.now() + (at - audioCtx.currentTime) * 1000);
             turnStart = 0;
           }
           src.start(at);
@@ -180,7 +181,7 @@ const Voice = (() => {
         HUD.setSpectrum(Float32Array.from({ length: HUD.BARS }, (_, i) => env * (0.4 + 0.6 * Math.abs(Math.sin(t / 110 + i * 0.35)))));
         frame = requestAnimationFrame(animate);
       };
-      u.onstart = () => { frame = requestAnimationFrame(animate); line?.estimate(14, 0); };
+      u.onstart = () => { frame = requestAnimationFrame(animate); line?.estimate(14, 0); if (turnStart) { window.ares.latency('firstAudio', Date.now(), { ttsEngine: 'system' }); turnStart = 0; } };
       u.onend = u.onerror = () => { cancelAnimationFrame(frame); zero(); line?.finish(); resolve(); };
       speechSynthesis.speak(u);
     });
@@ -206,6 +207,7 @@ const Voice = (() => {
       if (cut >= 0) { inSources = true; text = text.slice(0, cut); }
       text = text.replace(/\(?https?:\/\/\S+\)?/g, '').trim(); // never read out web addresses
       if (!/[a-z0-9]/i.test(forDisplay(text))) return;
+      window.ares.latency('firstSentence', Date.now(), { firstSentenceChars: text.length }); // (only the first one counts)
       const line = Comms.sentence(text); // its subtitle, lit word by word as she says it
       if (native && ttsOn && !failed) {
         const playing = window.ares.ttsPlay(text); // fetch now; the listener plays clips strictly in order
@@ -445,6 +447,8 @@ let activeTurn = null;
 let interruptedNote = ''; // set when the user talks over her, passed to Claude with their next request
 async function handle(text, { voice = false, addressed = true, intent = null } = {}) {
   turnStart = performance.now();
+  const handleAt = Date.now(); // (also this turn's identity in the latency log)
+  window.ares.latency('handle', handleAt);
   const turn = activeTurn = { barged: false, speech: null };
   // Echo-cancelled playback: keep listening so the user can simply talk over her. Otherwise pause.
   if (bargeable && Voice.ready()) window.ares.speakingMode(true); else window.ares.pauseListening();
@@ -458,6 +462,7 @@ async function handle(text, { voice = false, addressed = true, intent = null } =
   const command = localCommand(text) || Work.command(text) || (Drop.pending ? await Drop.consume(text, { voice }) : null);
   const plan = command ? { notes: '' }
     : await window.ares.planRemark(text, { intent, afterBarge: Boolean(cutIn), addressed }).catch(() => ({ notes: '' }));
+  window.ares.latency('plan', Date.now(), { local: Boolean(command || plan.quick) });
   const quick = plan.quick && { ...plan.quick, after: plan.quick.action === 'sleep' ? () => { window.ares.setAwake(false); window.ares.resumeListening(); } : null };
   const local = command || quick;
   if (command) { note('user', text); if (command.reply) note('ares', command.reply); } // brain and quick turns are kept by the main process
@@ -487,6 +492,7 @@ async function handle(text, { voice = false, addressed = true, intent = null } =
     said = local.reply;
   }
   await speech.done();
+  window.ares.latency('end', 0, { handleAt, end: turn.barged ? 'barged' : ignored ? 'ignored by the brain' : 'done' });
   // For desk mode: when she last finished, and whether she asked something (a short answer is then for her)
   if (!ignored) window.ares.replyDone(/\?\s*$/.test(forDisplay(said)));
   if (turn.barged) return; // the listener is already capturing what the user is saying

@@ -121,7 +121,7 @@ function spawnBrain() {
       }
       if (!pending) continue;
       if (msg.type === 'stream_event' && msg.event?.type === 'content_block_start' && msg.event.content_block?.type === 'tool_use') {
-        try { toolHook?.(msg.event.content_block.name); } catch {} // the dashboard's thought ticker
+        for (const fn of toolHooks) { try { fn(msg.event.content_block.name); } catch {} } // the dashboard's thought ticker, the orb, the latency log
       } else if (msg.type === 'stream_event' && msg.event?.type === 'content_block_start' && msg.event.content_block?.type === 'text') {
         // "One moment, sir." then a tool call, then the answer: keep the two apart
         if (pending.text && !/\s$/.test(pending.text)) { pending.text += ' '; pending.onText(' '); }
@@ -249,9 +249,9 @@ function oneShot(prompt, { model = process.env.ARES_MEMORY_MODEL || MODEL, timeo
   });
 }
 
-/** Called with each tool's name as the brain starts using it ("checking your calendar…"). */
-let toolHook = null;
-function onTool(fn) { toolHook = fn; }
+/** Called with each tool's name as the brain starts using it ("checking your calendar…"). Every hook added is kept. */
+const toolHooks = [];
+function onTool(fn) { toolHooks.push(fn); }
 
 function shutdown() {
   proc?.kill();
