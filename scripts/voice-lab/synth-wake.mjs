@@ -60,6 +60,7 @@ for (const engine of ENGINES) {
   const fa = neg.filter(woke).map((c) => `${c.text} → "${byFile.get(c.file)?.text}"`);
   report[engine] = {
     recall: `${pos.filter(woke).length}/${pos.length}`,
+    recallWithOkayFix: `${pos.filter((c) => wakeToday(byFile.get(c.file), { okayFix: true }).woke).length}/${pos.length}`,
     falseAccepts: `${fa.length}/${neg.length}`,
     nameHeardAs: Object.entries(heard).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => `${k || '(nothing)'} ${v}`).join(', '),
     msPerClip: Math.round(res.reduce((a, r) => a + (r.ms || 0), 0) / res.length),

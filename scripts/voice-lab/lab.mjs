@@ -115,7 +115,7 @@ export function writeWav16(file, samples) {
 export { readWav };
 
 /** Transcribe many clips as one file (clips joined by `gap` s of silence); results per clip, words assigned by time. */
-export async function transcribeJoined(engine, files, { gap = 1.5, batch = 120, ...opts } = {}) {
+export async function transcribeJoined(engine, files, { gap = 3, batch = 120, ...opts } = {}) {
   const out = [];
   for (let b = 0; b < files.length; b += batch) {
     const part = files.slice(b, b + batch);
@@ -134,7 +134,8 @@ export async function transcribeJoined(engine, files, { gap = 1.5, batch = 120, 
     writeWav16(joined, all);
     const [r] = await transcribe(engine, [joined], { ...opts, timeoutS: Math.ceil(t) + 60 });
     for (const sp of spans) {
-      const segs = (r?.segments || []).filter((g) => g.t + g.d / 2 >= sp.start - 0.2 && g.t + g.d / 2 < sp.end + gap * 0.6)
+      // each word belongs to the clip whose span (widened to the middle of the gaps either side) holds its midpoint
+      const segs = (r?.segments || []).filter((g) => g.t + g.d / 2 >= sp.start - gap / 2 && g.t + g.d / 2 < sp.end + gap / 2)
         .map((g) => ({ ...g, t: g.t - sp.start }));
       out.push({ file: sp.file, engine, text: segs.map((g) => g.s).join('').replace(/\s+/g, ' ').trim(), segments: segs, error: r?.error, ms: r?.ms ? Math.round(r.ms * (sp.end - sp.start) / t) : null });
     }

@@ -5,13 +5,16 @@ const NAME = '(?:ares|aries|arras|arris|aris|arez|eris)';
 const PHRASES = ['hey ares', 'ok ares'];
 const BARE = ['ares'];
 const word = (w) => (w === 'ares' ? NAME : w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-const PHRASE_RE = new RegExp(String.raw`\b(?:` + PHRASES.map((p) => p.split(' ').map(word).join(String.raw`[\s,]+`)).join('|') + String.raw`)\b`, 'i');
+const phraseRe = (list) => new RegExp(String.raw`\b(?:` + list.map((p) => p.split(' ').map(word).join(String.raw`[\s,]+`)).join('|') + String.raw`)\b`, 'i');
+const PHRASE_RE = phraseRe(PHRASES);
+// The same rule with "okay" accepted: the recognisers write "Okay", so today's "ok ares" phrase never matches it
+const PHRASE_RE_OKAY = phraseRe([...PHRASES, 'okay ares']);
 const BARE_RE = new RegExp('^(?:' + BARE.map(word).join('|') + ')$', 'i');
 
 /** { woke, how } for one transcript, exactly as the listener would decide on its final text. */
-export function wakeToday(tr) {
+export function wakeToday(tr, { okayFix = false } = {}) {
   if (!tr || !tr.text) return { woke: false, how: 'no text' };
-  if (PHRASE_RE.test(tr.text)) return { woke: true, how: 'phrase' };
+  if ((okayFix ? PHRASE_RE_OKAY : PHRASE_RE).test(tr.text)) return { woke: true, how: 'phrase' };
   const segs = tr.segments || [];
   for (let i = 0; i < segs.length; i++) {
     const w = String(segs[i].s || '').replace(/^[^\p{L}]+|[^\p{L}]+$/gu, '');
