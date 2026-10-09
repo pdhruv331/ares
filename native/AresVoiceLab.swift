@@ -40,7 +40,13 @@ final class Lab {
 
     init(vpio: Bool) { self.vpio = vpio }
 
+    let playFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 1, interleaved: false)!
+
     func start() -> Bool {
+        // Same order as AresListener: the player joins the graph before voice processing is switched on (the other way
+        // round, the engine fails to start with -10875)
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: playFormat)
         let input = engine.inputNode
         if vpio {
             do {
@@ -51,8 +57,6 @@ final class Lab {
                 }
             } catch { emit(["type": "error", "message": "voice processing: \(error.localizedDescription)"]); return false }
         }
-        engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: nil)
         let fmt = input.outputFormat(forBus: 0)
         guard fmt.sampleRate > 0 else { emit(["type": "error", "message": "no microphone"]); return false }
         inputMono = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: fmt.sampleRate, channels: 1, interleaved: false)
@@ -126,8 +130,10 @@ final class Lab {
     func play(_ p: String) {
         do {
             let f = try AVAudioFile(forReading: URL(fileURLWithPath: p))
-            engine.disconnectNodeOutput(player)
-            engine.connect(player, to: engine.mainMixerNode, format: f.processingFormat)
+            if f.processingFormat != playFormat { // (Kokoro's 24 kHz mono already matches: no re-wiring under voice processing)
+                engine.disconnectNodeOutput(player)
+                engine.connect(player, to: engine.mainMixerNode, format: f.processingFormat)
+            }
             player.scheduleFile(f, at: nil, completionCallbackType: .dataPlayedBack) { _ in
                 DispatchQueue.main.async { emit(["type": "played"]) }
             }

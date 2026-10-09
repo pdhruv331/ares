@@ -71,6 +71,7 @@ export function recorder({ vpio = true } = {}) {
   const r = new EventEmitter();
   r.level = 0;
   const pipe = fs.createWriteStream(run.stdin); // (opens once the helper opens its end)
+  pipe.on('error', () => {}); // the helper exited (its error event says why): don't take Node down with EPIPE
   const stop = follow(run.out, (m) => { if (m.type === 'level') r.level = m.rms; r.emit('event', m); r.emit(m.type, m); });
   r.send = (cmd) => pipe.write(cmd + '\n');
   r.wait = (type, ms = 30_000) => new Promise((resolve, reject) => {
