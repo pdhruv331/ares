@@ -185,6 +185,7 @@ let localeId = option("--locale") ?? "en-GB"
 let context = option("--context")?.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } ?? ["Ares", "Hey Ares"]
 let lmDir = option("--lm")
 let xsampa = option("--xsampa") ?? "E@ r i: z"
+let fileTimeout = Double(option("--timeout") ?? "") ?? 30   // seconds per file before it counts as stuck
 let files = argv
 
 func authorize() async {
@@ -286,12 +287,26 @@ func transcribeST(_ path: String) async -> [String: Any] {
 }
 
 
+/// One file's transcription with a deadline: a recogniser that never finishes a file (seen with SpeechTranscriber) gives an
+/// error line for it instead of stalling the batch.
+func withTimeout(_ seconds: Double, _ path: String, _ op: @escaping () async -> [String: Any]) async -> [String: Any] {
+    await withCheckedContinuation { c in
+        let lock = NSLock()
+        var done = false
+        let finish: ([String: Any]) -> Void = { r in
+            lock.lock(); defer { lock.unlock() }
+            if !done { done = true; c.resume(returning: r) }
+        }
+        let task = Task { finish(await op()) }
+        DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { task.cancel(); finish(["file": path, "error": "timed out after \(Int(seconds)) s"]) }
+    }
+}
 // ---- Main ------------------------------------------------------------------------------------------------------------
 if mode == "record" { runRecorder() } else { Task {
     switch mode {
     case "sf":
         await authorize()
-        for f in files { emit(await transcribeSF(f)) }
+        for f in files { emit(await withTimeout(fileTimeout, f) { await transcribeSF(f) }) }
     case "lm-build":
         await authorize()
         guard let dir = files.first else { fail("lm-build <dir>") }
@@ -299,7 +314,7 @@ if mode == "record" { runRecorder() } else { Task {
     case "st":
         guard #available(macOS 26.0, *) else { fail("SpeechTranscriber needs macOS 26") }
         await authorize()
-        for f in files { emit(await transcribeST(f)) }
+        for f in files { emit(await withTimeout(fileTimeout, f) { await transcribeST(f) }) }
     case "locales":
         let sf = SFSpeechRecognizer.supportedLocales().map(\.identifier).filter { $0.hasPrefix("en") }.sorted()
         let onDevice = sf.filter { SFSpeechRecognizer(locale: Locale(identifier: $0))?.supportsOnDeviceRecognition == true }
