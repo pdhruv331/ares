@@ -59,14 +59,18 @@ everything else is ours, on this M5 MacBook.
 | Today's rule, SFSpeech, clean Kokoro (28 voices) | 80% | 28/392 sentences (all "Aries is my star sign") | "Okay ARES" never works; "Hey" heard as "Hell"/"Helly" |
 | Same, "okay" fixed | 93% | same | |
 | Today's rule on SpeechTranscriber | 82% → 98% fixed | 19/392 (same sentence) | |
-| livekit-wakeword "hey ares" (trained here) | *pending training* | *DET on 25 h of validation audio* | |
+| livekit-wakeword "hey ares" (trained here), its own test: 12,000 Piper clips + 24.2 h of other audio | 88.0% at 0.5 · **79.0% at 0.75** | 0.33/h at 0.5 · **0.08/h at 0.75** | ~1 MB model; DET AUT 0.0018 |
+| Same model on Kokoro's 28 voices (a TTS it never saw), "Hey ARES …" lines only | **107/112 (96%) at 0.75** | 9/392 (6 "Aries is my star sign", 3 "Hey, Harry's here!") | bare "ARES, …" and "Okay ARES" low by design (not trained) |
+| Today's regex on the same "Hey ARES …" lines | 102/112 (91%) | 28/392 | |
 | sherpa-onnx KWS "HEY ARES" | *pending session* | | tokenised `▁HE Y ▁ARE S`, no training |
 | Report *(livekit vendor)* | 86.1% | 0.08/h | on "hey livekit" |
 
 - Training data: livekit's 2,000 h of negative features (16 GB), MUSAN noise, RIRs, Piper's 904 voices. Negatives from
   ARES's confusions (Harris, Paris, heiress, erase, ears, Iris, Harry's, areas…); **not "Aries"**, which espeak renders
   identically to "Ares" (`'e@ri:z`).
-- **Still to do:** your session (0.5 / 1 / 3 m, music, TV, while she talks) and your own takes added to the positives.
+- Training took ~2.5 h on this Mac (synthesis ~1.5 h, augmentation/features ~30 min, 60,000 steps ~1 h at ~15 steps/s).
+- **Still to do:** your session (0.5 / 1 / 3 m, music, TV, while she talks), then a retrain with your own takes added to
+  the positives (all training voices are synthetic and US-accented), and a "Harry's" / "hey Harry" negative added.
 
 ## A3. Voice trust
 
@@ -141,7 +145,9 @@ Every Mac action (timers, volume, apps, media) goes to the brain today: no tier-
 - **A7 brain:** Haiku 5.5 for quick turns; needs the Claude Code update / model override; Sonnet stays the default.
 - **A8:** fix the eight wrong fast actions first (anchor kill/power phrases to being addressed, battery readout only for
   "my battery", "stop it <name>" → not for her), then the B13 registry.
-- **A2:** fix "okay" now (one line); the learned detector pick waits for training + your session.
+- **A2 (provisional):** the trained livekit-wakeword "hey ares" model as stage 1 at ~0.75, with sherpa KWS (respelled
+  "HEY AIRES") as the stage-2 check and the text check for "Aries…"; fix "okay" in today's rule meanwhile. Confirm on
+  your recordings (accent, 3 m, TV, while she talks) before committing.
 - **A3–A6:** pending your session and the echo test.
 
 ## Wave plan, adjusted

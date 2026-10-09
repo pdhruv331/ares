@@ -216,7 +216,7 @@ if (PARTS.includes('wake')) {
       methods[`livekit hey_ares ≥ ${thr}`] = (c) => (lk[c.wav]?.max ?? 0) >= thr;
       wake[`livekit hey_ares ≥ ${thr} on other voices`] = `${otherWavs.reduce((a, f) => a + (lk[f]?.fires[String(thr)] || 0), 0)} in ${otherSeconds.toFixed(0)} s`;
     }
-    const evalJson = path.join(LAB, 'wakeword/output/hey_ares/eval_results.json'); // its own DET run on 25 h of validation audio
+    const evalJson = path.join(LAB, 'wakeword/output/hey_ares/hey_ares_eval.json'); // its own DET run on 25 h of validation audio
     if (fs.existsSync(evalJson)) wake['livekit eval (25 h validation set)'] = JSON.parse(fs.readFileSync(evalJson, 'utf8'));
   }
   for (const f of otherWavs) fs.rmSync(f, { force: true });
