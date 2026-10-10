@@ -9,6 +9,7 @@ import os from 'os';
 import path from 'path';
 import { createRequire } from 'module';
 import { recorder, readWav, transcribe } from './lab.mjs';
+import { audioDevices } from './devices.mjs';
 
 if (!process.argv.includes('--go')) { console.error('Plays audio through the speakers for ~3 minutes. Mute the installed ARES, keep the room quiet, then pass --go.'); process.exit(1); }
 const OUT = path.join(os.homedir(), 'Library/Application Support/ARES/voice-lab', `echo-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}`);
@@ -53,7 +54,8 @@ async function capture(name, vpio, play) {
   return file;
 }
 
-console.log(`Echo test → ${OUT}\nOutput volume ${volume}%. Stay quiet for about three minutes.`);
+const dev = audioDevices();
+console.log(`Echo test → ${OUT}\nInput: ${dev.input?.name}, output: ${dev.output?.name} at ${volume}%. Stay quiet for about three minutes.`);
 const f = {
   silenceOff: await capture('silence-vpio-off', false, null),
   silenceOn: await capture('silence-vpio-on', true, null),
@@ -70,6 +72,7 @@ const said = new Set(words(TEXT));
 const tr = await transcribe('sf', Object.values(f), { locale: 'en-GB' });
 const heard = Object.fromEntries(Object.keys(f).map((kk, i) => { const w = words(tr[i]?.text || ''); return [kk, `${w.filter((x) => said.has(x)).length}/${words(TEXT).length} of her words`]; }));
 const result = {
+  devices: audioDevices(), // speakers vs earbuds change everything: always say which
   outputVolume: `${volume}%`,
   levelsDb: Object.fromEntries(Object.entries(E).map(([kk, v]) => [kk, db(v)])),
   erleOtherProcessDb: erle(E.otherOff, E.silenceOff, E.otherOn, E.silenceOn),

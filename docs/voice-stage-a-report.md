@@ -114,6 +114,13 @@ condition and the mic's recording was transcribed:
   a display's speakers, Bluetooth), voice processing off or restarting, or the moment before it converges.
 - The dB echo-reduction figures from this run are not usable: voice processing's AGC lifts the noise floor ~16 dB, so
   whole-file energy comparisons go negative. The word test is the meaningful one.
+- **Earbuds (10 Oct, Buds4 Pro as input and output, headset mode, volume 93%):** her passage reached the buds' mic as
+  **0/44 words even with voice processing off**: the sound is in your ears and the buds cancel their own echo. So echo
+  is not a risk with earbuds. But: macOS puts the buds in **call mode** (1 channel, narrowband) whenever their mic is
+  used, so while ARES listens on them, Katherine and music play at phone quality and recognition gets narrowband audio;
+  the buds' mic also picked up room speech during a "silence" take; and the first take through them was pure digital
+  silence (the Bluetooth mic takes a moment to start). Which mic ARES should use with earbuds in (theirs vs the
+  MacBook's) is measured in the session's two earbud blocks.
 - **Still to check:** double talk. Does *your* voice survive while she plays (barge-in)? The session's "while she talks"
   block measures that. Also worth one run on AirPods if you use them with ARES.
 

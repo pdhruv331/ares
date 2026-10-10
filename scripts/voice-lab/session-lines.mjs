@@ -61,6 +61,9 @@ export const BLOCKS = {
   music: { title: 'At the desk with music playing at your normal level (start it yourself now)', distance: 0.5, condition: 'music', lines: [...WAKE, ...COMMANDS.slice(15, 30)] },
   tv: { title: 'At the desk with a TV show or YouTube talking in the background (start it yourself now)', distance: 0.5, condition: 'tv', lines: [...WAKE, ...COMMANDS.slice(30, 40)] },
   speaking: { title: 'While ARES is talking (the backup voice plays through the speakers): cut in with the wake word', distance: 0.5, condition: 'speaking', lines: WAKE, voice: true },
+  // Bluetooth earbuds: macOS drops them to call quality when their mic is used. The same lines through each microphone.
+  budsMic: { title: 'EARBUDS IN, earbuds microphone: Control Centre → Sound → Input → your earbuds, then Enter', distance: 0.5, condition: 'buds-mic', lines: [...WAKE.slice(0, 6), ...COMMANDS.slice(0, 15)], checkInput: 'bluetooth' },
+  budsMacMic: { title: 'EARBUDS IN, MacBook microphone: Control Centre → Sound → Input → MacBook Pro Microphone, then Enter', distance: 0.5, condition: 'buds-macmic', lines: [...WAKE.slice(0, 6), ...COMMANDS.slice(0, 15)], checkInput: 'builtin' },
   // Other people's voices: a podcast or TV through the speakers, you silent. Only features (speaker embeddings, wake scores)
   // are kept from it: score-session.mjs deletes the audio once they're extracted.
   others: { title: 'Other voices: start a podcast or a TV show with people talking, then stay quiet for 3 minutes', distance: 0.5, condition: 'others', timed: 180, featuresOnly: true, lines: [] },

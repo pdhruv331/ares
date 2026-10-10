@@ -12,6 +12,7 @@ import os from 'os';
 import path from 'path';
 import readline from 'readline';
 import { recorder } from './lab.mjs';
+import { audioDevices } from './devices.mjs';
 
 const ROOT = path.join(import.meta.dirname, '..', '..');
 const SUPPORT = path.join(os.homedir(), 'Library/Application Support/ARES');
@@ -23,7 +24,7 @@ const DIR = opt('--dir', path.join(SUPPORT, 'voice-lab', `session-${stamp}`));
 
 import { BLOCKS, fillIn } from './session-lines.mjs';
 
-const ORDER = opt('--blocks', 'wake,commands,pauses,lean,far,music,tv,speaking,others').split(',');
+const ORDER = opt('--blocks', 'wake,commands,pauses,lean,far,music,tv,speaking,budsMic,budsMacMic,others').split(',');
 
 // ---- Kokoro lines playing while she "speaks" (another process, the way the window plays her) -------------------------
 async function makeVoiceClips() {
@@ -61,6 +62,13 @@ async function runBlock(name, rec, labels, clips) {
   const file = path.join(DIR, `${name}.wav`);
   console.log(`\n=== ${b.title} ===\n${b.timed ? `${b.timed} s of room audio` : `${b.lines.length} lines`}. Press Enter to start.`);
   await key();
+  const devices = audioDevices();
+  if (b.checkInput && devices.input?.transport !== b.checkInput) {
+    console.log(`  The input is ${devices.input?.name || 'unknown'} (${devices.input?.transport || '?'}), not the ${b.checkInput} one this block needs: skipping it.`);
+    return;
+  }
+  // The recorder uses the input that was default when it started: restart it so a switched microphone takes effect
+  if (b.checkInput && !DRY) { await rec.close(); Object.assign(rec, makeRecorder()); await rec.wait('ready', 120_000); }
   rec.send(`rec ${file}`);
   const t0 = Date.now();
   let player = null;
@@ -85,7 +93,7 @@ async function runBlock(name, rec, labels, clips) {
     if (k === 'r') { i--; continue; }
     if (k === 'q') break;
     if (k === 's') continue;
-    labels.write(JSON.stringify({ block: name, file: path.basename(file), i, text, start: +start.toFixed(2), end: +end.toFixed(2), distance: b.distance, condition: b.condition }) + '\n');
+    labels.write(JSON.stringify({ block: name, file: path.basename(file), i, text, start: +start.toFixed(2), end: +end.toFixed(2), distance: b.distance, condition: b.condition, input: devices.input?.name, output: devices.output?.name }) + '\n');
   }
   if (player) { player.removeAllListeners('exit'); player.kill('SIGTERM'); }
   rec.send('stop');
