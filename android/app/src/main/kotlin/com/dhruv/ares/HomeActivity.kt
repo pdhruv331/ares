@@ -71,7 +71,9 @@ class HomeActivity : Activity(), Session.Ui {
     private lateinit var schematic: SchematicView
     private lateinit var caption: TextView
     private lateinit var hint: TextView
-    private lateinit var cards: LinearLayout
+    private lateinit var cards: HomeGrid
+    private lateinit var board: HomeBoard
+    private var pickHome = false // the drawer's pick is for the board, not a dock slot
     private lateinit var dots: TextView
     private lateinit var dockRow: LinearLayout
     private lateinit var drawer: AppDrawer
@@ -97,7 +99,7 @@ class HomeActivity : Activity(), Session.Ui {
     private val fadeCaption = Runnable { caption.animate().alpha(0f).setDuration(600).start(); schematic.dimBottom = readCard != null || callBox != null; showNotes(null) }
     private val jobsChanged = { showJobs() }
     private val powerChanged = { showPower() }
-    private val appsChanged = { showDock(); drawer.refresh() }
+    private val appsChanged = { showDock(); drawer.refresh(); if (::board.isInitialized) board.render() }
     private val schemeChanged = { applyScheme() }
     private val powerSave = object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) = showPowerSave() }
     private val testCall = object : BroadcastReceiver() {
@@ -205,13 +207,29 @@ class HomeActivity : Activity(), Session.Ui {
         drawer = AppDrawer(this, drawerView,
             onAsk = { q -> pager.go(0); ask(q) },
             onDock = { app -> addToDock(app) },
-            onPick = { app -> if (pickSlot >= 0) setSlot(pickSlot, app.key); pickSlot = -1 })
+            onPick = { app -> if (pickHome) { board.addApp(app); pager.go(1) } else if (pickSlot >= 0) setSlot(pickSlot, app.key); pickSlot = -1; pickHome = false },
+            onHome = { app -> board.addApp(app); drawer.close(); pager.go(1) },
+            onHomeHas = { app -> board.has(app) })
+        board = HomeBoard(this, cards,
+            aresCard = { which -> when (which) { "next" -> nextCard(); "work" -> workCard(); "systems" -> systemsCard(); else -> null } },
+            pickApp = { pickHome = true; pickSlot = -1; drawer.open(pick = true, forHome = true) },
+            toDock = { app -> addToDock(app) })
 
         holdToTalk()
         onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { back() }
         Apps.listen(appsChanged)
         Apps.load(this)
         Scheme.listen(schemeChanged)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        runCatching { board.host.startListening() }
+    }
+
+    override fun onStop() {
+        runCatching { board.host.stopListening() }
+        super.onStop()
     }
 
     override fun onResume() {
@@ -550,6 +568,7 @@ class HomeActivity : Activity(), Session.Ui {
     @Deprecated("Activity result for the voice reply")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (board.onResult(requestCode, resultCode)) return
         if (requestCode != REPLY) return
         val n = replyTo ?: return
         val said = data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.trim()
@@ -1000,27 +1019,8 @@ class HomeActivity : Activity(), Session.Ui {
         }
     }
 
-    /** NEXT, WORK, SYSTEMS: each only when it has something to say, in the order you've put them (hold a header and drag). */
-    private fun renderCards() {
-        if (cardsReorder.dragging) return // (rebuilt once it's dropped)
-        cards.removeAllViews()
-        val built = mapOf("next" to nextCard(), "work" to workCard(), "systems" to systemsCard())
-        if (built["next"] == null && built["work"] == null) cards.addView(TextView(this).apply {
-            text = "All quiet."; textSize = 13f; setTextColor(getColor(R.color.muted)); gravity = Gravity.CENTER
-            setPadding(0, (28 * dp).toInt(), 0, (28 * dp).toInt())
-        })
-        for (id in cardOrder()) built[id]?.let { c -> c.tag = id; cards.addView(c); cardsReorder.attach(c.getChildAt(0), c) }
-    }
-
-    private val cardsReorder by lazy {
-        Reorder(cards, vertical = true) { views ->
-            val order = views.mapNotNull { it.tag as? String }
-            Ares.prefs(this).edit().putString("homeCards", (order + cardOrder().filter { it !in order }).joinToString(",")).apply()
-        }
-    }
-
-    private fun cardOrder() = (Ares.prefs(this).getString("homeCards", null)?.split(',') ?: emptyList()).filter { it in setOf("next", "work", "systems") }
-        .let { saved -> saved + listOf("next", "work", "systems").filter { it !in saved } }
+    /** The board: apps, widgets and the ARES cards (NEXT, WORK, SYSTEMS; each only when it has something to say). */
+    private fun renderCards() = board.render()
 
     private fun nextCard(): LinearLayout? {
         if (!hasCalendar()) return card("NEXT", "CALENDAR", add = false).also { c -> c.addView(row("Show your calendar here ›", null, Scheme.color) { askCalendar() }) }
@@ -1082,7 +1082,6 @@ class HomeActivity : Activity(), Session.Ui {
             addView(TextView(this@HomeActivity).apply { text = title; textSize = 9f; letterSpacing = 0.3f; setTextColor(Scheme.color); layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f) })
             if (right != null) addView(TextView(this@HomeActivity).apply { text = right; textSize = 9f; letterSpacing = 0.2f; setTextColor(Scheme.alpha(89)) })
         })
-        if (add) cards.addView(c)
         return c
     }
 

@@ -38,3 +38,11 @@ JobStore / PowerStore, battery measured, emulator tests with a fake phone server
 8. REARRANGE EVERYTHING: the dock (hold, drag sideways, the others slide; hold without moving = the menu), the app drawer (hold and drag
    in a grid; switches the drawer from A–Z to YOUR ORDER, with an A–Z chip to go back; new apps join at the end), and the home cards
    (hold a card's header, drag up or down). All orders are saved.
+
+9. THE BOARD (added 2026-10-09, the user's ask: "customizable home widgets, or where i can add the apps to home screen on the
+   non reactor screen"): page 1 becomes a four-column board (`HomeGrid` + `HomeBoard`, prefs `homeBoard`) holding apps, real
+   Android widgets (AppWidgetHost: the system's one-time "allow ARES to create widgets", then the widget's own configure screen)
+   and the ARES cards (NEXT, WORK, SYSTEMS; removable and re-addable). Items pack in your order (each where its columns are
+   lowest, then leftmost): hold to lift and drag among the others; hold without dragging = its menu (apps: Add to dock, App info,
+   Remove; widgets: Resize… in cells, Remove; cards: Remove). Hold empty space = Add an app / Add a widget / Add a removed card.
+   The drawer's long-press menu gets Add to home.

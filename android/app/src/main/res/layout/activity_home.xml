@@ -34,11 +34,12 @@
                     android:textSize="9sp" android:letterSpacing="0.3" android:textColor="#993EE6FF" android:text="HOLD · TALK     TAP · OPEN"/>
             </FrameLayout>
 
-            <!-- Page 1: the cards -->
+            <!-- Page 1: your board (apps, widgets, cards) -->
             <ScrollView android:id="@+id/page1" android:layout_width="match_parent" android:layout_height="match_parent"
                 android:overScrollMode="never" android:scrollbars="none" android:fillViewport="true">
-                <LinearLayout android:id="@+id/cards" android:layout_width="match_parent" android:layout_height="wrap_content"
-                    android:orientation="vertical" android:paddingStart="18dp" android:paddingEnd="18dp" android:paddingTop="18dp" android:paddingBottom="12dp"/>
+                <!-- Apps, widgets and the ARES cards, arranged by hand (docs/launcher-v2-prompt.md §9) -->
+                <com.dhruv.ares.HomeGrid android:id="@+id/cards" android:layout_width="match_parent" android:layout_height="wrap_content"
+                    android:paddingStart="16dp" android:paddingEnd="16dp" android:paddingTop="18dp" android:paddingBottom="24dp"/>
             </ScrollView>
         </com.dhruv.ares.HomePager>
 

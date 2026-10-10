@@ -35,6 +35,8 @@ class AppDrawer(
     private val onAsk: (String) -> Unit,
     private val onDock: (Apps.App) -> Unit,
     private val onPick: (Apps.App) -> Unit,
+    private val onHome: (Apps.App) -> Unit = {},
+    private val onHomeHas: (Apps.App) -> Boolean = { false },
 ) {
     private val list: ListView = root.findViewById(R.id.apps)
     private val search: EditText = root.findViewById(R.id.search)
@@ -120,10 +122,10 @@ class AppDrawer(
         }
     }
 
-    fun open(pick: Boolean = false) {
+    fun open(pick: Boolean = false, forHome: Boolean = false) {
         picking = pick
         search.setText("")
-        search.hint = if (pick) "PICK AN APP FOR THE DOCK" else "SEARCH OR ASK"
+        search.hint = if (!pick) "SEARCH OR ASK" else if (forHome) "PICK AN APP FOR HOME" else "PICK AN APP FOR THE DOCK"
         build("")
         list.setSelection(0)
         root.visibility = View.VISIBLE
@@ -331,7 +333,7 @@ class AppDrawer(
 
     private fun askNow(q: String) { close(); onAsk(q) }
 
-    /** Long-press: the app's shortcuts, then Add to dock, App info, Uninstall. */
+    /** Long-press: the app's shortcuts, then Add to dock / home, App info, Uninstall. */
     private fun menu(anchor: View, app: Apps.App) {
         Haptics.click(act)
         val la = act.getSystemService(LauncherApps::class.java)
@@ -345,11 +347,13 @@ class AppDrawer(
         shortcuts.forEachIndexed { i, s -> m.menu.add(0, 100 + i, i, s.shortLabel ?: s.longLabel ?: s.id) }
         val inDock = Apps.dock(act).contains(app.key)
         if (!inDock) m.menu.add(1, 1, 10, "Add to dock")
+        if (!onHomeHas(app)) m.menu.add(1, 4, 10, "Add to home")
         m.menu.add(1, 2, 11, "App info")
         m.menu.add(1, 3, 12, "Uninstall")
         m.setOnMenuItemClickListener {
             when (it.itemId) {
                 1 -> onDock(app)
+                4 -> onHome(app)
                 2 -> runCatching { la.startAppDetailsActivity(app.component, app.user, null, null) }
                 3 -> act.startActivity(Intent(Intent.ACTION_DELETE, Uri.parse("package:${app.component.packageName}")))
                 else -> shortcuts.getOrNull(it.itemId - 100)?.let { s -> runCatching { la.startShortcut(s, null, null) }; root.postDelayed({ close(false) }, 350) }
