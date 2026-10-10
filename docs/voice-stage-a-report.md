@@ -98,11 +98,24 @@ everything else is ours, on this M5 MacBook.
 - Silero VAD v6 + Smart Turn v3.2 (8.7 MB) + transcript cues + 3 s cap vs silence timers, eot-bench style (silence needed
   for ≤ 5% / ≤ 10% cut-offs, latency at true ends). Pipeline built (`eot.py`); **pending your "thinking out loud" lines**.
 
-## A6. Echo
+## A6. Echo (done, 10 Oct)
 
-- `echo-test.mjs` plays a passage from another process (`afplay`, the same situation as the window or a browser) and
-  from the engine itself, voice processing on and off, and reports echo reduction in dB and how many of her words the
-  recogniser still hears. **Not run: waiting for your go** (audible for ~3 minutes, ARES muted).
+The installed ARES was in standby, speakers at 50%, the room quiet. One Kokoro passage (44 words) was played in each
+condition and the mic's recording was transcribed:
+
+| Playback | Voice processing off: her words the recogniser hears | Voice processing on |
+|---|---|---|
+| Another process (`afplay`: the same situation as the ARES window or a browser) | 44/44 | **0/44** |
+| The recording engine's own player | 43/44 | **0/44** |
+
+- **VPIO does cancel audio from other processes on this MacBook's speakers**, as completely as audio it plays itself.
+  The report's concern (it found no evidence either way) doesn't hold here, so **wave 3's AEC3 + process tap (B14) isn't
+  needed** on this hardware. ARES hearing YouTube or herself must come from something else: a different output (AirPods,
+  a display's speakers, Bluetooth), voice processing off or restarting, or the moment before it converges.
+- The dB echo-reduction figures from this run are not usable: voice processing's AGC lifts the noise floor ~16 dB, so
+  whole-file energy comparisons go negative. The word test is the meaningful one.
+- **Still to check:** double talk. Does *your* voice survive while she plays (barge-in)? The session's "while she talks"
+  block measures that. Also worth one run on AirPods if you use them with ARES.
 
 ## A7. Voice model and brain (done)
 
@@ -148,7 +161,8 @@ Every Mac action (timers, volume, apps, media) goes to the brain today: no tier-
 - **A2 (provisional):** the trained livekit-wakeword "hey ares" model as stage 1 at ~0.75, with sherpa KWS (respelled
   "HEY AIRES") as the stage-2 check and the text check for "Aries…"; fix "okay" in today's rule meanwhile. Confirm on
   your recordings (accent, 3 m, TV, while she talks) before committing.
-- **A3–A6:** pending your session and the echo test.
+- **A6:** keep VPIO; drop B14 (AEC3 + tap) unless double talk or another output device fails.
+- **A3–A5:** pending your session.
 
 ## Wave plan, adjusted
 
