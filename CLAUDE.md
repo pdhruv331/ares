@@ -324,6 +324,10 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   the notification's own action, SUMMARISE is the only path to the Mac, calls via CATEGORY_CALL) drawn by `HomeOverlay` (also the meeting
   ring, the Mac link, the Buds earpieces), modes (morning / meeting soon / night / at the Mac from /api/status idle+locked), Buds via
   AudioDeviceCallback, and assistant summons listen on the home screen (`HomeActivity.listenHere`). Captions are small and muted on purpose.
+- Page 2 is the board (2026-10-09): `HomeGrid` (four columns, items packed in order, hold-drag; the intercepted UP/CANCEL is handled in
+  onInterceptTouchEvent) + `HomeBoard` (prefs homeBoard: apps, widgets via AppWidgetHost HOST_ID 0x4A12, the ARES cards). Calls also come from
+  the phone's ringing state (READ_PHONE_STATE + ANSWER_PHONE_CALLS, home menu "Calls on the home screen…"); emulator: `adb emu gsm call <n>`,
+  `adb emu sms send <n> <text>` (Google Messages gives a real reply action).
 - Debug-only hooks: `adb shell am broadcast -a com.dhruv.ares.TEST_CALL [--es name Mom]`, `…TEST_MODE --es mode night|morning|meeting|desk|none`,
   `"am broadcast -a com.dhruv.ares.TEST_BUDS --es name 'Galaxy Buds Pro 4'"` (quote names with spaces inside the adb shell string).
   Notification access on the emulator: `adb shell cmd notification allow_listener com.dhruv.ares/com.dhruv.ares.AresNotifs` (again after
