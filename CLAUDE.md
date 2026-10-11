@@ -307,7 +307,20 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   (`HomeActivity.chooseHome`, also in MainActivity's menu and the home long-press menu). MainActivity and the app icon are unchanged.
 - `HomePager` = the two pages (0 reactor, 1 cards) + the upward swipe to the drawer (the dock reuses it with `pages = false`).
   `Apps` (LauncherApps listing, dock slots in prefs `dock`), `Icons` (monochrome layer tinted cyan, else desaturated; prefs
-  `homeOriginalIcons`), `AppDrawer` (rows of four, letter rail, search → "Ask ARES", long-press shortcuts/dock/info/uninstall).
+  `homeOriginalIcons`), `AppDrawer` (search → "Ask ARES", long-press shortcuts/dock/info/uninstall, pick mode).
+- THE DRAWER IS PAGED (2026-10-11, One UI style): `DrawerModel` (pages of apps and folders, prefs `drawerLayout` as JSON pages; the
+  old `drawerOrder` list is migrated once; `drawerGrid` 4x6|5x6; `drawerSort` mine|az; `reconcile()` drops gone apps, dissolves
+  one-app folders, appends new installs to the last page, trims empty pages), `DrawerPages.kt` (`DrawerPager` = sideways pages on
+  the motion kit with rubber bands, a downward pull closes the sheet; `DrawerGrid` = cols×rows cells kept per item id, slot
+  changes glide on springs; `DrawerCell`, `FolderPreview` 2×2, `DrawerDots` sprung pill), `AppDrawer` (⋮ = Custom / A–Z / grid;
+  hold 0.4 s lifts, the hole moves as the finger crosses gaps, the MIDDLE of a cell held 0.5 s arms a folder (ring + click),
+  the edges held 0.6 s flip pages (glow), a drop past the last page makes one; folders open as a sprung sheet over the pages
+  (rename = tap the title; drag out of the card drops onto the page below; one app left dissolves it). A–Z is read-only:
+  dragging adopts the A–Z order as custom (`adoptAz`). Search replaces the pages with one grid (`rows = 0`) + the Ask row and
+  restores the page when cleared. JankStats states "Drawer=Paging" / "Drawer=Dragging". Back closes a folder sheet, then
+  a search, then the drawer (`backInside`). The letter rail and YOUR ORDER chips are gone.
+  Testing: 110 code-less dummy apps (`aapt2 link` + `apksigner` with the debug key, label only) filled the emulator's drawer;
+  `adb shell input motionevent DOWN/MOVE/UP` drives holds and drags (a plain `swipe` can't hold).
 - The reactor and schematic are the app's own views with `maxFps` (30/20 on home) and `still` (Power Saving). Hold-to-talk only inside
   the circle; the view's corners belong to the page's long-press menu. `Bubble.home(true)` hides the floating bubble while home is up.
 - Cards: NEXT from the phone's calendar (READ_CALENDAR, asked when page 1 first opens), WORK from JobStore (OK = `/api/jobs/<id>/answer`,

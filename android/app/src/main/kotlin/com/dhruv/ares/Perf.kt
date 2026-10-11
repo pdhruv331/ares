@@ -52,8 +52,9 @@ object Perf {
 
     /** Name what the screen is doing while it lasts (null clears it): shows up on every logged frame. */
     fun state(key: String, value: String?) {
+        if (holders.isEmpty()) Log.w(TAG, "state $key=$value: no holders")
         for (h in holders.values) {
-            val st = h.state ?: continue
+            val st = h.state ?: run { Log.w(TAG, "state $key=$value: holder has no state"); continue }
             if (value == null) st.removeState(key) else st.putState(key, value)
         }
     }

@@ -225,7 +225,7 @@ class HomeActivity : Activity(), Session.Ui {
             toDock = { app -> addToDock(app) })
 
         holdToTalk()
-        drawer.onOpenChanged = { syncBack() }
+        drawer.onOpenChanged = { open -> syncBack(open) } // (told the intent: the sheet is still in flight when this fires)
         pager.onPage = { p -> closeReadout(); syncBack(); if (p == 1) { if (!askedCalendar()) askCalendar(); loadEvents(); renderCards() } }
         Perf.track(this)
         Apps.listen(appsChanged)
@@ -312,7 +312,7 @@ class HomeActivity : Activity(), Session.Ui {
     private fun back() {
         when {
             readCard != null -> closeReadout()
-            drawer.isOpen -> drawer.close()
+            drawer.isOpen -> if (!drawer.backInside()) drawer.close()
             pager.page != 0 -> pager.go(0)
         }
         syncBack()
@@ -341,8 +341,8 @@ class HomeActivity : Activity(), Session.Ui {
         }
     }
     private var backHooked = false
-    private fun syncBack() {
-        val want = readCard != null || drawer.isOpen || pager.page != 0
+    private fun syncBack(drawerOpen: Boolean = drawer.isOpen) {
+        val want = readCard != null || drawerOpen || pager.page != 0
         if (want == backHooked) return
         backHooked = want
         if (want) onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, backScrub)

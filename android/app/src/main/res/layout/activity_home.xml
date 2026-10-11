@@ -57,35 +57,34 @@
         </com.dhruv.ares.HomePager>
     </LinearLayout>
 
-    <!-- The app drawer -->
+    <!-- The app drawer: paged like One UI's Apps screen (DrawerPages.kt); the pages, dots and folder sheet are built in code -->
     <LinearLayout android:id="@+id/drawer" android:layout_width="match_parent" android:layout_height="match_parent"
         android:orientation="vertical" android:background="@color/bg" android:visibility="gone" android:clickable="true">
         <LinearLayout android:layout_width="match_parent" android:layout_height="48dp" android:layout_marginStart="18dp" android:layout_marginEnd="18dp"
             android:layout_marginTop="14dp" android:background="@drawable/bg_search" android:gravity="center_vertical" android:orientation="horizontal"
-            android:paddingStart="16dp" android:paddingEnd="12dp">
+            android:paddingStart="16dp" android:paddingEnd="6dp">
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="⌕" android:textColor="@color/cyan" android:textSize="18sp"/>
             <EditText android:id="@+id/search" android:layout_width="0dp" android:layout_height="match_parent" android:layout_weight="1"
                 android:layout_marginStart="10dp" android:background="@null" android:hint="SEARCH OR ASK" android:textSize="14sp"
                 android:textColor="@color/text" android:textColorHint="@color/muted" android:singleLine="true" android:imeOptions="actionGo"
                 android:inputType="text|textNoSuggestions"/>
+            <TextView android:id="@+id/drawerMenu" android:layout_width="36dp" android:layout_height="36dp" android:gravity="center" android:text="⋮"
+                android:textColor="@color/cyan" android:textSize="20sp" android:contentDescription="Drawer options" android:background="?android:attr/selectableItemBackgroundBorderless"/>
         </LinearLayout>
-        <!-- A–Z (letter headers and rail) or YOUR ORDER (hold an app and drag it) -->
-        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="18dp" android:layout_marginTop="10dp" android:orientation="horizontal">
-            <TextView android:id="@+id/sortAz" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="A–Z"
-                android:textSize="10sp" android:letterSpacing="0.25" android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingTop="6dp" android:paddingBottom="6dp"/>
-            <TextView android:id="@+id/sortMine" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:text="YOUR ORDER"
-                android:textSize="10sp" android:letterSpacing="0.25" android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingTop="6dp" android:paddingBottom="6dp"/>
-        </LinearLayout>
-        <com.dhruv.ares.DragFrame android:id="@+id/dragFrame" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:layout_marginTop="2dp">
-            <ListView android:id="@+id/apps" android:layout_width="match_parent" android:layout_height="match_parent"
-                android:paddingStart="10dp" android:paddingEnd="30dp" android:clipToPadding="false" android:divider="@null"
-                android:dividerHeight="0dp" android:scrollbars="none" android:overScrollMode="never" android:listSelector="@android:color/transparent"/>
-            <LinearLayout android:id="@+id/rail" android:layout_width="26dp" android:layout_height="match_parent" android:layout_gravity="end"
-                android:orientation="vertical" android:gravity="center_horizontal" android:paddingTop="8dp" android:paddingBottom="8dp"/>
+        <com.dhruv.ares.DragFrame android:id="@+id/dragFrame" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:layout_marginTop="8dp">
+            <FrameLayout android:id="@+id/pagesBox" android:layout_width="match_parent" android:layout_height="match_parent"/>
+            <ScrollView android:id="@+id/searchScroll" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone"
+                android:scrollbars="none" android:overScrollMode="never">
+                <LinearLayout android:id="@+id/searchBox" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical"
+                    android:paddingStart="10dp" android:paddingEnd="10dp" android:paddingBottom="24dp"/>
+            </ScrollView>
+            <View android:id="@+id/edgeLeft" android:layout_width="36dp" android:layout_height="match_parent" android:layout_gravity="start" android:background="@drawable/edge_glow_left" android:alpha="0"/>
+            <View android:id="@+id/edgeRight" android:layout_width="36dp" android:layout_height="match_parent" android:layout_gravity="end" android:background="@drawable/edge_glow_right" android:alpha="0"/>
             <View android:id="@+id/scan" android:layout_width="match_parent" android:layout_height="1dp" android:background="@color/cyan" android:alpha="0"/>
         </com.dhruv.ares.DragFrame>
+        <FrameLayout android:id="@+id/dotsBox" android:layout_width="match_parent" android:layout_height="22dp"/>
         <TextView android:id="@+id/drawerHome" android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center"
-            android:paddingTop="8dp" android:paddingBottom="10dp" android:textSize="9sp" android:letterSpacing="0.35" android:textColor="#993EE6FF"
+            android:paddingTop="6dp" android:paddingBottom="10dp" android:textSize="9sp" android:letterSpacing="0.35" android:textColor="#993EE6FF"
             android:text="HOME\n﹀" android:lineSpacingMultiplier="0.9"/>
     </LinearLayout>
 </FrameLayout>
