@@ -332,3 +332,51 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   `"am broadcast -a com.dhruv.ares.TEST_BUDS --es name 'Galaxy Buds Pro 4'"` (quote names with spaces inside the adb shell string).
   Notification access on the emulator: `adb shell cmd notification allow_listener com.dhruv.ares/com.dhruv.ares.AresNotifs` (again after
   each reinstall); test notifications with `cmd notification post` (they come from "Shell").
+
+## Phone UI v3: fluid motion, presence, cards, receipts (docs/phone-ui-prompt.md; built 2026-10-10)
+
+- `Motion.kt` is the ONE motion kit: M3 Expressive spring tokens (FastSpatial 0.6/800 … SlowEffects 1/800, `TapSpatial`/`TapSlow`
+  for taps at damping 1), `Motion.to(view, prop, target, spec, velocity)` retargets a running spring (never restarts), `Motion.Value`
+  for sprung numbers, `band`/`rubber` for edges, `stagger` for rows. Everything honours "Remove animations" (`Motion.enabled`).
+  No `animate()`/`ValueAnimator` durations are left on gesture paths; keep it that way.
+- `HomePager` tracks 1:1, releases with the finger's velocity (`release` → `go(target, velocity)`), rubber-bands at both ends, and
+  hands an upward drag to the drawer (`onSheetDrag`/`onSheetRelease` → `AppDrawer.track`/`release`); the drawer is a sheet on
+  `Motion.Value` (SlowSpatial), rows stagger in, the list's bottom rides the IME frame by frame. `Reorder`/`HomeGrid` glide the
+  others on retargeted springs and re-parent only when the drop's spring settles (no CANCEL under a finger). The bubble keeps the
+  throw's velocity (`snap(vx, vy)`). Predictive back: HomeActivity's `backScrub` (registered only while there's something to go
+  back from), AskActivity and ReceiptActivity scrub with `OnBackAnimationCallback`.
+- `ReactorView` states are shapes (sprung `coilOpen`, `coreK`, `beat`, `ringK`): listening opens the coils, thinking contracts and beats
+  ~1 Hz, speaking's ring follows the voice, idle after a turn settles with one overshoot, `interrupt()` collapses in < 100 ms.
+  Frame pacing: `hot(key, on)` votes (`pace()`: `requestedFrameRate` where the panel has ARR, else the old throttle; the pager's
+  `onMoving` marks it hot so a swipe never runs at 30/120 mixed). `Haptics` is the vocabulary (listen/tick/commit/land/approval/
+  settle/error); `Sounds` = three WAVs copied from renderer/sounds (in front only, home menu "Sounds").
+- THE PRESENCE (`AskActivity`): the reactor grows out of the bubble's rect (`from`, SlowSpatial) over whatever app is up, captions and
+  cards under it, condenses back (`condense()`, then `Bubble.presence(false)`). The bubble hides while it's up. Listening starts a
+  beat after the grow (`soon`), because opening the recogniser stalls the main thread and would swallow the spring. A card that opens
+  an app leaves the bubble's "back to ARES" arc for 30 s (`Bubble.returnChip`); the next tap restores the card from `Cards.lastRect`.
+- CARDS: Mac `cards.js` (catalogue + `validateCard`) ← tool `show_card` (tools/mac.js) → bridge `/card` → `onCard` → the ask stream's
+  `{type:'card'}`; phone `Cards.kt` draws only known kinds (summary, list, event, place, file, image, progress, approval; else text),
+  ≤ 3 actions {url | ask | share | api(jobs only)}. `Session.Ui.card`/`showJob`. PHONE_NOTE tells the brain when to use it.
+- JOBS IN THE STRIP: `LiveUpdates.kt` = one silent ProgressStyle notification per active job (channel `work`, segments by phase/progress),
+  `setRequestPromotedOngoing` called by reflection (it's API 36 QPR1, absent from the API 36 jar). Alerts still come only from the Mac's
+  pushes. NEEDS YOU on the home page = `HomeOverlay.needs` (one amber "!" orb in the notification arc; into the core = not now).
+  `JobStore.events` keeps the live `job-event`s. Off the live line, main.js pushes status changes over FCM at NORMAL priority
+  (`relay.notify({type:'job'…}, {priority:'normal'})`; the Worker maps it; deployed 2026-10-10).
+- THE RECEIPT (`ReceiptActivity`, a sheet): `GET /api/jobs/<id>/receipt` = job + events + files + checks + the audit lines whose `what`
+  starts with the title. Approvals: `Approvals.kt` → APPROVE = `BiometricPrompt` (BIOMETRIC_STRONG | DEVICE_CREDENTIAL; a plain
+  confirm when the phone has no lock) then `answer {yes, at, from:'phone'}`; EDIT = `answer {yes:false, edit}` (the worker is told the
+  change and asks again); NOT NOW; UNDO = `POST /undo` inside the 10 s window (`jobs.answer(..., {from:'phone'})` holds the resolve,
+  `job.undo.until`). Notification "Yes" buttons from the phone no longer answer directly (the receipt does, with the fingerprint).
+- SENTINEL (`sentinel.js`): `isOutgoing(tool, input)` + `check()` = a haiku one-shot (ARES_SENTINEL_MODEL) that judges the exact payload
+  against the request (recipients checked against contacts, secrets fail locally). Runs in `jobs.ask` (verdict on `request.check`,
+  `job.checks`, the receipt, the audit) and in the bridge's `/approve` for the brain's own sends (a failure denies and tells the brain
+  to show the user). It never replaces the owner's yes.
+- IDEAS (`ideas.js`, `GET /api/ideas[?job=]`): ≤ 3 chips from the next event, the hour, waiting/unseen jobs and autonomy's seen table
+  (a learned chip once a day, `state.offeredIdeas`). Phone: `Ideas.row` under the reactor (`HomeActivity.loadIdeas`, 10 min) and in receipts.
+- Measuring: `Perf.kt` (JankStats, states "HomePager=Swiping", "Reactor=Summon"; tag ARES.jank), `scripts/phone-jank.sh`,
+  `app/src/main/baseline-prof.txt` (hand-written; regenerate with the macrobenchmark module: `-PmacroBench=1`, see android/macrobenchmark/README.md).
+- Tests: `node scripts/test-phone-ui.js` (cards, sentinel routing with a fake one-shot, ideas, edit/undo/receipt with a fake worker).
+  Emulator: debug hook `am broadcast -a com.dhruv.ares.TEST_RECEIPT --es job <id>`; the presence over an app = tap the bubble
+  (`appops set com.dhruv.ares SYSTEM_ALERT_WINDOW allow` first). Not verified on the emulator (no API 36 QPR1 image, no lock):
+  the status-bar chip / Now Bar, BiometricPrompt, FCM normal-priority progress. Designs only, nothing created: docs/intake-email-design.md,
+  reports/One-time payment cards.md.

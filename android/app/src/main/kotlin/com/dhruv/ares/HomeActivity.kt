@@ -107,6 +107,7 @@ class HomeActivity : Activity(), Session.Ui {
     private val testCall = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
             if (i.action == "com.dhruv.ares.TEST_BUDS") { testBuds = i.getStringExtra("name"); checkBuds(testBuds != null); return }
+            if (i.action == "com.dhruv.ares.TEST_RECEIPT") { i.getStringExtra("job")?.let { startActivity(ReceiptActivity.intent(this@HomeActivity, it)) }; return }
             if (i.action == "com.dhruv.ares.TEST_MODE") { testMode = i.getStringExtra("mode")?.let { m -> Mode.entries.firstOrNull { it.name.equals(m, true) } }; updateMode() }
             else NotifStore.testCall(i.getStringExtra("name"))
         }
@@ -261,7 +262,7 @@ class HomeActivity : Activity(), Session.Ui {
         showNotes(null)
         page0.removeCallbacks(modeTick); page0.post(modeTick)
         if (applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) // (a ringing call on the emulator: adb shell am broadcast -a com.dhruv.ares.TEST_CALL [--es name Mom])
-            registerReceiver(testCall, IntentFilter("com.dhruv.ares.TEST_CALL").apply { addAction("com.dhruv.ares.TEST_MODE"); addAction("com.dhruv.ares.TEST_BUDS") }, Context.RECEIVER_EXPORTED)
+            registerReceiver(testCall, IntentFilter("com.dhruv.ares.TEST_CALL").apply { addAction("com.dhruv.ares.TEST_MODE"); addAction("com.dhruv.ares.TEST_BUDS"); addAction("com.dhruv.ares.TEST_RECEIPT") }, Context.RECEIVER_EXPORTED)
         registerReceiver(powerSave, IntentFilter(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED))
         showPowerSave()
         showJobs()

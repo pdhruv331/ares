@@ -1,0 +1,30 @@
+# Baseline profile (docs/phone-ui-prompt.md §10): the classes on the hot path at launch and during gestures, compiled
+# ahead of time by profileinstaller so the first launch after an update isn't interpreted. Hand-written (the
+# generator needs a connected device: see android/macrobenchmark/README.md to regenerate from the real Galaxy).
+Lcom/dhruv/ares/HomeActivity;
+Lcom/dhruv/ares/HomePager;
+Lcom/dhruv/ares/HomeGrid;
+Lcom/dhruv/ares/HomeBoard;
+Lcom/dhruv/ares/HomeOverlay;
+Lcom/dhruv/ares/AppDrawer;
+Lcom/dhruv/ares/DragFrame;
+Lcom/dhruv/ares/Reorder;
+Lcom/dhruv/ares/ReactorView;
+Lcom/dhruv/ares/SchematicView;
+Lcom/dhruv/ares/Motion;
+Lcom/dhruv/ares/Motion$Value;
+Lcom/dhruv/ares/Scheme;
+Lcom/dhruv/ares/Apps;
+Lcom/dhruv/ares/Icons;
+Lcom/dhruv/ares/Bubble;
+Lcom/dhruv/ares/AskActivity;
+Lcom/dhruv/ares/Cards;
+Lcom/dhruv/ares/Session;
+Lcom/dhruv/ares/Speaker;
+Lcom/dhruv/ares/Haptics;
+Lcom/dhruv/ares/Perf;
+Lcom/dhruv/ares/JobStore;
+Lcom/dhruv/ares/LiveUpdates;
+Lcom/dhruv/ares/NotifStore;
+Lcom/dhruv/ares/PowerStore;
+Landroidx/dynamicanimation/animation/**;

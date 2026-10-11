@@ -114,7 +114,17 @@ class AskActivity : Activity(), Session.Ui {
         Perf.state("Reactor", "Summon")
         from = intent.getIntArrayExtra("from") ?: Bubble.rect() ?: Ares.prefs(this).let { p -> if (Ares.bubbleOn(this)) intArrayOf(p.getInt("bubbleX", -1), p.getInt("bubbleY", -1), (58 * dp).toInt()).takeIf { it[0] >= 0 } else null }
         Bubble.presence(true)
-        root.post { grow() }
+        // Positioned before the first frame is drawn (the margins need a layout pass), then grown on the frame after
+        reactor.visibility = View.INVISIBLE
+        root.viewTreeObserver.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+            private var placed = false; private var started = false
+            override fun onPreDraw(): Boolean {
+                if (root.width == 0) return true
+                if (!placed) { placed = true; place(); return false }
+                if (!started) { started = true; grow() }
+                return true
+            }
+        })
         handle(intent)
     }
 
@@ -126,14 +136,18 @@ class AskActivity : Activity(), Session.Ui {
     private fun handle(i: Intent) {
         when (i.action) {
             Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE -> return receiveShare(i)
-            Intent.ACTION_ASSIST, Intent.ACTION_VOICE_COMMAND -> { if (needMic()) listen(); return }
+            Intent.ACTION_ASSIST, Intent.ACTION_VOICE_COMMAND -> { if (needMic()) soon { listen() }; return }
         }
         if (i.getBooleanExtra("assist", false)) watchScreen()
         if (i.getBooleanExtra("restore", false)) restoreCard()
         i.getStringExtra("ask")?.let { heard.text = it; heard.visibility = View.VISIBLE; session.ask(it, voice = false); return }
         if (i.getBooleanExtra("type", false)) return showKeyboard()
-        if (i.getBooleanExtra("listen", false) && needMic()) listen(i.getBooleanExtra("hold", false))
+        if (i.getBooleanExtra("listen", false) && needMic()) soon { listen(i.getBooleanExtra("hold", false)) }
     }
+
+    /** After the grow has had its first frames (opening the recogniser stalls the main thread for a moment, which would eat the spring). */
+    private fun soon(f: () -> Unit) { if (Motion.enabled && !grown) root.postDelayed(f, 380) else f() }
+    private var grown = false
 
     // ---- Growing out of the bubble, condensing back -----------------------------------------------------------------------
 
@@ -145,15 +159,15 @@ class AskActivity : Activity(), Session.Ui {
         restX = (w - size) / 2f
         restY = (bubbleCy - size / 2f).coerceIn(h * 0.1f, h * 0.36f)
         (reactor.layoutParams as FrameLayout.LayoutParams).let { it.leftMargin = restX.toInt(); it.topMargin = restY.toInt(); reactor.layoutParams = it }
-        (column.layoutParams as FrameLayout.LayoutParams).let { it.topMargin = (restY + size + 10 * dp).toInt(); column.layoutParams = it }
-        (hint.layoutParams as FrameLayout.LayoutParams).let { it.topMargin = (restY + size - 4 * dp).toInt(); hint.layoutParams = it }
+        (column.layoutParams as FrameLayout.LayoutParams).let { it.topMargin = (restY + size + 34 * dp).toInt(); column.layoutParams = it }
+        (hint.layoutParams as FrameLayout.LayoutParams).let { it.topMargin = (restY + size + 10 * dp).toInt(); hint.layoutParams = it }
         (findViewById<View>(R.id.cardsScroll).layoutParams as LinearLayout.LayoutParams).let { it.height = -2; }
         findViewById<View>(R.id.cardsScroll).layoutParams.height = (h - (restY + size + 10 * dp) - 140 * dp).toInt().coerceAtLeast((160 * dp).toInt())
     }
 
     /** The reactor grows out of the bubble's spot (SlowSpatial) to its resting place; the column fades in under it. */
     private fun grow() {
-        place()
+        reactor.visibility = View.VISIBLE
         val size = reactor.layoutParams.width.toFloat()
         val f = from
         reactor.pivotX = size / 2; reactor.pivotY = size / 2
@@ -166,7 +180,7 @@ class AskActivity : Activity(), Session.Ui {
             reactor.hot("summon", true)
             Motion.to(reactor, Motion.X, 0f, Motion.SlowSpatial)
             Motion.to(reactor, Motion.Y, 0f, Motion.SlowSpatial)
-            Motion.scale(reactor, 1f, Motion.SlowSpatial) { reactor.hot("summon", false); Perf.state("Reactor", null) }
+            Motion.scale(reactor, 1f, Motion.SlowSpatial) { grown = true; reactor.hot("summon", false); Perf.state("Reactor", null) }
             column.alpha = 0f; hint.alpha = 0f; keyboardChip.alpha = 0f
             column.postDelayed({ Motion.to(column, Motion.ALPHA, 1f, Motion.DefaultEffects); Motion.to(hint, Motion.ALPHA, 1f, Motion.DefaultEffects); Motion.to(keyboardChip, Motion.ALPHA, 1f, Motion.DefaultEffects) }, 120)
         } else { column.alpha = 1f; hint.alpha = 1f; keyboardChip.alpha = 1f }

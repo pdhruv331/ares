@@ -37,7 +37,7 @@ object Perf {
                     jank++
                     val states = f.states.joinToString(" ") { "${it.key}=${it.value}" }
                     Log.w(TAG, "jank ${f.frameDurationUiNanos / 1_000_000}ms ui, overrun ${overrun / 1_000_000}ms $states")
-                } else if (overrun > 0) {
+                } else if (overrun > 2_000_000L) { // a single missed frame at 120 Hz is still visible; smaller overruns only count in the summary
                     val states = f.states.joinToString(" ") { "${it.key}=${it.value}" }
                     Log.d(TAG, "over ${overrun / 1_000_000}ms $states")
                 }
