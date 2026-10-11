@@ -11,7 +11,7 @@ const SAFE_WRITES = /^(create_draft|draft_)/i;
 // What counts as the user saying "yes" (must be how their latest message starts).
 const AFFIRMATIVE = /^\s*(yes|yeah|yep|yup|sure|go ahead|do it|send it|book it|delete it|move it|confirm(ed)?|please do|ok(ay)?|absolutely|correct|that'?s right|affirmative|go for it)\b/i;
 
-function startBridge({ onTimerDone, onTimers = () => {}, onPhoneAction, onNotify, findContact, memory, teachPhrase, work, calls, claudeUsage, claude = () => null, control = null, autonomy = () => null, log }) {
+function startBridge({ onTimerDone, onTimers = () => {}, onPhoneAction, onNotify, onCard = () => ({ message: 'no cards' }), sentinel = null, audit = null, findContact, memory, teachPhrase, work, calls, claudeUsage, claude = () => null, control = null, autonomy = () => null, log }) {
   const token = crypto.randomBytes(24).toString('hex');
   const timers = new Map(); // label -> { handle, endsAt }
   let lastUserText = '';
@@ -89,6 +89,7 @@ function startBridge({ onTimerDone, onTimers = () => {}, onPhoneAction, onNotify
     '/phone-action': (args) => onPhoneAction(args, source),
     '/contacts/find': ({ name }) => findContact(name),
     '/notify': (args) => onNotify(args),
+    '/card': (args) => onCard(args, source),
     '/memory/remember': ({ fact }) => { memory.add(fact); log('memory remember'); return { message: 'Saved to memory.' }; },
     '/memory/recall': () => {
       const facts = memory.facts();
@@ -129,9 +130,15 @@ function startBridge({ onTimerDone, onTimers = () => {}, onPhoneAction, onNotify
     '/calls/cancel': ({ call }) => ({ message: calls.cancelScheduled(call) }),
     '/calls/message': (args) => ({ message: calls.addMessage(args) }),
     '/calls/unmessage': (args) => ({ message: calls.removeMessage(args) }),
-    '/approve': ({ tool }) => {
+    '/approve': async ({ tool, input }) => {
       const action = String(tool).split('__').pop();
       if (READ_VERBS.test(action) || SAFE_WRITES.test(action)) return { allow: true };
+      // Anything leaving on the owner's behalf: the independent outgoing check first (sentinel.js); a failure blocks and asks the owner
+      if (sentinel && require('./sentinel').isOutgoing(tool, input)) {
+        const v = await sentinel({ request: lastUserText, tool, input, source });
+        audit?.()?.record({ what: `outgoing check ${v.ok === false ? 'failed' : v.ok ? 'passed' : 'skipped'}: ${v.what}`, why: v.reason, tier: 3, kind: 'check', source, ok: v.ok !== false, approval: 'independent check' });
+        if (v.ok === false) { log('gate sentinel block', { tool, reason: v.reason }); return { allow: false, message: `Blocked by ARES's outgoing check: ${v.reason}. Tell the user exactly that, show them what you were about to send, and only proceed if they explicitly say to after hearing it.` }; }
+      }
       return confirm(tool);
     },
   };

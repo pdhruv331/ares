@@ -18,6 +18,7 @@ const CODE_MODEL = process.env.ARES_CODE_MODEL || 'opus';
 const CODE_TIMEOUT_MS = (Number(process.env.ARES_CODE_TIMEOUT_MIN) || 90) * 60_000;
 const CODE_TOOLS = ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'WebSearch', 'WebFetch', 'TodoWrite', 'NotebookEdit'];
 const APPROVAL_WAIT_MS = 30 * 60_000; // an unanswered "may I send this?" is refused after half an hour
+const UNDO_MS = 10_000; // a yes from the phone is held this long so it can be undone (docs/phone-ui-prompt.md §7)
 
 // File tools are NOT pre-allowed: every write (and any read outside the job folder) goes through the gate
 // below, which keeps the worker inside its own folder. The rest of the toolset comes from worker-tools.js.
@@ -162,6 +163,9 @@ class Jobs extends EventEmitter {
     this.procs = new Map();     // id -> child process
     this.approvals = new Map(); // id -> { resolve, timer, request }
     this.decisions = new Map(); // id -> the latest approval's promise (the worker long-polls it)
+    this.undos = new Map();     // id -> { timer, resolve, updatedInput, request }: a yes from the phone held for ~10 s (docs/phone-ui-prompt.md §7)
+    /** The independent outgoing check (sentinel.js), set by main.js: async ({ request, tool, input, source }) => verdict. */
+    this.sentinel = null;
     fs.mkdirSync(dir, { recursive: true });
     try { this.jobs = JSON.parse(fs.readFileSync(this.indexFile, 'utf8')); } catch { this.jobs = []; }
     // After a restart: what was running picks up where it left off; what was queued stays queued.
@@ -771,6 +775,19 @@ class Jobs extends EventEmitter {
       this.audit?.record({ what: `${job.title}: ${request.what}`, tier: 3, kind: 'job', source: job.source, ok: false, approval: 'asked, waiting for a yes' });
       this.event(job, { type: 'approval', text: `Needs your OK: ${request.what}` });
       this.emit('approval', this.view(job));
+      // The independent outgoing check (sentinel.js): its verdict joins the request, the receipt and the audit; a failure never auto-approves
+      if (this.sentinel && require('./sentinel').isOutgoing(tool, input)) {
+        this.sentinel({ request: job.text, tool, input, source: job.source }).then((v) => {
+          if (!v || job.approval !== request) return;
+          request.check = { ok: v.ok, reason: v.reason, at: v.at };
+          (job.checks ||= []).push({ ...v, what: v.what || request.what });
+          job.checks = job.checks.slice(-20);
+          this.save();
+          this.event(job, { type: 'step', kind: v.ok ? 'check-ok' : 'check-failed', text: `Outgoing check ${v.ok === null ? 'not possible' : v.ok ? 'passed' : 'FAILED'}: ${v.reason}` });
+          this.audit?.record({ what: `${job.title}: outgoing check ${v.ok ? 'passed' : 'failed'}: ${request.what}`, why: v.reason, tier: 3, kind: 'job', source: job.source, ok: v.ok !== false, approval: 'independent check' });
+          this.emit('change', this.view(job));
+        }).catch(() => {});
+      }
     });
     this.decisions.set(job.id, decision);
     return decision;
@@ -780,28 +797,71 @@ class Jobs extends EventEmitter {
     return this.decisions.get(id) || Promise.resolve({ allow: false, message: 'Nothing is waiting for approval.' });
   }
 
-  /** The user's answer to a job's pending request. Returns false when nothing was waiting. */
-  answer(id, yes, why) {
+  /**
+   * The user's answer to a job's pending request. Returns false when nothing was waiting.
+   * `opts.edit`: a change to apply before it runs (the worker applies it and asks again). `opts.from === 'phone'` with a yes:
+   * the action is held for UNDO_MS so the phone can withdraw it (docs/phone-ui-prompt.md §7); the worker only runs it after.
+   */
+  answer(id, yes, why, opts = {}) {
     const pending = this.approvals.get(id);
     if (!pending) return false;
     this.approvals.delete(id);
     clearTimeout(pending.timer);
     const job = this.get(id);
+    const edit = opts.edit ? String(opts.edit).slice(0, 1000) : '';
     if (job) {
       job.approval = null;
       if (job.status === 'approval') job.status = 'running';
-      this.save();
-      this.log('job approval answer', { id, yes: Boolean(yes) });
-      this.audit?.record({ what: `${job.title}: ${pending.request.what}`, tier: 3, kind: 'job', source: job.source, ok: Boolean(yes), approval: yes ? 'the user said yes' : `declined${why ? `: ${why}` : ''}` });
-      this.event(job, { type: 'step', kind: yes ? 'ok' : 'refused', text: yes ? `Approved: ${pending.request.what}` : `Declined: ${pending.request.what}` });
+      this.log('job approval answer', { id, yes: Boolean(yes), edit: Boolean(edit), from: opts.from });
+      this.audit?.record({ what: `${job.title}: ${pending.request.what}`, tier: 3, kind: 'job', source: job.source, ok: Boolean(yes), approval: yes ? `the user said yes${opts.from ? ` (${opts.from})` : ''}` : edit ? `asked for a change: ${edit.slice(0, 80)}` : `declined${why ? `: ${why}` : ''}` });
+      this.event(job, { type: 'step', kind: yes ? 'ok' : edit ? 'edit' : 'refused', text: yes ? `Approved: ${pending.request.what}` : edit ? `Change requested: ${edit}` : `Declined: ${pending.request.what}` });
     }
-    pending.resolve(yes ? { allow: true, updatedInput: pending.updatedInput } : { allow: false, message: why || "The user said no. Don't retry; note in result.md what you would have done." });
+    const deny = (message) => pending.resolve({ allow: false, message });
+    if (!yes) {
+      if (edit) deny(`The user wants a change before this runs: "${edit}". Apply it, then ask again with the changed action.`);
+      else deny(why || "The user said no. Don't retry; note in result.md what you would have done.");
+      if (job) { this.save(); this.emit('change', this.view(job)); }
+      return true;
+    }
+    const allow = () => pending.resolve({ allow: true, updatedInput: pending.updatedInput });
+    if (job && opts.from === 'phone') {
+      const until = Date.now() + UNDO_MS;
+      job.undo = { until, what: pending.request.what };
+      const timer = setTimeout(() => { this.undos.delete(id); if (job.undo?.until === until) job.undo = null; this.save(); allow(); this.emit('change', this.view(job)); }, UNDO_MS);
+      this.undos.set(id, { timer, deny, request: pending.request });
+      this.event(job, { type: 'note', text: `Runs in ${Math.round(UNDO_MS / 1000)} s unless undone` });
+    } else allow();
+    if (job) { this.save(); this.emit('change', this.view(job)); }
     return true;
+  }
+  /** UNDO within the window after a yes from the phone: the action hasn't run; it's withdrawn. */
+  undo(id) {
+    const u = this.undos.get(id);
+    if (!u) return { error: 'Nothing to undo: it has already run, or nothing was approved.' };
+    this.undos.delete(id);
+    clearTimeout(u.timer);
+    const job = this.get(id);
+    if (job) {
+      job.undo = null;
+      this.audit?.record({ what: `${job.title}: ${u.request.what}`, tier: 3, kind: 'job', source: job.source, ok: false, approval: 'approved, then undone from the phone' });
+      this.event(job, { type: 'step', kind: 'refused', text: `Undone: ${u.request.what}` });
+      this.save();
+      this.emit('change', this.view(job));
+    }
+    u.deny("The user approved this, then withdrew it. Don't retry; note in result.md what you would have done.");
+    return { ok: true };
+  }
+  /** The task receipt (docs/phone-ui-prompt.md §7): the job, its steps, its files and the checks it went through. */
+  receipt(id) {
+    const job = this.get(id);
+    if (!job) return null;
+    return { job: this.view(job), events: this.events(id).slice(-200), files: this.files(id).slice(0, 40), checks: job.checks || [] };
   }
   get waiting() { return this.jobs.filter((j) => j.status === 'approval'); }
 
   shutdown() {
     for (const [id] of this.approvals) this.answer(id, false, 'ARES is quitting.');
+    for (const [id] of this.undos) this.undo(id);
     for (const child of this.procs.values()) child.kill();
     // Status stays "running" in jobs.json on purpose: next launch resumes those jobs.
   }

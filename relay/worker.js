@@ -100,7 +100,7 @@ const ageSec = (at) => (at ? Math.round((Date.now() - Number(at)) / 1000) : null
 async function helperAge(env) { return ageSec(await env.ARES_KV.get('helper')); }
 
 /** A data message to every registered phone (the app builds the notification itself). Drops dead tokens. */
-async function sendToPhones(env, data, { ttl = 3600 } = {}) {
+async function sendToPhones(env, data, { ttl = 3600, priority = 'HIGH' } = {}) {
   const list = await tokens(env);
   if (!list.length) return { sent: 0, error: 'no phone registered' };
   const sa = JSON.parse(env.FCM_SERVICE_ACCOUNT);
@@ -112,7 +112,7 @@ async function sendToPhones(env, data, { ttl = 3600 } = {}) {
     const res = await fetch(`https://fcm.googleapis.com/v1/projects/${sa.project_id}/messages:send`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${auth}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: { token: t.token, data: strings, android: { priority: 'HIGH', ttl: `${ttl}s` } } }),
+      body: JSON.stringify({ message: { token: t.token, data: strings, android: { priority: priority === 'NORMAL' ? 'NORMAL' : 'HIGH', ttl: `${ttl}s` } } }),
     });
     if (res.ok) { sent++; continue; }
     const err = await res.text();
@@ -213,7 +213,8 @@ export default {
     if (url.pathname === '/notify') {
       const data = { type: 'note', ...msg.data };
       if (JSON.stringify(data).length > 3800) return json({ error: 'too large for a push' }, 413);
-      return json({ ok: true, ...(await sendToPhones(env, data, { ttl: Number(msg.ttl) || 3600 })) });
+      // Silent job progress goes at normal priority so FCM never downgrades ARES's real alerts (docs/phone-ui-prompt.md §7)
+      return json({ ok: true, ...(await sendToPhones(env, data, { ttl: Number(msg.ttl) || 3600, priority: String(msg.priority || 'high').toUpperCase() })) });
     }
     // ---- Wake from off: the helper's side (the Mac's signature) ----
     if (url.pathname === '/helper/poll') {

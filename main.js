@@ -1034,7 +1034,7 @@ function startRemote() {
 }
 // ---- Phone app (served to your phone over Tailscale) -------------------------------------------------
 const PHONE_PORT = Number(process.env.ARES_PHONE_PORT) || 8765;
-const PHONE_NOTE = "(ARES note: the user is using the ARES app on their phone, away from the Mac. Keep replies concise. To open, call, text, message, navigate or play something, use the phone_action tool so it happens on their phone, not the Mac; use notify_phone for anything they should be reminded of later. Anything they want to SEE goes to the phone: files with send_to_phone, their screen with look_at_screen to_phone: true, a page with send_to_phone kind link. Mac work (files, apps, windows, Shortcuts, system, jobs) still happens on the Mac; if its screen is locked and a step needs it, say so plainly and offer the alternatives.)\n\n";
+const PHONE_NOTE = "(ARES note: the user is using the ARES app on their phone, away from the Mac. Keep replies concise. To open, call, text, message, navigate or play something, use the phone_action tool so it happens on their phone, not the Mac; use notify_phone for anything they should be reminded of later. Anything they want to SEE goes to the phone: files with send_to_phone, their screen with look_at_screen to_phone: true, a page with send_to_phone kind link. Mac work (files, apps, windows, Shortcuts, system, jobs) still happens on the Mac; if its screen is locked and a step needs it, say so plainly and offer the alternatives. When an answer has structure (a list, an event, a place, a file, a job), call show_card ONCE with it so the phone shows a card as well: a headline of a few words, two or three facts, up to three follow-ups; still say the answer.)\n\n";
 let phoneUrl = process.env.ARES_PHONE_URL || null; // https://<mac>.<tailnet>.ts.net once Tailscale is set up
 
 /** Stream one sentence of speech (raw 24kHz PCM) into `out.chunks`, in whichever voice is speaking now. */
@@ -1225,6 +1225,16 @@ async function onPhoneAction(args, source) {
   const sent = await pushToPhones({ title: 'ARES', body: action.label, buttons: [{ title: 'Open', url: action.url }] });
   return { message: sent ? `Sent to the user's phone as a notification: "${action.label}".` : "The phone app isn't set up for notifications yet." };
 }
+/** show_card (docs/phone-ui-prompt.md §6): validated against the catalogue (cards.js), then into the phone conversation in progress. */
+function onCard(spec, source) {
+  const { card, error } = require('./cards').validateCard(spec);
+  if (error) return { message: `Card not shown: ${error}.` };
+  if (source === 'phone' && phoneStream) { phoneStream({ type: 'card', card }); return { message: `Card shown on the phone (${card.kind}). Say the answer in a sentence or two; don't repeat the card's lines.` }; }
+  // Not in a phone conversation: the card's headline goes as a notification with its first link
+  const first = (card.actions || []).find((a) => a.url);
+  return pushToPhones({ title: card.title || 'ARES', body: (card.lines || []).join(' · ') || card.text || (card.items || []).map((i) => i.text).join(' · ') || card.when || card.address || '', buttons: first ? [{ title: first.label, url: first.url }] : [] })
+    .then((sent) => ({ message: sent ? 'Sent to the phone as a notification.' : "The phone app isn't connected." }));
+}
 async function onNotify({ title, body, buttons }) {
   const sent = await pushToPhones({ title, body, buttons });
   return { message: sent ? 'Notification sent to the phone.' : "The phone app isn't set up for notifications yet (enable them in the app)." };
@@ -1279,6 +1289,8 @@ function startPhone() {
     power: powerView,
     powerAct,
     relayInfo: (d) => (relay.ready ? { url: relay.url, id: phone.deviceId(d), key: phone.wakeKey(d) } : null),
+    // "Ideas" chips (ideas.js): the calendar, the jobs, and what the owner repeats (autonomy's seen table)
+    ideas: (job) => require('./ideas').ideas({ events: (calendar?.ready ? calendar.near() : dashboard?.events) || [], jobs: jobs?.list() || [], seen: autonomy?.state?.seen || {}, offered: (autonomy ? (autonomy.state.offeredIdeas ||= {}) : {}), job }),
     log,
   });
   // The relay knows each phone by its id, push token and wake key (so a signed wake from the phone can reach the ignition helper)
@@ -1671,6 +1683,8 @@ async function startWork() {
     tools: () => workerTools({ env: process.env, appDir: __dirname, runtime, bridge, egress: () => egress.url }),
   });
   workFiles.install({ jobs, log });
+  // The independent outgoing check (sentinel.js): a cheap one-shot, never the acting session
+  jobs.sentinel = (o) => require('./sentinel').check({ ...o, contacts, model: process.env.ARES_SENTINEL_MODEL || 'haiku' }, claude.oneShot);
   const lastStatus = new Map();
   jobs.on('change', (job) => {
     win?.webContents.send('job-change', job);
@@ -1678,6 +1692,9 @@ async function startWork() {
     theme?.jobs(jobs.list());
     orb?.refresh();
     phone?.broadcast({ type: 'job', job });
+    // No phone on the live line: the Live Update still moves, silently, at normal FCM priority (docs/phone-ui-prompt.md §7)
+    if (!phone?.listeners.size && relay?.ready && (job.status === 'running' || job.status === 'approval' || job.status === 'done' || job.status === 'failed') && lastStatus.get(job.id) !== job.status)
+      relay.notify({ type: 'job', job: { id: job.id, title: job.title, status: job.status, created: job.created, steps: job.steps, progress: job.progress, project: job.project && { phase: job.project.phase }, approval: job.approval, undo: job.undo, seen: job.seen } }, { priority: 'normal' }).catch(() => {});
     // Answered (on the Mac, by voice or from the phone): the "needs your OK" notification is out of date
     if (lastStatus.get(job.id) === 'approval' && job.status !== 'approval') clearPhoneNotes([`job-${job.id}-ok`]);
     lastStatus.set(job.id, job.status);
@@ -1879,13 +1896,22 @@ function phoneWork() {
       return jobs.view(job);
     },
     continue: (id, text, files = []) => tryJob(() => jobs.continue(id, text, 'phone', files)),
-    answer(id, yes, at, device) {
+    answer(id, yes, at, device, opts = {}) {
       const j = jobs.get(id);
       if (j.status !== 'approval' || !j.approval) return { error: 'Nothing is waiting for your OK on that job any more.' };
       if (Number(at) !== j.approval.at) return { error: 'That request has changed. Open the job to see what it is asking now.' };
-      jobs.answer(id, yes);
-      log('job answer phone', { id, yes, device });
+      jobs.answer(id, yes, undefined, { edit: opts.edit, from: opts.from || 'phone' });
+      log('job answer phone', { id, yes, edit: Boolean(opts.edit), device });
       return { job: jobs.view(j) };
+    },
+    undo: (id) => jobs.undo(id),
+    // The receipt (docs/phone-ui-prompt.md §7): the job's own steps plus the audit log's entries for it (matched by title)
+    receipt(id) {
+      const r = jobs.receipt(id);
+      if (!r) return { error: 'no such job' };
+      const title = `${r.job.title}:`;
+      r.audit = (control?.audit?.recent(400) || []).filter((e) => e.kind === 'job' && String(e.what || '').startsWith(title)).slice(-40);
+      return r;
     },
     cancel: (id) => (jobs.cancel(id) ? {} : { error: "It isn't running." }),
     dismiss: (id) => (jobs.dismiss(id) ? {} : { error: "Only finished jobs can be put away (and this one already is)." }),
@@ -2397,6 +2423,9 @@ app.whenReady().then(async () => {
     },
     onPhoneAction,
     onNotify,
+    onCard,
+    sentinel: (o) => require('./sentinel').check({ ...o, contacts, model: process.env.ARES_SENTINEL_MODEL || 'haiku' }, claude.oneShot),
+    audit: () => control?.audit,
     work: workControls(),
     claudeUsage: () => claudeUsage.describe(),
     claude: () => claudeCtl,

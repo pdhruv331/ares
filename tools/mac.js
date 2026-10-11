@@ -210,6 +210,20 @@ tool('phone_action',
   },
   async (args) => (await bridge('/phone-action', args)).message);
 
+tool('show_card',
+  "Show a RESULT CARD on the user's phone alongside your spoken answer (only while they're on the phone). Use it once per answer when " +
+  'the answer has structure: a list, an event, a place, a file, a job\'s progress or an approval. ' + require('../cards').CATALOGUE,
+  {
+    kind: z.enum(['summary', 'list', 'event', 'place', 'file', 'image', 'progress', 'approval']),
+    title: z.string().describe('Headline, 12 words or fewer'),
+    lines: z.array(z.string()).max(3).optional().describe('Two or three key facts (summary, event, place)'),
+    items: z.array(z.object({ text: z.string(), sub: z.string().optional(), url: z.string().optional() })).max(6).optional(),
+    when: z.string().optional(), where: z.string().optional(), address: z.string().optional(), hours: z.string().optional(), phone: z.string().optional(),
+    name: z.string().optional(), size: z.string().optional(), mime: z.string().optional(), url: z.string().optional(), job: z.string().optional().describe('A job id for progress / approval cards'),
+    actions: z.array(z.object({ label: z.string().max(24), url: z.string().optional(), ask: z.string().optional(), share: z.string().optional() })).max(3).optional(),
+  },
+  async (args) => (await bridge('/card', args)).message);
+
 tool('notify_phone',
   "Send a notification to the user's phone (it arrives even when the app is closed). Optional buttons can open a link " +
   'or ask you something when tapped (e.g. "Snooze 10 min" -> ask "set a 10 minute timer").',

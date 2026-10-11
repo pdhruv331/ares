@@ -252,6 +252,8 @@ class PhoneServer extends EventEmitter {
       return fs.createReadStream(file).pipe(res);
     }
     if (req.method === 'GET' && url.pathname === '/api/history') return json(200, { ok: true, history: this.history() });
+    // "Ideas" starters for the phone's chips (docs/phone-ui-prompt.md §8)
+    if (req.method === 'GET' && url.pathname === '/api/ideas') return json(200, { ok: true, ideas: this.ideas ? this.ideas(url.searchParams.get('job') || null) : [] });
 
     if (url.pathname === '/api/jobs' || url.pathname.startsWith('/api/jobs/')) return this.jobRoute(req, res, url, json);
     if (url.pathname.startsWith('/api/autonomy/')) return this.autonomyRoute(req, res, url, json);
@@ -425,6 +427,8 @@ class PhoneServer extends EventEmitter {
     if (!work.get(id)) return json(404, { ok: false, error: 'no such job' });
 
     if (req.method === 'GET' && !sub && !action) return json(200, { ok: true, ...work.detail(id) });
+    // The task receipt (docs/phone-ui-prompt.md §7): steps, files, checks, and the audit log's lines for this job
+    if (req.method === 'GET' && action === 'receipt') return json(200, { ok: true, ...work.receipt(id) });
     if (req.method === 'GET' && sub === 'version') {
       const text = work.version(id, Number(rest));
       return text == null ? json(404, { ok: false }) : json(200, { ok: true, text });
@@ -457,7 +461,8 @@ class PhoneServer extends EventEmitter {
       case 'continue':
         if (typeof b.text !== 'string' || !b.text.trim()) return json(400, { ok: false, error: 'What should change?' });
         return this.withUploads(b.files, json, async (paths) => reply(await work.continue(id, b.text.slice(0, 8000), paths)));
-      case 'answer': return reply(work.answer(id, b.yes === true, b.at, me.name));
+      case 'answer': return reply(work.answer(id, b.yes === true, b.at, me.name, { edit: typeof b.edit === 'string' ? b.edit.slice(0, 1000) : '', from: b.from === 'phone' ? 'phone' : '' }));
+      case 'undo': return reply(work.undo(id));
       case 'cancel': return reply(work.cancel(id));
       case 'dismiss': return reply(work.dismiss(id));
       case 'seen': return reply(work.seen(id, me.name));

@@ -38,10 +38,12 @@ class Relay {
   unregisterAll() { return this.post('/unregister', { all: true }); }
 
   /** A Mac notification to the Android app over FCM. Returns how many phones got it (0 on failure). */
-  async notify({ title, body, tag, job, buttons }) {
+  async notify({ type, title, body, tag, job, buttons, evt, id }, { priority = 'high', ttl } = {}) {
     try {
-      const data = { title, body: String(body || '').slice(0, 1500), tag, job, buttons: buttons?.length ? JSON.stringify(buttons) : undefined };
-      return (await this.post('/notify', { data })).sent || 0;
+      const data = type === 'job' || type === 'job-event'
+        ? { type, id, job: job ? JSON.stringify(job) : undefined, evt: evt ? JSON.stringify(evt) : undefined } // silent progress for the Live Update (docs/phone-ui-prompt.md §7)
+        : { title, body: String(body || '').slice(0, 1500), tag, job, buttons: buttons?.length ? JSON.stringify(buttons) : undefined };
+      return (await this.post('/notify', { data, priority, ttl })).sent || 0;
     } catch (err) { this.log('relay notify failed', err.message); return 0; }
   }
 
