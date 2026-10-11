@@ -400,6 +400,15 @@ class MainActivity : Activity(), Session.Ui {
         setStatus("online")
     }
 
+    override fun card(spec: org.json.JSONObject) {
+        val clean = Cards.parse(spec) ?: return
+        val v = Cards.view(Cards.Host(this, ask = { q -> session.ask(q, voice = true) }), clean)
+        Cards.land(this, log, v)
+        scrollDown()
+    }
+
+    override fun showJob(id: String?) { if (id != null) startActivity(ReceiptActivity.intent(this, id)) else startActivity(WorkActivity.intent(this)) }
+
     override fun action(url: String, label: String) {
         val card = layoutInflater.inflate(R.layout.item_action, log, false) as TextView
         card.text = "↗  $label"

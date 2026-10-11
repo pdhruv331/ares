@@ -31,6 +31,15 @@ class HomeOverlay @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
 
     var notes: List<NotifStore.Item> = emptyList()
         set(v) { field = v; invalidate() }
+    /** A Mac job waiting for the owner (docs/phone-ui-prompt.md §7): ONE amber orb in the same arc, same hold / drag / absorb. */
+    var needs: JobStore.Job? = null
+        set(v) { val was = field; field = v; if (v != null && was?.id != v.id) Haptics.approval(context); invalidate() }
+    var onNeeds: (JobStore.Job) -> Unit = {}
+    var onNeedsDismiss: (JobStore.Job) -> Unit = {}
+    private val NEEDS_KEY = "ares:needs"
+    private fun needsItem(j: JobStore.Job) = NotifStore.Item(NEEDS_KEY, context.packageName, "ARES", j.title, j.approvalWhat.orEmpty(), System.currentTimeMillis(), true, null, null, false)
+    /** Everything on the arc: the amber job orb first, then the notifications. */
+    private val all: List<NotifStore.Item> get() = listOfNotNull(needs?.let(::needsItem)) + notes
     var onTap: (NotifStore.Item) -> Unit = {}
     var onDismiss: (NotifStore.Item) -> Unit = {}
     var ringing = false
@@ -137,8 +146,8 @@ class HomeOverlay @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
             animate = true
         }
 
-        // Notification orbs on the arc above the reactor
-        val live = notes.filter { n -> absorbing.none { it.first.key == n.key } }
+        // Notification orbs on the arc above the reactor (and the one amber job orb)
+        val live = all.filter { n -> absorbing.none { it.first.key == n.key } }
         val keep = live.map { it.key }.toHashSet()
         pos.keys.retainAll(keep)
         val dragging = held?.takeIf { moved }
@@ -195,6 +204,15 @@ class HomeOverlay @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     private fun drawOrb(canvas: Canvas, n: NotifStore.Item, x: Float, y: Float, scale: Float, t: Float) {
         if (scale <= 0f) return
         val half = orbPx / 2f * scale
+        if (n.key == NEEDS_KEY) { // the job that needs you: amber, a soft pulse, a "!"
+            stroke.color = amber; stroke.pathEffect = null; stroke.strokeWidth = 1.5f * dp
+            stroke.alpha = (90 + 90 * sin(t * 3)).toInt().coerceIn(0, 255); canvas.drawCircle(x, y, half + 5 * dp, stroke)
+            fill.color = Color.parseColor("#1A0F00"); fill.alpha = 255; canvas.drawCircle(x, y, half, fill)
+            stroke.alpha = 255; stroke.strokeWidth = 2 * dp; canvas.drawCircle(x, y, half, stroke)
+            text.color = amber; text.alpha = 255; text.textSize = 15 * dp * scale
+            canvas.drawText("!", x, y + 5f * dp * scale, text)
+            return
+        }
         if (n.person) {
             stroke.color = amber; stroke.pathEffect = null; stroke.strokeWidth = 1.5f * dp
             stroke.alpha = (90 + 90 * sin(t * 4)).toInt().coerceIn(0, 255)
@@ -217,7 +235,7 @@ class HomeOverlay @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     override fun onTouchEvent(e: MotionEvent): Boolean {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                val hit = notes.firstOrNull { n -> pos[n.key]?.let { hypot(it.x - e.x, it.y - e.y) < orbPx * 0.75f } == true } ?: return false
+                val hit = all.firstOrNull { n -> pos[n.key]?.let { hypot(it.x - e.x, it.y - e.y) < orbPx * 0.75f } == true } ?: return false
                 held = hit; moved = false
                 parent?.requestDisallowInterceptTouchEvent(true) // a finger on an orb is the orb's (no page swipe)
                 val p = pos.getValue(hit.key); dx0 = e.x - p.x; dy0 = e.y - p.y
@@ -234,11 +252,11 @@ class HomeOverlay @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
                 held = null
                 parent?.requestDisallowInterceptTouchEvent(false)
                 val p = pos[n.key]
-                if (!moved) onTap(n)
+                if (!moved) { if (n.key == NEEDS_KEY) needs?.let(onNeeds) else onTap(n) }
                 else if (p != null && hypot(p.x - cx, p.y - cy) < r * 0.6f) {
                     absorbing += Triple(n, PointF(p.x, p.y), System.nanoTime())
                     Haptics.click(context)
-                    onDismiss(n)
+                    if (n.key == NEEDS_KEY) needs?.let(onNeedsDismiss) else onDismiss(n)
                 }
                 invalidate() // (anything else floats back to its place)
             }

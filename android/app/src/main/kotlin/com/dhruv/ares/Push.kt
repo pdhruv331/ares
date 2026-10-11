@@ -15,6 +15,7 @@ class AresApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Notes.channels(this)
+        LiveUpdates.channel(this)
         Scheme.load(this)
         Push.init(this)
     }
@@ -79,6 +80,9 @@ class AresPush : FirebaseMessagingService() {
         when (d["type"]) {
             "call" -> CallStore.fromPush(d)?.let { call -> CallStore.add(this, call); Notes.call(this, call) }
             "note" -> Notes.show(this, JSONObject(d as Map<*, *>))
+            // Silent job progress (normal priority): the Live Update changes in place, nothing alerts
+            "job" -> d["job"]?.let { runCatching { JSONObject(it) }.getOrNull() }?.let { JobStore.update(this, it) }
+            "job-event" -> d["evt"]?.let { runCatching { JSONObject(it) }.getOrNull() }?.let { JobStore.event(this, d["id"].orEmpty(), it) }
         }
     }
 }

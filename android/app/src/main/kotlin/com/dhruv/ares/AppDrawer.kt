@@ -1,6 +1,7 @@
 package com.dhruv.ares
 
-import android.animation.ValueAnimator
+import android.view.WindowInsets
+import android.view.WindowInsetsAnimation
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.LauncherApps
@@ -28,6 +29,9 @@ import android.widget.TextView
  * an app for its shortcuts, Add to dock, App info and Uninstall. `pick` mode fills an empty dock slot instead of opening.
  * YOUR ORDER (docs/launcher-v2-prompt.md §8): hold an app and drag it; the first drag starts from the A–Z order, new apps
  * join at the end, and the A–Z chip goes back (the order is kept for next time).
+ * Fluid (docs/phone-ui-prompt.md §2): the drawer is a sheet that follows the finger up from the dock (`track` / `release`)
+ * and down from the top of its list, opens and closes from wherever it is with the finger's own speed, its rows entering
+ * with a stagger; the list's bottom rides the keyboard frame by frame.
  */
 class AppDrawer(
     private val act: Activity,
@@ -57,8 +61,18 @@ class AppDrawer(
     private val dp = act.resources.displayMetrics.density
     private val iconPx = (52 * dp).toInt()
     private var picking = false
+    private val minFling = android.view.ViewConfiguration.get(act).scaledMinimumFlingVelocity * 6f
+    /** The sheet's position: 0 = open, height = closed (below the screen). */
+    private val pos = Motion.Value(0f, Motion.SlowSpatial) { y -> root.translationY = y }
+    private var opening = false // the finger is dragging it up from the dock
+    private var closingDrag = false // ...or down from the top of the list
+    private var lastOpenMs = 0L
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    var onOpenChanged: (Boolean) -> Unit = {}
 
-    val isOpen get() = root.visibility == View.VISIBLE
+    val isOpen get() = root.visibility == View.VISIBLE && !opening && pos.value < root.height * 0.5f && !closingSheet
+    private var closingSheet = false
+    private val h get() = root.height.toFloat().coerceAtLeast(1f)
 
     private sealed class Row {
         class Header(val text: String) : Row()
@@ -98,15 +112,38 @@ class AppDrawer(
             true
         }
         root.findViewById<View>(R.id.drawerHome).setOnClickListener { close() }
-        // Pull down from the top of the list to close
-        var y0 = 0f
+        // Pull down from the top of the list: the sheet follows the finger down, and a release decides open or closed
+        var y0 = 0f; var vt: android.view.VelocityTracker? = null
         list.setOnTouchListener { _, e ->
             when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> y0 = e.rawY
-                MotionEvent.ACTION_MOVE -> if (!list.canScrollVertically(-1) && e.rawY - y0 > 90 * dp) { y0 = Float.MAX_VALUE; close() }
+                MotionEvent.ACTION_DOWN -> { y0 = e.rawY; closingDrag = false; vt?.recycle(); vt = android.view.VelocityTracker.obtain(); vt?.addMovement(e) }
+                MotionEvent.ACTION_MOVE -> {
+                    vt?.addMovement(e)
+                    val dy = e.rawY - y0
+                    if (!closingDrag && !list.canScrollVertically(-1) && dy > slop * 2 && frame.grab == null) {
+                        closingDrag = true
+                        list.dispatchTouchEvent(MotionEvent.obtain(e).apply { action = MotionEvent.ACTION_CANCEL })
+                    }
+                    if (closingDrag) { pos.set((dy - slop * 2).coerceAtLeast(0f)); return@setOnTouchListener true }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (closingDrag) {
+                    closingDrag = false
+                    vt?.computeCurrentVelocity(1000)
+                    release(if (e.actionMasked == MotionEvent.ACTION_UP) vt?.yVelocity ?: 0f else 0f)
+                    return@setOnTouchListener true
+                }
             }
             false
         }
+        // The list's bottom follows the keyboard frame by frame, not in one jump
+        root.setWindowInsetsAnimationCallback(object : WindowInsetsAnimation.Callback(DISPATCH_MODE_CONTINUE_ON_SUBTREE) {
+            override fun onProgress(insets: WindowInsets, running: MutableList<WindowInsetsAnimation>): WindowInsets {
+                if (running.none { it.typeMask and WindowInsets.Type.ime() != 0 }) return insets
+                val bars = insets.getInsets(WindowInsets.Type.systemBars()); val ime = insets.getInsets(WindowInsets.Type.ime())
+                root.setPadding(root.paddingLeft, root.paddingTop, root.paddingRight, kotlin.math.max(bars.bottom, ime.bottom))
+                return insets
+            }
+        })
         sortAz.setOnClickListener { if (mine) { mine = false; build(search.text.toString()); list.setSelection(0) } }
         sortMine.setOnClickListener { if (!mine) { mine = true; build(search.text.toString()); list.setSelection(0) } }
         rail.setOnTouchListener { v, e ->
@@ -122,28 +159,86 @@ class AppDrawer(
         }
     }
 
-    fun open(pick: Boolean = false, forHome: Boolean = false) {
+    private fun prepare(pick: Boolean, forHome: Boolean) {
         picking = pick
         search.setText("")
         search.hint = if (!pick) "SEARCH OR ASK" else if (forHome) "PICK AN APP FOR HOME" else "PICK AN APP FOR THE DOCK"
         build("")
         list.setSelection(0)
-        root.visibility = View.VISIBLE
-        if (!ValueAnimator.areAnimatorsEnabled()) { root.alpha = 1f; root.translationY = 0f; return }
-        root.alpha = 0f; root.translationY = 40 * dp
-        root.animate().alpha(1f).translationY(0f).setDuration(220).setInterpolator(android.view.animation.DecelerateInterpolator()).start()
-        // The scan line sweeps down the list as it opens
+    }
+
+    /** Open it (a tap on the handle, a pick): from below, critically damped. */
+    fun open(pick: Boolean = false, forHome: Boolean = false) {
+        if (isOpen && !pick) return
+        prepare(pick, forHome)
+        closingSheet = false
+        if (root.visibility != View.VISIBLE) { root.visibility = View.VISIBLE; pos.set(h) }
+        settle(open = true, velocity = null, tapped = true)
+    }
+
+    /** The finger is dragging the sheet up from the dock: it follows, `dy` px above where the drag started. */
+    fun track(dy: Float) {
+        if (!opening) {
+            opening = true; closingSheet = false
+            if (root.visibility != View.VISIBLE || !isOpen) prepare(false, false)
+            root.visibility = View.VISIBLE
+            if (pos.value <= 0f) pos.set(h)
+        }
+        val from = h
+        pos.set(Motion.band(from - dy, 0f, from, from, 0.4f))
+    }
+
+    /** ...and let go: open or closed, whichever the throw lands nearer, with the finger's speed. */
+    fun release(vy: Float) {
+        opening = false
+        val open = Motion.pick(pos.value, vy, h, 0f, minFling) == 0f
+        settle(open, vy, tapped = false)
+    }
+
+    private fun settle(open: Boolean, velocity: Float?, tapped: Boolean) {
+        val wasOpen = isOpen
+        if (!open) { closingSheet = true; hideKeyboard() }
+        val spec = if (tapped) Motion.TapSlow else Motion.SlowSpatial
+        val target = if (open) 0f else h
+        if (open && !wasOpen && System.currentTimeMillis() - lastOpenMs > 400) { lastOpenMs = System.currentTimeMillis(); staggerRows(); sweep() }
+        pos.to(target, spec, velocity) {
+            if (!open) { root.visibility = View.GONE; closingSheet = false }
+        }
+        if (!Motion.enabled && !open) { root.visibility = View.GONE; closingSheet = false }
+        onOpenChanged(open)
+    }
+
+    /** The rows enter 20 ms apart, from a little below (only the ones on screen). */
+    private fun staggerRows() {
+        if (!Motion.enabled) return
+        list.post {
+            val rows = (0 until list.childCount).map(list::getChildAt)
+            Motion.stagger(rows, 18 * dp, 20)
+        }
+    }
+
+    /** The scan line sweeps down the list as it opens. */
+    private fun sweep() {
+        if (!Motion.enabled) return
         scan.alpha = 0.8f; scan.translationY = 0f
         scan.post { scan.animate().translationY((scan.parent as View).height.toFloat()).alpha(0f).setDuration(420).start() }
     }
 
-    fun close(animate: Boolean = true) {
-        if (!isOpen) return
+    private fun hideKeyboard() {
         act.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(search.windowToken, 0)
         search.clearFocus()
-        if (!animate || !ValueAnimator.areAnimatorsEnabled()) { root.visibility = View.GONE; return }
-        root.animate().alpha(0f).translationY(24 * dp).setDuration(160).withEndAction { root.visibility = View.GONE }.start()
     }
+
+    fun close(animate: Boolean = true) {
+        if (root.visibility != View.VISIBLE || closingSheet) return
+        hideKeyboard()
+        if (!animate || !Motion.enabled) { pos.cancel(); root.visibility = View.GONE; opening = false; onOpenChanged(false); return }
+        settle(open = false, velocity = null, tapped = true)
+    }
+
+    /** Predictive back: the sheet steps down with the gesture (k = 0..1), then commits (`close`) or springs back (`settleBack`). */
+    fun peek(k: Float) { if (root.visibility == View.VISIBLE) pos.set(h * 0.35f * k) }
+    fun settleBack() { if (root.visibility == View.VISIBLE) pos.to(0f, Motion.TapSlow) }
 
     /** The app list changed (installs, removals, the dock, icon style). */
     fun refresh() { if (isOpen) build(search.text.toString()) }
@@ -255,7 +350,7 @@ class AppDrawer(
     private fun hold(cell: View, app: Apps.App, pinned: Boolean) {
         if (picking || pinned || search.text.isNotBlank()) return menu(cell, app)
         Haptics.click(act)
-        cell.animate().scaleX(1.12f).scaleY(1.12f).setDuration(120).start()
+        Motion.scale(cell, 1.12f, Motion.FastSpatial)
         val x0 = frame.downX; val y0 = frame.downY
         var moved = false; var lastX = x0; var lastY = y0
         val edge = object : Runnable {
@@ -279,7 +374,7 @@ class AppDrawer(
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     frame.grab = null
                     frame.removeCallbacks(edge)
-                    cell.animate().scaleX(1f).scaleY(1f).setDuration(120).start()
+                    Motion.scale(cell, 1f, Motion.DefaultSpatial)
                     if (moved) finishDrag() else if (e.actionMasked == MotionEvent.ACTION_UP) menu(cell, app)
                 }
             }

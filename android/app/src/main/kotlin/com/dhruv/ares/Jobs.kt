@@ -15,9 +15,50 @@ object JobStore {
     data class Job(
         val id: String, val title: String, val status: String, val created: Long, val steps: Int,
         val seen: Boolean, val dismissed: Boolean, val approvalAt: Long, val approvalWhat: String?, val summary: String,
+        val kind: String = "", val error: String = "", val phase: String? = null, val progressDone: Int = 0, val progressTotal: Int = 0,
+        val undoUntil: Long = 0L, val check: JSONObject? = null, val sentinel: JSONArray? = null,
     ) {
         val active get() = status == "queued" || status == "running" || status == "approval"
+        val project get() = phase != null
+        /** The latest step the Mac reported for this job (kept here from the live line), or null. */
+        fun lastEvent(): String? = events(id).lastOrNull()?.optString("text")?.takeIf { it.isNotBlank() }
+        /** One line on where it is: the project's phase, else progress, else the steps so far. */
+        fun phaseLine(): String = when {
+            phase != null -> phase.uppercase().let { p -> if (progressTotal > 0) "$p · $progressDone/$progressTotal" else p }
+            progressTotal > 0 -> "Working · $progressDone of $progressTotal"
+            steps > 0 -> "Working · $steps steps"
+            else -> "Working"
+        }
+        /** The Live Update's segments (docs/phone-ui-prompt.md §7): projects by phase, plain jobs by progress. */
+        fun segmentNames(): List<String> = if (project) listOf("plan", "build", "test", "verify", "done") else listOf("queued", "working", "done")
+        fun segmentsDone(): Int = when (status) {
+            "done" -> segmentNames().size
+            "failed", "cancelled" -> 0
+            "queued" -> 1
+            else -> if (project) (listOf("plan", "build", "test", "verify", "report").indexOf(phase ?: "plan") + 1).coerceIn(1, 4) else 2
+        }
+        /** 0..100 for the progress bar. */
+        fun percent(): Int = when {
+            status == "done" -> 100
+            status == "queued" -> 5
+            project -> (segmentsDone() * 100 / segmentNames().size).coerceIn(5, 95)
+            progressTotal > 0 -> (10 + progressDone * 85 / progressTotal).coerceIn(10, 95)
+            else -> (10 + steps * 3).coerceAtMost(80)
+        }
+        val undoLeftMs get() = (undoUntil - System.currentTimeMillis()).coerceAtLeast(0L)
     }
+
+    /** The last steps of each job, as the Mac's 'job-event' messages bring them (the receipt and the Live Update read them). */
+    private val eventLog = LinkedHashMap<String, ArrayList<JSONObject>>()
+    fun events(id: String): List<JSONObject> = synchronized(this) { eventLog[id]?.toList().orEmpty() }
+    fun event(c: Context, id: String, evt: JSONObject) {
+        synchronized(this) { val l = eventLog.getOrPut(id) { ArrayList() }; l += evt; while (l.size > 80) l.removeAt(0) }
+        main.post { for (l in eventListeners) l(id) }
+        LiveUpdates.sync(c)
+    }
+    private val eventListeners = CopyOnWriteArraySet<(String) -> Unit>()
+    fun listenEvents(l: (String) -> Unit) { eventListeners += l }
+    fun unlistenEvents(l: (String) -> Unit) { eventListeners -= l }
 
     private val jobs = LinkedHashMap<String, Job>()
     private val raw = LinkedHashMap<String, JSONObject>() // as the Mac sent them: the brain's orbs use these
@@ -28,9 +69,13 @@ object JobStore {
 
     private fun parse(o: JSONObject): Job {
         val ap = o.optJSONObject("approval")
+        val pr = o.optJSONObject("progress")
         return Job(
             o.optString("id"), o.optString("title", "Job"), o.optString("status"), o.optLong("created"), o.optInt("steps"),
             o.optBoolean("seen"), o.optBoolean("dismissed"), ap?.optLong("at") ?: 0L, ap?.optString("what"), o.optString("summary"),
+            kind = o.optString("kind"), error = o.optString("error"), phase = o.optJSONObject("project")?.optString("phase")?.takeIf { it.isNotBlank() },
+            progressDone = pr?.optInt("done") ?: 0, progressTotal = pr?.optInt("total") ?: 0,
+            undoUntil = o.optJSONObject("undo")?.optLong("until") ?: 0L, check = ap?.optJSONObject("check"), sentinel = o.optJSONArray("checks"),
         )
     }
 
@@ -76,6 +121,7 @@ object JobStore {
     fun unlisten(l: () -> Unit) { listeners -= l }
 
     private fun changed(c: Context) {
+        LiveUpdates.sync(c)
         val s = summary()
         val p = Ares.prefs(c)
         if (p.getString("jobs", null) != s) {

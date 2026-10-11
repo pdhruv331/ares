@@ -31,6 +31,8 @@ class Session(private val ctx: Context, private val ui: Ui) {
         fun attached() {} // the pending attachment went with the question
         fun handsFree(on: Boolean, why: String) {} // hands-free conversation switched on or off
         fun caption(text: String) {} // what to show over the reactor right now (her sentence as she says it, your words as you say them)
+        fun card(spec: org.json.JSONObject) {} // a result card from the Mac (docs/phone-ui-prompt.md §6), drawn by Cards.kt
+        fun showJob(id: String?) {} // "show me the job": the Mac asked the phone to show a job (null = the list)
     }
 
     /** Extra context for the next question: something shared from another app, or your screen. */
@@ -193,6 +195,8 @@ class Session(private val ctx: Context, private val ui: Ui) {
                     text = { t -> main.post { if (!mine.get()) { replyText = t; ui.reply(t, false) } } },
                     audio = { pcm, clip -> if (!mine.get()) speaker.play(pcm, clip) },
                     action = { url, label -> main.post { if (!mine.get()) ui.action(url, label) } },
+                    card = { spec -> main.post { if (!mine.get()) ui.card(spec) } },
+                    job = { id -> main.post { if (!mine.get()) ui.showJob(id) } },
                     done = { t -> Ares.saveLast(ctx, null, t); main.post { if (!mine.get()) {
                         replyText = t
                         ui.reply(t, true)

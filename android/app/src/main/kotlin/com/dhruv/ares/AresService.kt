@@ -158,12 +158,13 @@ class AresService : Service() {
                         // Work: live job changes, notifications seen or answered elsewhere, "send this to my phone"
                         "job" -> m.optJSONObject("job")?.let { JobStore.update(this, it) }
                         "job-removed" -> JobStore.remove(this, m.optString("id"))
+                        "job-event" -> m.optJSONObject("evt")?.let { JobStore.event(this, m.optString("id"), it) }
                         "clear" -> m.optJSONArray("tags")?.let { t -> main.post { for (i in 0 until t.length()) nm.cancel(t.getString(i).hashCode()) } }
                         "show-job" -> JobStore.show(m.optString("id"))
                         "calls" -> CallStore.changed()
                         // Power (docs/ignition-prompt.md §4d): the Mac's standby / wake / power down, and the charge's steps
-                        "power" -> { PowerStore.fromPower(this, m); main.post { refresh() } }
-                        "power-step" -> PowerStore.step(m)
+                        "power" -> { PowerStore.fromPower(this, m); main.post { refresh(); wakeStrip() } }
+                        "power-step" -> { PowerStore.step(m); main.post { wakeStrip() } }
                     }
                 }
             } catch (e: NotPairedException) {
@@ -191,6 +192,12 @@ class AresService : Service() {
     }
 
     private fun wake() = synchronized(lock) { lock.notifyAll() }
+
+    /** The Mac waking up as a Live Update in the strip (docs/phone-ui-prompt.md §7). */
+    private fun wakeStrip() {
+        if (PowerStore.mode == PowerStore.Mode.CHARGING) LiveUpdates.wake(this, PowerStore.chargeK, "${(PowerStore.chargeK * 100).toInt()}% · ${PowerStore.why.ifBlank { "starting up" }}")
+        else LiveUpdates.wake(this, null, "")
+    }
 
     private fun online(s: String) {
         Ares.setStatus(this, s)
@@ -256,6 +263,7 @@ class AresService : Service() {
     /** A notification button that acts through the Mac's job API. Only a problem (or Send to Mac's answer) is shown. */
     private fun callApi(api: String, body: String) {
         if (!api.startsWith("/api/jobs/") && !api.startsWith("/api/claude/") && !api.startsWith("/api/power/")) return
+        if (api.endsWith("/answer") && runCatching { JSONObject(body).optBoolean("yes") }.getOrDefault(false)) return // (a yes needs the fingerprint: the receipt does that)
         thread(name = "ares-job-api") {
             val r = runCatching { if (api.startsWith("/api/power/")) client.powerAct(api.removePrefix("/api/power/")) else client.post(api, JSONObject(body)) }.getOrElse { JSONObject().put("error", "Couldn't reach your Mac.") }
             val line = when {

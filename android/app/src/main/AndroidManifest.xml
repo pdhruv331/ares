@@ -21,6 +21,9 @@
     <!-- Calls on the home screen (asked from the home menu): that the phone is ringing, and ANSWER / DECLINE -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
     <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS"/>
+    <!-- Phone UI v3: tier-3 approvals need a fingerprint on the phone itself; Live Updates for Mac jobs -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS"/>
 
     <!-- The phone's speech recogniser (Android 11+ needs this to see it) -->
     <queries>
@@ -41,6 +44,7 @@
         android:theme="@style/Theme.Ares"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/no_backup"
+        android:enableOnBackInvokedCallback="true"
         android:supportsRtl="true">
 
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize">
@@ -134,6 +138,9 @@
         <meta-data android:name="firebase_analytics_collection_deactivated" android:value="true"/>
 
         <activity android:name=".WorkActivity" android:exported="false" android:launchMode="singleTask" android:windowSoftInputMode="stateAlwaysHidden|adjustResize"/>
+        <!-- The task receipt (docs/phone-ui-prompt.md §7): a sheet over whatever was there -->
+        <activity android:name=".ReceiptActivity" android:exported="false" android:theme="@style/Theme.Ares.Floating" android:taskAffinity="com.dhruv.ares.receipt"
+            android:launchMode="singleTask" android:excludeFromRecents="true"/>
 
         <activity android:name=".UpdateActivity" android:exported="false" android:theme="@style/Theme.Ares.Floating"
             android:taskAffinity="com.dhruv.ares.update" android:excludeFromRecents="true" android:launchMode="singleTask"/>

@@ -16,7 +16,7 @@ android {
         minSdk = 34 // built for the Galaxy S26 Ultra; nothing older needed
         targetSdk = 36
         versionCode = (findProperty("aresVersionCode") as String?)?.toInt() ?: 1 // set by build.sh
-        versionName = "0.4.0"
+        versionName = "0.5.0"
     }
 
     signingConfigs {
@@ -42,6 +42,10 @@ android {
 // No google-services plugin, no analytics: the app is configured at runtime from the Mac (Push.kt).
 dependencies {
     implementation("com.google.firebase:firebase-messaging:25.1.3")
+    // Phone UI v3 (docs/phone-ui-prompt.md): springs for every gesture (Motion.kt), jank measurement, the baseline profile
+    implementation("androidx.dynamicanimation:dynamicanimation:1.1.0")
+    implementation("androidx.metrics:metrics-performance:1.0.0")
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
 }
 
 // ARES's 3D brain (the same files as the Mac app) bundled into the APK, so the app's brain works offline
@@ -54,4 +58,13 @@ val copyBrain by tasks.registering(Copy::class) {
 }
 android.sourceSets["main"].assets.srcDir(brainAssets.get().asFile)
 
-tasks.named("preBuild") { dependsOn(copyBrain) }
+// The phone's three short sounds (Sounds.kt) are the Mac's own WAVs (renderer/sounds), copied in at build time
+val soundRes = layout.buildDirectory.dir("generated/soundRes")
+val copySounds by tasks.registering(Copy::class) {
+    into(soundRes.map { it.dir("raw") })
+    from(rootProject.file("../renderer/sounds")) { include("tick.wav", "ptt-on.wav", "ptt-off.wav") }
+    rename { it.replace('-', '_') }
+}
+android.sourceSets["main"].res.srcDir(soundRes.get().asFile)
+
+tasks.named("preBuild") { dependsOn(copyBrain, copySounds) }

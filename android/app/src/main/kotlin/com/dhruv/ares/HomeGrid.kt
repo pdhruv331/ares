@@ -19,6 +19,8 @@ import kotlin.math.min
  * wide, packed in your order (each item goes where its columns are lowest, then leftmost; nothing overlaps, nothing has to
  * be placed by hand). Hold an item to lift it, drag it among the others, let go to drop it; a hold without a drag is its menu.
  * Hold empty space to add something. A child's span is its [Span] (rows = 0: as tall as it wants to be, like the ARES cards).
+ * Fluid (docs/phone-ui-prompt.md §3): the others glide to their new places on retargeted springs as the held item hovers;
+ * the drop springs it into its slot and ticks when it settles.
  */
 class HomeGrid @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = null) : ViewGroup(ctx, attrs) {
     class Span(val cols: Int, val rows: Int) : ViewGroup.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
@@ -86,10 +88,10 @@ class HomeGrid @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = nu
             val moved = v.isLaidOut && (oldX != rect.left || oldY != rect.top)
             v.layout(rect.left, rect.top, rect.right, rect.bottom)
             if (v === held) { follow(); continue }
-            // Glide from where it was to where it now goes
+            // Glide from where it was to where it now goes (a spring, retargeted if it's already on its way)
             if (moved && dragging) {
-                v.translationX = (oldX - rect.left).toFloat(); v.translationY = (oldY - rect.top).toFloat()
-                v.animate().translationX(0f).translationY(0f).setDuration(180).start()
+                v.translationX += (oldX - rect.left).toFloat(); v.translationY += (oldY - rect.top).toFloat()
+                Motion.to(v, Motion.X, 0f, Motion.DefaultSpatial); Motion.to(v, Motion.Y, 0f, Motion.DefaultSpatial)
             }
         }
     }
@@ -123,7 +125,8 @@ class HomeGrid @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = nu
         if (v == null) { onEmptyHold(); return@Runnable }
         held = v
         grabX = x0 - v.left; grabY = y0 - v.top
-        v.animate().scaleX(1.06f).scaleY(1.06f).setDuration(120).start()
+        Motion.cancel(v, Motion.X); Motion.cancel(v, Motion.Y)
+        Motion.scale(v, 1.06f, Motion.FastSpatial)
         v.translationZ = 10 * dp
     }
 
@@ -205,7 +208,9 @@ class HomeGrid @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = nu
         parent?.requestDisallowInterceptTouchEvent(false)
         if (v == null) return
         v.translationZ = 0f
-        v.animate().scaleX(1f).scaleY(1f).translationX(0f).translationY(0f).setDuration(180).start()
+        Motion.scale(v, 1f, Motion.DefaultSpatial)
+        Motion.to(v, Motion.X, 0f, Motion.DefaultSpatial)
+        Motion.to(v, Motion.Y, 0f, Motion.DefaultSpatial) { if (wasDrag) Haptics.settle(context) }
         if (wasDrag) onOrder((0 until childCount).map(::getChildAt))
         else if (!cancel) onMenu(v)
     }

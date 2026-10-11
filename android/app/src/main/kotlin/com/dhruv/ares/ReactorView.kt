@@ -31,13 +31,26 @@ import kotlin.random.Random
  * It also mirrors the Mac's POWER state (docs/ignition-prompt.md §4d): STANDBY winds the rings down to a cool blue with the
  * core breathing slowly; OFFLINE is the cold gold still; ASLEEP grey and still; CHARGING pulls streams of energy into the core
  * as the real charge grows, then a white bloom; SPINDOWN decelerates to gold. A hold ring fills around it while you hold.
- * Draws itself ~60 times a second while shown; scales down to a 64dp button without the extras.
+ *
+ * Her states are told apart by SHAPE, not only colour (docs/phone-ui-prompt.md §4), every parameter a spring the draw
+ * loop reads: LISTENING opens the coils and the ring follows the mic; THINKING contracts the core and beats about once a
+ * second; SPEAKING's ring follows her voice; DONE settles with one overshoot; an interruption collapses in under 100 ms.
+ * Frame pacing: ~30 fps while idle, the panel's full rate during holds, state bursts and page swipes (adaptive refresh
+ * where the panel has it, else a plain throttle); dead still with the system's animations off.
  */
 class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? = null) : View(ctx, attrs) {
     enum class Power { ONLINE, STANDBY, OFFLINE, ASLEEP, CHARGING, SPINDOWN }
 
     var state = State.IDLE
-        set(v) { if (field != v) { field = v; if (v == State.THINKING && power == Power.ONLINE) burst(14); invalidate() } }
+        set(v) {
+            if (field == v) return
+            val was = field
+            field = v
+            if (v == State.THINKING && power == Power.ONLINE) burst(14)
+            shape(v, was)
+            announce(v)
+            invalidate()
+        }
     var levelSource: () -> Float = { 0f }
     /** The Mac's power state; transitions animate from wherever the rings are. */
     var power = Power.ONLINE
@@ -123,6 +136,49 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     var still = false
         set(v) { field = v; last = 0L; invalidate() }
 
+    // ---- The state's shape (sprung; the draw loop reads the values) ------------------------------------------------------
+    private val coilOpen = Motion.Value(0f, Motion.DefaultSpatial) { invalidate() }   // 0 closed → 1 spread (listening)
+    private val coreK = Motion.Value(1f, Motion.DefaultSpatial) { invalidate() }      // the core's scale (thinking contracts it)
+    private val beat = Motion.Value(0f, Motion.DefaultEffects) { invalidate() }       // the heartbeat while thinking
+    private val ringK = Motion.Value(0f, Motion.DefaultEffects) { invalidate() }      // how far the waveform ring follows the voice
+    private var beatAt = 0L
+    private val hotKeys = HashSet<String>()
+    private var lastHot = 0L
+
+    private fun shape(s: State, was: State) {
+        val online = power == Power.ONLINE
+        when {
+            !online -> { coilOpen.to(0f); coreK.to(1f); ringK.to(0f) }
+            s == State.LISTENING -> { coilOpen.to(1f, Motion.DefaultSpatial); coreK.to(1f, Motion.DefaultSpatial); ringK.to(1f) }
+            s == State.THINKING -> { coilOpen.to(0f, Motion.DefaultSpatial); coreK.to(0.82f, Motion.DefaultSpatial); ringK.to(0.35f); beatAt = 0L }
+            s == State.SPEAKING -> { coilOpen.to(0.25f, Motion.DefaultSpatial); coreK.to(1f, Motion.DefaultSpatial); ringK.to(1f) }
+            else -> { // IDLE after a turn: one spatial settle with a single overshoot
+                coilOpen.to(0f, Motion.DefaultSpatial); ringK.to(0f)
+                if (was == State.SPEAKING || was == State.THINKING) { coreK.set(1.08f); coreK.to(1f, Motion.FastSpatial) } else coreK.to(1f)
+            }
+        }
+    }
+
+    /** Interrupted (a tap or a new hold while she speaks or thinks): everything collapses to rest in under 100 ms. */
+    fun interrupt() {
+        coilOpen.to(0f, Motion.FastEffects); coreK.to(1f, Motion.FastEffects); ringK.to(0f, Motion.FastEffects); beat.to(0f, Motion.FastEffects)
+        energy = min(energy, 0.15f); level = 0f
+        invalidate()
+    }
+
+    /** Something wants the full frame rate for a while (a page swipe, a summon): `on` while it lasts. */
+    fun hot(key: String, on: Boolean) { if (on) hotKeys += key else hotKeys -= key; if (on) invalidate() }
+    private val isHot: Boolean get() = hotKeys.isNotEmpty() || (power == Power.ONLINE && state != State.IDLE) || holdK > 0f || bloom > 0f || shock >= 0f ||
+        power == Power.CHARGING || abs(wantAlive - alive) > 0.01f || System.nanoTime() - lastHot < 600_000_000L ||
+        coilOpen.moving || coreK.moving || beat.moving
+
+    @Suppress("DEPRECATION")
+    private fun announce(s: State) {
+        val label = when (s) { State.LISTENING -> "Listening"; State.THINKING -> "Thinking"; State.SPEAKING -> "Speaking"; State.OFFLINE -> "Offline"; State.IDLE -> "Ready" }
+        stateDescription = label
+        if (isShown && isAttachedToWindow && resources.displayMetrics.widthPixels > 0) announceForAccessibility("ARES $label")
+    }
+
     /** The Mac's jobs: one orb each, amber for ones waiting on you. */
     fun jobs(list: List<JobStore.Job>) {
         val active = list.filter { it.active }
@@ -158,6 +214,7 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     }
 
     private fun burst(n: Int) {
+        lastHot = System.nanoTime()
         val cx = width / 2f; val cy = height / 2f; val r = min(width, height) / 2f * 0.9f
         repeat(n) {
             val a = rnd.nextFloat() * 2f * PI.toFloat()
@@ -178,6 +235,8 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         level += (wantLevel - level) * (dt * 16f).coerceAtMost(1f)
         val wantEnergy = if (!online) 0f else when (state) { State.IDLE -> 0f; State.OFFLINE -> 0f; State.LISTENING -> 0.55f; State.SPEAKING -> 0.8f; State.THINKING -> 1f }
         energy += (wantEnergy - energy) * (dt * 3f).coerceAtMost(1f)
+        // The heartbeat while thinking: a quick swell about once a second, decaying between beats
+        if (online && state == State.THINKING && now - beatAt > 1_000_000_000L) { beatAt = now; beat.set(1f); beat.to(0f, Motion.DefaultEffects) }
         // Power: the rings wind down slowly (standby ~2.5 s, the spin-down ~3.5 s) and come up quickly
         val wa = wantAlive
         val rate = if (wa < alive) (if (power == Power.SPINDOWN) 0.75f else 1.3f) else 2.4f
@@ -244,9 +303,10 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
 
         // The waveform ring: her voice (or yours) ripples it
         val wr = r * 0.47f
-        if (online && (level > 0.02f || energy > 0.05f)) {
+        val follow = ringK.value
+        if (online && (level > 0.02f || energy > 0.05f || follow > 0.02f)) {
             wave.reset()
-            val amp = wr * (0.02f + level * 0.16f + energy * 0.015f)
+            val amp = wr * (0.02f + level * (0.1f + 0.12f * follow) + energy * 0.015f + follow * 0.015f)
             for (i in 0..120) {
                 val a = i / 120f * 2f * PI.toFloat()
                 val wob = sin(a * 7f + t * 9f) * 0.5f + sin(a * 11f - t * 13f) * 0.3f + sin(a * 3f + t * 4f) * 0.2f
@@ -261,7 +321,8 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
 
         // Coils around the core, lit in a chase (while charging: one per 10%, going out one by one on the way down)
         val coils = 10
-        val coilR = r * 0.4f
+        val open = coilOpen.value
+        val coilR = r * (0.4f + 0.09f * open) // listening: the coils spread outward from the core
         for (i in 0 until coils) {
             val deg = i * 360f / coils
             val a = Math.toRadians(deg.toDouble())
@@ -270,8 +331,9 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
             val lit = (1f - d / 110f).coerceIn(0f, 1f) * alive
             stroke.strokeWidth = r * 0.045f; stroke.color = c
             stroke.alpha = (30 + 20 * on + lit * 200 * (0.4f + energy * 0.6f + level * 0.5f) + (if (power == Power.CHARGING) on * 120 else 0f)).toInt().coerceAtMost(255)
-            val x1 = cx + cos(a).toFloat() * (coilR - r * 0.035f); val y1 = cy + sin(a).toFloat() * (coilR - r * 0.035f)
-            val x2 = cx + cos(a).toFloat() * (coilR + r * 0.035f); val y2 = cy + sin(a).toFloat() * (coilR + r * 0.035f)
+            val half = r * (0.035f + 0.02f * open)
+            val x1 = cx + cos(a).toFloat() * (coilR - half); val y1 = cy + sin(a).toFloat() * (coilR - half)
+            val x2 = cx + cos(a).toFloat() * (coilR + half); val y2 = cy + sin(a).toFloat() * (coilR + half)
             canvas.drawLine(x1, y1, x2, y2, stroke)
         }
 
@@ -283,9 +345,10 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
             else -> 0f
         }
         val held = if (power == Power.CHARGING && chargeK >= 0.995f) -0.03f else 0f // the held breath before the bloom
-        val core = r * (0.24f + breathe + level * 0.13f + energy * 0.03f + flicker + held + bloom * 0.12f) * (if (power == Power.ASLEEP) 0.9f else 1f)
+        val pulse = beat.value
+        val core = r * (0.24f + breathe + level * 0.13f + energy * 0.03f + flicker + held + bloom * 0.12f + pulse * 0.05f) * (if (power == Power.ASLEEP) 0.9f else 1f) * coreK.value
         glow.color = if (bloom > 0f) mix(c, white, bloom) else c
-        glow.alpha = ((70 + energy * 90 + level * 120) * (0.45f + 0.55f * alive) + bloom * 150).toInt().coerceAtMost(255)
+        glow.alpha = ((70 + energy * 90 + level * 120 + pulse * 70) * (0.45f + 0.55f * alive) + bloom * 150).toInt().coerceAtMost(255)
         canvas.drawCircle(cx, cy, core * (1.35f + bloom * 0.8f), glow)
         if (coreShader == null || coreColor != c) {
             coreColor = c
@@ -371,8 +434,20 @@ class ReactorView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
             }
         }
 
-        // A dead-still grey needs no redraws beyond the first; everything else animates
-        if (isShown && !still && !(power == Power.ASLEEP && alive == 0f && sparks.isEmpty() && holdK == 0f && abs(Color.red(hue) - Color.red(target)) < 2)) nextFrame(maxFps)
+        // A dead-still grey needs no redraws beyond the first; with the system's animations off she's still unless something's happening
+        val dead = power == Power.ASLEEP && alive == 0f && sparks.isEmpty() && holdK == 0f && abs(Color.red(hue) - Color.red(target)) < 2
+        val quiet = still || (!Motion.enabled && !isHot)
+        if (isShown && !quiet && !dead) pace()
+    }
+
+    private val arr: Boolean by lazy { android.os.Build.VERSION.SDK_INT >= 35 && runCatching { display?.hasArrSupport() == true }.getOrDefault(false) }
+    /** The next frame: the panel's full rate while hot, ~30 fps idle (adaptive refresh votes where the panel supports them, else a plain throttle). */
+    private fun pace() {
+        val hot = isHot
+        if (arr) {
+            requestedFrameRate = if (hot) REQUESTED_FRAME_RATE_CATEGORY_HIGH else (if (maxFps in 1..59) maxFps.toFloat() else REQUESTED_FRAME_RATE_CATEGORY_NORMAL)
+            postInvalidateOnAnimation()
+        } else nextFrame(if (hot) 0 else maxFps)
     }
 
     override fun onVisibilityChanged(changedView: View, visibility: Int) {

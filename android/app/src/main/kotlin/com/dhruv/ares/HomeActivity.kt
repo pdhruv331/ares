@@ -91,6 +91,8 @@ class HomeActivity : Activity(), Session.Ui {
     // Notifications (docs/launcher-v2-prompt.md §5)
     private lateinit var overlay: HomeOverlay
     private lateinit var summarise: TextView
+    private lateinit var ideasRow: FrameLayout // the "ideas" chips under the reactor (docs/phone-ui-prompt.md §8)
+    private var ideasAt = 0L
     private var callBox: View? = null
     private var replyTo: NotifStore.Item? = null
     private var replyField: android.widget.EditText? = null // the open notification card's reply box
@@ -176,10 +178,12 @@ class HomeActivity : Activity(), Session.Ui {
             schematic.alpha = (1f - 0.65f * k.coerceIn(0f, 1f)) * (if (mode == Mode.NIGHT) 0.35f else 1f)
             dots.text = if (k < 0.5f) "● ○" else "○ ●"
         }
-        pager.onPage = { p -> closeReadout(); if (p == 1) { if (!askedCalendar()) askCalendar(); loadEvents(); renderCards() } }
-        pager.onSwipeUp = { openDrawer() }
+        // The drawer follows the finger up from either pager (the pages or the dock) and lands with its speed
+        pager.onSheetDrag = { dy -> drawer.track(dy) }
+        pager.onSheetRelease = { vy -> drawer.release(vy) }
         pager.canSwipeUp = { _, _ -> pager.page == 0 || !page1.canScrollVertically(1) }
-        findViewById<HomePager>(R.id.bottom).apply { pages = false; onSwipeUp = { openDrawer() } }
+        pager.onMoving = { on -> reactor.hot("pager", on); Perf.state("HomePager", if (on) "Swiping" else null) }
+        findViewById<HomePager>(R.id.bottom).apply { pages = false; onSheetDrag = { dy -> drawer.track(dy) }; onSheetRelease = { vy -> drawer.release(vy) } }
         findViewById<View>(R.id.handle).setOnClickListener { openDrawer() }
         page0.setOnLongClickListener { homeMenu(hint); true }
         page0.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> placeReactor() }
@@ -190,6 +194,10 @@ class HomeActivity : Activity(), Session.Ui {
         overlay = findViewById(R.id.overlay)
         overlay.onTap = { openNote(it) }
         overlay.onDismiss = { NotifStore.dismiss(it); showCaption("Dismissed · ${it.app}", 1800) }
+        // The amber orb (a job waiting for the owner): tap = its approval in the receipt; into the core = not now
+        overlay.onNeeds = { j -> startActivity(ReceiptActivity.intent(this, j.id)) }
+        overlay.onNeedsDismiss = { j -> Approvals.notNow(this, j.id); showCaption("Not now · ${j.title}", 1800) }
+        ideasRow = FrameLayout(this).apply { layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.TOP); setPadding((24 * dp).toInt(), 0, (24 * dp).toInt(), 0); visibility = View.GONE; page0.addView(this) }
         summarise = TextView(this).apply {
             text = "SUMMARISE"; textSize = 9f; letterSpacing = 0.3f; gravity = Gravity.CENTER; visibility = View.GONE
             setPadding((12 * dp).toInt(), (6 * dp).toInt(), (12 * dp).toInt(), (6 * dp).toInt())
@@ -216,7 +224,9 @@ class HomeActivity : Activity(), Session.Ui {
             toDock = { app -> addToDock(app) })
 
         holdToTalk()
-        onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { back() }
+        drawer.onOpenChanged = { syncBack() }
+        pager.onPage = { p -> closeReadout(); syncBack(); if (p == 1) { if (!askedCalendar()) askCalendar(); loadEvents(); renderCards() } }
+        Perf.track(this)
         Apps.listen(appsChanged)
         Apps.load(this)
         Scheme.listen(schemeChanged)
@@ -232,11 +242,14 @@ class HomeActivity : Activity(), Session.Ui {
         super.onStop()
     }
 
+    private var pausedAt = 0L
     override fun onResume() {
         super.onResume()
         resumed = true
         front = java.lang.ref.WeakReference(this)
+        if (pausedAt != 0L && System.currentTimeMillis() - pausedAt > 400) settleHome() // back from another app: cover the system's close animation
         Bubble.home(true)
+        Sounds.front = true; Sounds.warm(this)
         getSystemService(android.media.AudioManager::class.java).registerAudioDeviceCallback(audioDevices, null)
         checkBuds(false)
         if (Ares.paired(this)) AresService.start(this)
@@ -255,11 +268,14 @@ class HomeActivity : Activity(), Session.Ui {
         applyScheme()
         loadEvents()
         pollStatus()
+        loadIdeas()
         reactor.invalidate(); schematic.invalidate()
     }
 
     override fun onPause() {
         resumed = false
+        pausedAt = System.currentTimeMillis()
+        Sounds.front = false
         Bubble.home(false)
         getSystemService(android.media.AudioManager::class.java).unregisterAudioDeviceCallback(audioDevices)
         session.setHandsFree(false, "left")
@@ -298,6 +314,48 @@ class HomeActivity : Activity(), Session.Ui {
             drawer.isOpen -> drawer.close()
             pager.page != 0 -> pager.go(0)
         }
+        syncBack()
+    }
+
+    /**
+     * Predictive back (docs/phone-ui-prompt.md §2): while there's something to go back from (a card, the drawer, page 1) the
+     * gesture scrubs it, then commits or springs it back. With nothing open no callback is registered, so the system's own
+     * back-to-home stays as it is.
+     */
+    private val backScrub = object : android.window.OnBackAnimationCallback {
+        override fun onBackStarted(e: android.window.BackEvent) {}
+        override fun onBackProgressed(e: android.window.BackEvent) {
+            val k = e.progress
+            when {
+                readCard != null -> readCard?.let { c -> c.scaleX = 1f - 0.12f * k; c.scaleY = c.scaleX; c.alpha = 1f - 0.5f * k }
+                drawer.isOpen -> drawer.peek(k)
+                pager.page != 0 -> pager.peek(k)
+            }
+        }
+        override fun onBackInvoked() = back()
+        override fun onBackCancelled() {
+            readCard?.let { c -> Motion.scale(c, 1f, Motion.TapSpatial); Motion.to(c, Motion.ALPHA, 1f, Motion.DefaultEffects) }
+            if (drawer.isOpen) drawer.settleBack()
+            if (pager.page != 0) pager.go(pager.page)
+        }
+    }
+    private var backHooked = false
+    private fun syncBack() {
+        val want = readCard != null || drawer.isOpen || pager.page != 0
+        if (want == backHooked) return
+        backHooked = want
+        if (want) onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, backScrub)
+        else onBackInvokedDispatcher.unregisterOnBackInvokedCallback(backScrub)
+    }
+
+    /** Coming home from an app: the content settles from a little small and faded to full (DefaultSpatial), over the system's generic close. */
+    private fun settleHome() {
+        if (!Motion.enabled) return
+        val content = findViewById<View>(R.id.content)
+        content.pivotX = content.width / 2f; content.pivotY = content.height * 0.45f
+        content.scaleX = 0.94f; content.scaleY = 0.94f; content.alpha = 0.6f
+        Motion.scale(content, 1f, Motion.DefaultSpatial)
+        Motion.to(content, Motion.ALPHA, 1f, Motion.DefaultEffects)
     }
 
     // ---- Page 0: the reactor ----------------------------------------------------------------------------------------
@@ -335,6 +393,7 @@ class HomeActivity : Activity(), Session.Ui {
             val pcx = reactor.left + reactor.width / 2f; val pcy = reactor.top + reactor.height / 2f
             overlay.place(pcx, pcy, r)
             summarise.translationY = pcy + r * 1.2f
+            ideasRow.translationY = pcy + r * 1.42f
         }
     }
 
@@ -348,8 +407,9 @@ class HomeActivity : Activity(), Session.Ui {
             if (!needMic()) return@Runnable
             talking = true; holding = true
             reactor.parent.requestDisallowInterceptTouchEvent(true) // keep the finger: no page swipe while talking
-            Haptics.click(this)
-            if (session.state == State.SPEAKING) session.hush()
+            // The haptic, the sound and the coils opening land in the same frame
+            if (session.state == State.SPEAKING || session.state == State.THINKING) { reactor.interrupt(); session.hush() }
+            Haptics.listen(this); Sounds.listenOn(this)
             if (!session.listening) session.startListening()
         }
         reactor.setOnTouchListener { v, e ->
@@ -363,7 +423,7 @@ class HomeActivity : Activity(), Session.Ui {
                 MotionEvent.ACTION_MOVE -> if (!talking && (abs(e.x - x0) > slop || abs(e.y - y0) > slop)) v.removeCallbacks(start)
                 MotionEvent.ACTION_UP -> {
                     v.removeCallbacks(start)
-                    if (talking) { talking = false; holding = false; if (session.listening) session.stopListening() }
+                    if (talking) { talking = false; holding = false; if (session.listening) { Haptics.commit(this); Sounds.listenOff(this); session.stopListening() } }
                     else if (System.currentTimeMillis() - downAt < 320) tapReactor(e.x, e.y)
                 }
                 MotionEvent.ACTION_CANCEL -> { v.removeCallbacks(start); if (talking) { talking = false; holding = false; session.cancelListening() } }
@@ -375,8 +435,9 @@ class HomeActivity : Activity(), Session.Ui {
     private fun tapReactor(x: Float, y: Float) {
         reactor.orbAt(x, y)?.let { startActivity(WorkActivity.intent(this, it)); return }
         when {
-            session.state == State.SPEAKING -> session.hush()
-            session.listening -> session.stopListening()
+            // A tap while she speaks: the collapse and the tick are felt at once, while the stop travels to the Mac
+            session.state == State.SPEAKING || session.state == State.THINKING -> { reactor.interrupt(); Haptics.tick(this); session.hush() }
+            session.listening -> { Haptics.commit(this); Sounds.listenOff(this); session.stopListening() }
             else -> {
                 val opts = android.app.ActivityOptions.makeScaleUpAnimation(reactor, 0, 0, reactor.width, reactor.height).toBundle()
                 startActivity(Intent(this, MainActivity::class.java), opts)
@@ -408,8 +469,32 @@ class HomeActivity : Activity(), Session.Ui {
 
     private fun showJobs() {
         reactor.jobs(JobStore.list())
+        overlay.needs = JobStore.list().firstOrNull { it.status == "approval" }
         showReadouts()
         if (pager.page == 1) renderCards()
+    }
+
+    /** Two or three "ideas" chips under the reactor, from the Mac (at most every 10 minutes); a tap sends one. */
+    private fun loadIdeas(force: Boolean = false) {
+        if (!Ares.paired(this) || PowerStore.mode != PowerStore.Mode.ONLINE) { ideasRow.visibility = View.GONE; return }
+        if (!force && System.currentTimeMillis() - ideasAt < 10 * 60_000) return
+        ideasAt = System.currentTimeMillis()
+        Ideas.fetch(this) { ideas ->
+            ideasRow.removeAllViews()
+            if (ideas.length() == 0 || mode == Mode.NIGHT) { ideasRow.visibility = View.GONE; return@fetch }
+            ideasRow.addView(Ideas.row(this, ideas) { q -> ask(q) })
+            if (ideasRow.visibility != View.VISIBLE) { ideasRow.visibility = View.VISIBLE; ideasRow.alpha = 0f; Motion.to(ideasRow, Motion.ALPHA, 1f, Motion.DefaultEffects) }
+        }
+    }
+
+    override fun showJob(id: String?) { if (id != null) startActivity(ReceiptActivity.intent(this, id)) else startActivity(WorkActivity.intent(this)) }
+
+    /** A result card from the Mac (docs/phone-ui-prompt.md §6): over the bottom of the reactor page, like a readout's card. */
+    override fun card(spec: JSONObject) {
+        val clean = Cards.parse(spec) ?: return
+        val v = Cards.view(Cards.Host(this, ask = { q -> closeReadout(); ask(q) }), clean) as LinearLayout
+        v.layoutParams = FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM)
+        showCard(v, 2)
     }
 
     /** The bottom two callouts: NEXT (the next event) and SERVER (the Mac's state and jobs); each hides with nothing to say. */
@@ -464,10 +549,12 @@ class HomeActivity : Activity(), Session.Ui {
         schematic.dimBottom = true
         summarise.visibility = View.GONE
         c.alpha = 0f
+        syncBack()
         c.post {
             c.pivotX = when (from) { 0 -> 0f; 1 -> c.width.toFloat(); else -> c.width / 2f }; c.pivotY = if (from == 2) 0f else c.height.toFloat()
             c.scaleX = 0.15f; c.scaleY = 0.15f
-            c.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(260).setInterpolator(android.view.animation.DecelerateInterpolator(1.6f)).start()
+            Motion.scale(c, 1f, Motion.TapSpatial) { Haptics.settle(this) }
+            Motion.to(c, Motion.ALPHA, 1f, Motion.DefaultEffects)
         }
     }
 
@@ -479,8 +566,11 @@ class HomeActivity : Activity(), Session.Ui {
         replyField = null
         schematic.dimBottom = false
         showNotes(null)
-        c.animate().alpha(0f).scaleX(0.15f).scaleY(0.15f).setDuration(200).withEndAction { page0.removeView(c) }.start()
+        Motion.to(c, Motion.ALPHA, 0f, Motion.FastEffects)
+        Motion.scale(c, 0.15f, Motion.TapSpatial) { page0.removeView(c) }
+        if (!Motion.enabled) page0.removeView(c)
         s?.let(page0::removeView)
+        syncBack()
     }
 
     // ---- Notifications (docs/launcher-v2-prompt.md §5) -------------------------------------------------------------------
@@ -552,7 +642,7 @@ class HomeActivity : Activity(), Session.Ui {
             val bottom = loc[1] - c.translationY + c.height
             val room = root.height - imeBottom - 10 * dp
             val lift = if (imeBottom > 0) min(0f, room - bottom) else 0f
-            c.animate().translationY(lift).setDuration(160).start()
+            Motion.to(c, Motion.Y, lift, Motion.TapSpatial)
         }
     }
 
@@ -642,8 +732,8 @@ class HomeActivity : Activity(), Session.Ui {
         if (PowerStore.mode != PowerStore.Mode.ONLINE) return false // (the panel explains what's wrong)
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return false
         pager.go(0); closeReadout(); if (drawer.isOpen) drawer.close()
-        Haptics.click(this)
-        if (session.state == State.SPEAKING) session.hush()
+        if (session.state == State.SPEAKING || session.state == State.THINKING) { reactor.interrupt(); session.hush() }
+        Haptics.listen(this); Sounds.listenOn(this)
         if (!session.listening) session.startListening()
         return true
     }
@@ -852,6 +942,7 @@ class HomeActivity : Activity(), Session.Ui {
         m.menu.add(1, 10, 2, "Calls on the home screen…" + if (callsAllowed()) "" else " (off)")
         m.menu.add(1, 4, 2, "Original icons").apply { isCheckable = true; isChecked = Icons.original(this@HomeActivity) }
         m.menu.add(1, 5, 3, "Readouts on the reactor").apply { isCheckable = true; isChecked = p.getBoolean("homeCallouts", true) }
+        m.menu.add(1, 11, 3, "Sounds").apply { isCheckable = true; isChecked = Sounds.enabled(this@HomeActivity) }
         m.menu.add(1, 6, 4, "Home screen app…")
         m.setOnMenuItemClickListener {
             when (it.itemId) {
@@ -864,6 +955,7 @@ class HomeActivity : Activity(), Session.Ui {
                 10 -> callsMenu()
                 4 -> { p.edit().putBoolean("homeOriginalIcons", !Icons.original(this)).apply(); Icons.clear(); showDock(); drawer.refresh() }
                 5 -> { p.edit().putBoolean("homeCallouts", !p.getBoolean("homeCallouts", true)).apply(); showReadouts() }
+                11 -> p.edit().putBoolean("sounds", !Sounds.enabled(this)).apply()
                 6 -> AlertDialog.Builder(this).setTitle("Home screen app")
                     .setMessage("Choose ARES to keep this home screen, or One UI Home to go back to Samsung's. You can change it any time here or in Settings → Apps → Default apps → Home app.")
                     .setPositiveButton("Open") { _, _ -> chooseHome(this) }.setNegativeButton("Cancel", null).show()
@@ -1036,15 +1128,15 @@ class HomeActivity : Activity(), Session.Ui {
         val c = card("WORK", "${JobStore.working} RUNNING", add = false)
         for (j in active.take(5)) {
             if (j.status == "approval") {
-                c.addView(row(j.approvalWhat?.ifBlank { null } ?: j.title, null, getColor(R.color.amber)) { startActivity(WorkActivity.intent(this, j.id)) })
+                c.addView(row(j.approvalWhat?.ifBlank { null } ?: j.title, null, getColor(R.color.amber)) { startActivity(ReceiptActivity.intent(this, j.id)) })
                 c.addView(LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL; gravity = Gravity.END
                     setPadding(0, (2 * dp).toInt(), 0, (6 * dp).toInt())
-                    addView(pill("REVIEW", Scheme.color, null) { startActivity(WorkActivity.intent(this@HomeActivity, j.id)) })
-                    addView(pill("OK", getColor(R.color.amber), R.drawable.bg_amber) { approve(j) })
+                    addView(pill("RECEIPT", Scheme.color, null) { startActivity(ReceiptActivity.intent(this@HomeActivity, j.id)) })
+                    addView(pill("APPROVE", getColor(R.color.amber), R.drawable.bg_amber) { Approvals.approve(this@HomeActivity, j.id) })
                 })
-            } else c.addView(row(j.title, if (j.status == "queued") "queued" else if (j.steps > 0) "${j.steps} steps" else "working", getColor(R.color.text)) {
-                startActivity(WorkActivity.intent(this, j.id))
+            } else c.addView(row(j.title, if (j.status == "queued") "queued" else j.phaseLine().lowercase(), getColor(R.color.text)) {
+                startActivity(ReceiptActivity.intent(this, j.id))
             })
         }
         c.addView(LinearLayout(this).apply {

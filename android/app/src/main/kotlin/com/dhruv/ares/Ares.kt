@@ -46,12 +46,13 @@ object Ares {
     fun deviceName(c: Context): String =
         (Settings.Global.getString(c.contentResolver, Settings.Global.DEVICE_NAME) ?: Build.MODEL) + " (app)"
 
-    /** Open something ARES asked the phone to open: web links, calls, texts, email. */
-    fun open(c: Context, url: String): Boolean {
+    /** Open something ARES asked the phone to open: web links, calls, texts, email. `from`: the card it grows out of. */
+    fun open(c: Context, url: String, from: android.view.View? = null): Boolean {
         val uri = Uri.parse(url)
         if (uri.scheme !in setOf("https", "http", "tel", "sms", "smsto", "mailto")) return false
         return try {
-            c.startActivity(Intent(if (uri.scheme == "tel") Intent.ACTION_DIAL else Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            val opts = from?.let { android.app.ActivityOptions.makeClipRevealAnimation(it, 0, 0, it.width, it.height).toBundle() }
+            c.startActivity(Intent(if (uri.scheme == "tel") Intent.ACTION_DIAL else Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), opts)
             true
         } catch (e: Exception) { false }
     }
@@ -120,6 +121,8 @@ class AresClient(private val ctx: Context) {
         val text: (String) -> Unit = {},
         val audio: (pcm: ByteArray, clip: Int) -> Unit = { _, _ -> },
         val action: (url: String, label: String) -> Unit = { _, _ -> },
+        val card: (JSONObject) -> Unit = {},
+        val job: (String?) -> Unit = {},
         val done: (String) -> Unit = {},
     )
 
@@ -146,6 +149,8 @@ class AresClient(private val ctx: Context) {
                     "text" -> { reply += m.optString("delta"); on.text(reply) }
                     "audio" -> on.audio(android.util.Base64.decode(m.optString("pcm"), android.util.Base64.DEFAULT), m.optInt("clip", -1))
                     "action" -> on.action(m.optString("url"), m.optString("label"))
+                    "card" -> m.optJSONObject("card")?.let(on.card)
+                    "job" -> on.job(m.optString("id").takeIf { it.isNotBlank() && !m.isNull("id") })
                     "done" -> { reply = m.optString("text", reply); on.done(reply) }
                 }
             }
@@ -192,6 +197,11 @@ class AresClient(private val ctx: Context) {
             return runCatching { JSONObject(stream.bufferedReader().readText()) }.getOrElse { JSONObject().put("ok", false).put("error", "HTTP ${c.responseCode}") }
         } finally { c.disconnect() }
     }
+
+    /** A job's receipt (docs/phone-ui-prompt.md §7): its steps, files, audit entries and checks. */
+    fun receipt(id: String): JSONObject = open("/api/jobs/" + Uri.encode(id) + "/receipt").check().json()
+    /** Two or three "ideas" chips for right now (§8), from the Mac. */
+    fun ideas(job: String? = null): JSONArray = open("/api/ideas" + (job?.let { "?job=" + Uri.encode(it) } ?: "")).check().json().optJSONArray("ideas") ?: JSONArray()
 
     /** The kill switch: pause every job, hold goals and routines (the Work view's STOP ALL). */
     fun stopAll(): JSONObject = postJson("/api/autonomy/stop", JSONObject())
