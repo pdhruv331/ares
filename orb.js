@@ -5,7 +5,8 @@
 //                click again (⌥Space, Esc, "that's all") and it closes back into the orb, the app that was in front gets
 //                focus back. While she speaks a click stops her instead ("Stopped.").
 //   hold         push-to-talk: she listens without the wake word (Voice ID still checks the voice); release sends. A long
-//                or screen-needing answer opens the portal; otherwise she just speaks, with the caption above the orb.
+//                or screen-needing answer opens the portal; otherwise she just speaks (no caption on the orb: the line in
+//                COMMS is the record; a caption above the orb was tried and removed 2026-10-12, it could stick after a reply).
 //   right-click  the quick menu (Open ARES, Hold to talk, Standby, Stop everything, Open Work, Mute for 1 hour, What's on
 //                my screen?), each confirmed with a small card.
 //   drop         files, text or a URL: action chips (summarise, send to phone, start a project, ask about it; explain, save
@@ -24,7 +25,7 @@ const os = require('os');
 const { BrowserWindow, screen, ipcMain } = require('electron');
 const { spawn, execFile } = require('child_process');
 
-const W = 440, H = 360;        // the window: the orb in its corner plus room for the caption, menu, cards and chips
+const W = 440, H = 360;        // the window: the orb in its corner plus room for the menu, cards and chips
 const MARGIN = 24, R = 16;     // the orb's centre is MARGIN + R from both edges of the corner
 const NEAR = 220;              // px from the orb where the pointer is checked often
 const DRAG_REACH = 170;        // px: a drag this close makes the window take the drop (and the orb swells)
@@ -262,9 +263,8 @@ class Orb {
   }
 
   // ---- Live feeds -------------------------------------------------------------------------------------------------
-  /** The window's scene (her state, voice level, attention) and her captions (renderer/comms.js's word sync). */
+  /** The window's scene (her state, voice level, attention). */
   scene(msg) {
-    if (msg.type === 'caption') { if (this.on) this.send({ type: 'caption', ...msg }); return; }
     if (msg.type === 'state') this.speaking = msg.state === 'speaking'; // (the orb's turn ends with reply-done → turnDone, not with her state)
     if (msg.type === 'level' && !this.on) return;
     if (['state', 'level', 'attention'].includes(msg.type)) this.send({ type: 'scene', msg: msg.type === 'level' ? { type: 'level', v: msg.v } : msg });
@@ -487,7 +487,7 @@ class Orb {
       case 'screen': return this.ask("What's on my screen right now? Look at the window in front and tell me in two or three sentences.");
     }
   }
-  /** A question for the brain through the window (its usual path: spoken answer, caption, COMMS). */
+  /** A question for the brain through the window (its usual path: spoken answer, COMMS). */
   ask(text) {
     this.askedAt = Date.now();
     this.hooks.ask(text);

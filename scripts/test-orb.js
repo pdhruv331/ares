@@ -41,7 +41,10 @@ app.whenReady().then(async () => {
   const memory = { facts: [], add(f) { this.facts.push(f); return f; } };
   const tasks = { added: [], async add(t) { this.added.push(t); } };
   const usage = { pct: 10, snapshot() { return { windows: { five_hour: { pct: this.pct, resetsAt: Date.now() + 3600e3 } } }; } };
-  const sessions = { list() { return [{ id: 's1', title: 'Fix the tests', status: 'permission', detail: 'wants to run npm test' }]; } };
+  const sessions = { // the hook store + live registry, as orb.js reads them (no transcript scan)
+    hooks: { s1: { event: 'Notification', type: 'permission_prompt', at: Date.now(), text: 'wants to run npm test' } },
+    live: () => new Map([['s1', { pid: 1, cwd: '/tmp/fix-the-tests' }]]), desktopMeta: () => new Map([['s1', { title: 'Fix the tests' }]]),
+  };
   const hooks = { calls: [], summon() { this.calls.push('summon'); }, dismiss() { this.calls.push('dismiss'); }, sendWindow(ch, m) { this.calls.push(`${ch}:${JSON.stringify(m)}`); },
     openView(v) { this.calls.push(`open:${v}`); }, stopSpeaking() { this.calls.push('stop'); }, ask(t) { this.calls.push(`ask:${t.slice(0, 40)}`); }, silentNow: async () => false, liveCall: () => null, ownIds: ['com.github.Electron'] };
   const orb = new Orb({ appDir: root, helper: path.join(root, 'native/build/ares-theme'), log: (...p) => log.push(p), readSettings: () => settings, writeSettings: (p) => Object.assign(settings, p),
@@ -132,16 +135,6 @@ app.whenReady().then(async () => {
   await orb.act({ type: 'click' });
   check('click while speaking stops her, "Stopped." flashes', hooks.calls.includes('stop') && last('flash')?.text === 'Stopped.' && !hooks.calls.includes('summon'));
   orb.scene({ type: 'state', state: 'idle' });
-
-  // ---- captions ----------------------------------------------------------------------------------------------
-  sent.length = 0;
-  orb.scene({ type: 'caption', segs: [['Good', 'evening,', 'sir.']], starts: [[0, 0.3, 0.7]], total: 3, n: 0, clock: { t: 0, start: 0, end: 2 } });
-  orb.scene({ type: 'caption', n: 3, done: true });
-  check('captions reach the page while the orb shows', sent.filter((m) => m.type === 'caption').length === 2 && sent[0].segs?.[0].length === 3);
-  orb.setContext({ brain: true }); sent.length = 0;
-  orb.scene({ type: 'caption', segs: [['x']], starts: [[0]], total: 1, n: 0 });
-  check('…and not while it\'s hidden', !sent.some((m) => m.type === 'caption'));
-  orb.setContext({ brain: false });
 
   // ---- the quick menu --------------------------------------------------------------------------------------------
   await orb.act({ type: 'menu', act: 'stopall' });

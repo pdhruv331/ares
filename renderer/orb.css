@@ -1,4 +1,4 @@
-/* The corner orb (orb.js): a ≈30 pt mini reactor in a corner of the screen, its caption, quick menu, cards and drop chips.
+/* The corner orb (orb.js): a ≈30 pt mini reactor in a corner of the screen, its quick menu, cards and drop chips.
    Everything is positioned off the orb's centre (--ox, --oy, set by orb.js from the corner). */
 :root { --c: 62, 230, 255; --violet: 167, 139, 250; --amber: 255, 181, 71; --green: 74, 222, 128; --red: 248, 113, 113;
   --mono: "SF Mono", ui-monospace, Menlo, monospace; --ox: 0px; --oy: 0px; }
@@ -25,29 +25,12 @@ html.c-tr .hint, html.c-tl .hint { top: calc(var(--oy) + 28px); }
 html.c-bl .hint, html.c-tl .hint { left: calc(var(--ox) - 6px); transform: none; }
 html.c-br .hint, html.c-tr .hint { left: auto; right: calc(100% - var(--ox) - 6px); transform: none; }
 
-/* Her current line while the desktop is covered: one line, words lit in time with her voice (renderer/comms.js's sync) */
-.caption { position: absolute; max-width: 380px; padding: 6px 10px 6px 11px; border-radius: 3px; white-space: nowrap; pointer-events: none;
-  background: rgba(2, 8, 14, 0.8); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-  font-size: 12px; line-height: 16px; letter-spacing: 0.03em; color: rgba(207, 239, 255, 0.45);
-  opacity: 0; transform: translateY(4px); transition: opacity 0.22s ease, transform 0.22s ease; }
-.caption.on { opacity: 1; transform: none; }
-.caption span.lit { color: var(--cyan, rgb(var(--c))); text-shadow: 0 0 8px rgba(var(--c), 0.35); }
-.caption span.now { color: #effcff; text-shadow: 0 0 10px rgba(var(--c), 0.8); }
-.caption::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 1px;
-  background: linear-gradient(90deg, rgba(var(--c), 0.6), transparent); }
-html.c-br .caption, html.c-tr .caption { right: calc(100% - var(--ox) - 18px); }
-html.c-bl .caption, html.c-tl .caption { left: calc(var(--ox) - 18px); }
-html.c-br .caption, html.c-bl .caption { bottom: calc(100% - var(--oy) + 24px); }
-html.c-tr .caption, html.c-tl .caption { top: calc(var(--oy) + 24px); }
-html.c-br .caption::after, html.c-tr .caption::after { background: linear-gradient(90deg, transparent, rgba(var(--c), 0.6)); }
-
 /* A card above the orb: a confirmation ("ALL WORK PAUSED"), a result (title + two lines + OPEN ›), a request (APPROVE / REVIEW) */
 .card { --k: var(--c); position: absolute; width: 272px; cursor: default; transform-origin: 100% 100%; }
 html.c-br .card, html.c-tr .card { right: calc(100% - var(--ox) - 18px); }
 html.c-bl .card, html.c-tl .card { left: calc(var(--ox) - 18px); transform-origin: 0 100%; }
 html.c-br .card, html.c-bl .card { bottom: calc(100% - var(--oy) + 30px); }
 html.c-tr .card, html.c-tl .card { top: calc(var(--oy) + 30px); transform-origin: 100% 0; }
-.card.with-caption { bottom: calc(100% - var(--oy) + 62px); }
 .cd-back { position: absolute; inset: 0; border-radius: 3px; background: radial-gradient(ellipse at 30% 0%, rgba(var(--k), 0.12), transparent 70%), rgba(2, 8, 14, 0.84);
   backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
 .br { position: absolute; width: 9px; height: 9px; border: 0 solid rgba(var(--k, var(--c)), 0.9); filter: drop-shadow(0 0 3px rgba(var(--k, var(--c)), 0.8)); pointer-events: none; }

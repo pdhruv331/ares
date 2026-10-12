@@ -288,9 +288,8 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   `hideWindow()` and ⌥Space go through the orb while its portal is open; a sink from elsewhere (Esc, a click on another app) resets it.
 - Hold = push-to-talk: `listener.listen(30000, false)` (Voice ID still applies), release sends the listener `finish` (new command in
   AresListener.swift). The orb's turn lasts until `reply-done`; a tool in SCREEN_TOOLS (main.js) or an answer > 320 chars opens the
-  portal. Captions: renderer/comms.js `mirror()` sends each sentence's schedule (segments, word starts, the clock) on the `scene`
-  channel as `{type:'caption'}`; main routes it to the orb only; the orb page keeps time itself (a covered window gets no frames; a
-  250 ms timer in comms.js keeps the clock snapshots coming). "Mute for 1 hour" = `orb.speechMuted`, checked in `tts-stream`.
+  portal. No caption on the orb (removed 2026-10-12: the mirrored line could stick above the orb after a reply; COMMS keeps the
+  record). "Mute for 1 hour" = `orb.speechMuted`, checked in `tts-stream`.
 - Drops run through the existing pieces: jobs.start with `inputs` (summarise), `control.handle('phone/send')` / `control.pushFile`,
   `orb-ask` → the window's `handle()` (start project: the brain proposes the brief, tier 3 stays with the bridge gate; explain; what's
   on my screen), `memory.add`, `tasks.add`. Files: `control.classify` → blocked refused, outside asks first (ALLOW ONCE card).

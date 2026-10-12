@@ -773,7 +773,7 @@ ipcMain.handle('test-hands', (_e, clip, opts) => { if (!app.isPackaged) vision?.
 const talk = { lastReplyAt: 0, askedQuestion: false, fromWake: false };
 ipcMain.on('reply-done', (_e, asked) => { talk.lastReplyAt = Date.now(); talk.askedQuestion = Boolean(asked); orb?.turnDone(); if (power?.mode === 'spindown') power.lineSaid(); });
 ipcMain.on('listener-awake', (_e, on) => setAwake(on));
-ipcMain.on('scene', (_e, msg) => { if (msg?.type === 'caption') return orb?.scene(msg); wallpaper?.scene(msg); theme?.scene(msg); orb?.scene(msg); });
+ipcMain.on('scene', (_e, msg) => { wallpaper?.scene(msg); theme?.scene(msg); orb?.scene(msg); });
 ipcMain.on('theme-status', (_e, s) => theme?.status(s));
 ipcMain.on('wp-ready', (e) => wallpaper?.onReady(e.sender));
 

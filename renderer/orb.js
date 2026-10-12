@@ -1,13 +1,13 @@
 // The corner orb's page (orb.js in the main process has the window, the pointer, the rules and the actions).
 // Everything drawn is on one canvas: the mini reactor (Reactor.Engine, `small`), the violet progress ring, the comet
 // while she thinks, the waveform ring while she listens, the amber / green pulse rings. Idle it draws at 3 fps (the
-// reactor barely turning); it goes to 30 fps only while something moves. The DOM holds the text: hint, caption, card,
+// reactor barely turning); it goes to 30 fps only while something moves. The DOM holds the text: hint, card,
 // menu and drop chips. The orb's centre is --ox/--oy (from the corner), and every hit area is reported to the main
 // process, which makes the window interactive only there.
 (() => {
   const $ = (id) => document.getElementById(id);
   const field = $('field'), stage = $('stage'), ctx = stage.getContext('2d');
-  const hint = $('hint'), caption = $('caption'), card = $('card'), menu = $('menu'), chips = $('chips'), badge = $('badge');
+  const hint = $('hint'), card = $('card'), menu = $('menu'), chips = $('chips'), badge = $('badge');
   const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const COL = { cyan: [62, 230, 255], violet: [167, 139, 250], amber: [255, 181, 71], green: [74, 222, 128], red: [248, 113, 113], blue: [96, 150, 255], grey: [127, 140, 153] };
   const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${Math.max(0, Math.min(1, a))})`;
@@ -209,7 +209,6 @@
     $('cardDetail').textContent = c.detail || '';
     $('cardActs').innerHTML = (c.actions || []).map((a) => `<button data-act="${esc(a.act)}" class="${a.red ? 'red' : ''}">${esc(a.label).toUpperCase()}</button>`).join('');
     card.hidden = false;
-    card.classList.toggle('with-caption', caption.classList.contains('on'));
     const content = card.querySelector('.cd-content');
     for (const b of card.querySelectorAll('.br')) b.animate([{ opacity: 0 }, { opacity: 1, offset: 0.35 }, { opacity: 0.25, offset: 0.6 }, { opacity: 1 }], { duration: 320, easing: 'steps(6, end)' });
     content.animate([{ clipPath: 'inset(0 0 100% 0)' }, { clipPath: 'inset(0 0 0% 0)' }], { duration: 360, delay: 80, easing: 'cubic-bezier(.5,0,.3,1)', fill: 'backwards' });
@@ -287,57 +286,12 @@
     setHint('');
   });
 
-  // ---- Hint, caption, badge ----
+  // ---- Hint, badge ----
   function setHint(text, flash = false) {
     hint.classList.remove('flash');
     hint.textContent = String(text || '').toUpperCase();
     hint.classList.toggle('on', Boolean(text));
     if (text && flash) { void hint.offsetWidth; hint.classList.add('flash'); flashUntil = performance.now() + 1400; kick(); }
-  }
-  // The caption runs the window's word sync itself (renderer/comms.js mirror): the schedule arrives once per sentence
-  // (segments, each word's start as a fraction of the sentence, the clock's position), and this page keeps time from
-  // there; lit counts from the window snap it whenever that page gets a frame of its own.
-  let captionTimer = null, cap = null, capRaf = 0;
-  function setCaption(m) {
-    clearTimeout(captionTimer);
-    if (m.off || !S.on) { cap = null; caption.classList.remove('on'); card.classList.remove('with-caption'); return; }
-    if (m.segs) cap = { segs: m.segs, starts: m.starts, total: m.total, seg: -1, n: -1, clock: null, done: false };
-    if (!cap) return;
-    if (m.clock) cap.clock = { ...m.clock, at: performance.now() };
-    if (m.done) { cap.done = true; cap.clock = null; }
-    if (m.n != null) paintCaption(m.n, m.n > cap.n || m.done);
-    caption.classList.add('on');
-    card.classList.toggle('with-caption', !card.hidden);
-    if (m.done) captionTimer = setTimeout(() => { cap = null; caption.classList.remove('on'); card.classList.remove('with-caption'); }, m.hold || 2200);
-    else if (!capRaf) capRaf = requestAnimationFrame(captionTick);
-  }
-  function captionTick() {
-    capRaf = 0;
-    if (!cap || cap.done || !S.on) return;
-    capRaf = requestAnimationFrame(captionTick);
-    if (!cap.clock) return;
-    const c = cap.clock, t = c.t + (performance.now() - c.at) / 1000;
-    const k = (t - c.start) / Math.max(0.2, c.end - c.start);
-    let n = 0;
-    for (const seg of cap.starts) for (const st of seg) if (k >= st - 0.01) n++;
-    if (n > cap.n) paintCaption(n);
-  }
-  /** Show the segment holding word n: words before n lit, word n-1 the one being spoken (comms.js paint). */
-  function paintCaption(n, forward = true) {
-    if (!cap) return;
-    n = Math.min(n, cap.total);
-    if (!forward && n < cap.n) return; // a stale count from the window never pulls the line back
-    let seg = 0, before = 0;
-    for (let i = 0; i < cap.segs.length; i++) { const len = cap.segs[i].length; if (n <= before + len || i === cap.segs.length - 1) { seg = i; break; } before += len; }
-    if (n >= cap.total) { seg = cap.segs.length - 1; before = cap.total - cap.segs[seg].length; }
-    if (seg !== cap.seg) {
-      cap.seg = seg;
-      caption.innerHTML = cap.segs[seg].map((w) => `<span>${esc(w)}</span>`).join(' ');
-      caption.animate([{ opacity: 0.2, transform: 'translateY(3px)' }, { opacity: 1, transform: 'none' }], { duration: 180, easing: 'ease-out' });
-    }
-    cap.n = n;
-    const local = n - before;
-    [...caption.children].forEach((s, i) => { s.className = i < local - 1 ? 'lit' : i === local - 1 ? 'now' : ''; });
   }
   function setBadge(n) { badge.hidden = !(n > 0); badge.textContent = n > 9 ? '9+' : String(n); }
 
@@ -370,7 +324,6 @@
         else setHint('');
         kick(); postHits();
         break;
-      case 'caption': setCaption(m); break;
       case 'card': showCard({ ttl: 9000, ...m.card }); break;
       case 'hide-card': hideCard(); break;
       case 'chips': showChips(m); break;
