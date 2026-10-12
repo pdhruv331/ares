@@ -216,7 +216,9 @@ const PanelViews = (() => {
       host.className = 'dp-view tasks';
       const listName = m.lists?.filter((l) => l.on).length === 1 ? m.lists.find((l) => l.on).title : m.source === 'reminders' ? 'REMINDERS' : m.source === 'google' ? 'GOOGLE' : '';
       let html = `<div class="cal-head"><span class="cal-title">TASKS${listName ? ` · ${esc(listName)}` : ''}</span><span class="tk-count">${list.length ? pad2(list.length) : ''}</span></div>`;
-      if (!m.source) {
+      if (!m.source && m.reauth) {
+        html += '<div class="tk-setup"><div class="cal-empty">Google sign-in expired</div><div class="tk-choices"><span class="tk-choice" data-act="setup:google">RECONNECT</span></div></div>';
+      } else if (!m.source) {
         html += '<div class="tk-setup"><div class="cal-empty">no task source yet</div><div class="tk-choices"><span class="tk-choice" data-act="setup:reminders">USE REMINDERS</span><span class="tk-choice" data-act="setup:google">CONNECT GOOGLE TASKS</span></div></div>';
       } else {
         html += '<div class="tk-list">';

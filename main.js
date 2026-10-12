@@ -510,6 +510,7 @@ function wakeContext() {
 
 /** The ARES theme's views, opened from its menu bar, dock and notifications. */
 function openView(view, anchor = null) {
+  if (view === 'tasks-reconnect') { connectGoogleTasks(); return; } // the "Google Tasks needs a quick sign-in" toast
   showWindow(view === 'summon' ? null : view.split(':')[0]);
   if (view === 'summon') return;
   const id = /^job:(.+)$/.exec(view)?.[1];
@@ -2474,6 +2475,16 @@ app.whenReady().then(async () => {
     openExternal: (u) => shell.openExternal(u), notice: (line) => notice(line) });
   Object.assign(control.routes, tasks.routes());
   tasks.on('update', toDash);
+  // Google's testing-mode sign-in lasts 7 days: warn on day 6 and when it lapses, on the phone and the Mac, one click to sign in again
+  tasks.on('reauth', ({ soon }) => {
+    const value = soon ? 'Google Tasks sign-in runs out tomorrow' : 'Google Tasks needs a quick sign-in';
+    const detail = 'Click here on the Mac (or ◉ ▸ Reconnect Google Tasks…). It takes about 10 seconds.';
+    theme?.toast({ kind: 'needs', label: 'TASKS', tag: 'SIGN IN', value, detail, action: { type: 'tasks-reconnect' } });
+    notice(`${value}, sir. Click the notice on the Mac, or ◉ ▸ Reconnect Google Tasks.`);
+    pushToPhones({ title: value, body: 'Reconnect it at the Mac: click the notice there, or ◉ ▸ Reconnect Google Tasks.', tag: 'tasks-reauth' }).catch(() => {});
+    refreshTray();
+  });
+  tasks.on('reauth-done', () => { clearPhoneNotes(['tasks-reauth']).catch(() => {}); refreshTray(); });
   customPanels = new CustomPanels({
     dir: path.join(app.getPath('userData'), 'panels'), readSettings, writeSettings, log, tier: (level, what, ctx) => control.tier(level, what, ctx),
     oneShot: claude.oneShot, usage: claudeUsage, isPublicUrl: require('./egress').isPublicUrl, classify: (p) => control.classify(p),

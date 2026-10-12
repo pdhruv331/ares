@@ -11,6 +11,8 @@ const { parseWhen } = require('./calendar');
 const DAY = 86_400_000;
 const POLL_MS = 2 * 60_000;
 const API = 'https://tasks.googleapis.com/tasks/v1';
+const EXPIRY_MS = 7 * 86_400_000; // Google: refresh tokens of OAuth apps in "Testing" expire after 7 days
+const WARN_BEFORE_MS = 86_400_000; // warn on day 6
 const SCOPE = 'https://www.googleapis.com/auth/tasks';
 const KC = { client: 'google-tasks-client', refresh: 'google-tasks-refresh' };
 const startOfDay = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
@@ -61,7 +63,21 @@ class Tasks extends EventEmitter {
   }
   snapshot() {
     return { tasks: this.tasks, lists: this.lists.map((l) => ({ id: l.id, title: l.title, on: this.listOn(l.id) })), source: this.source, chosen: this.prefs.source || null,
-      at: this.at, error: this.error, setup: this.source ? null : { google: this.hasRefresh, reminders: Boolean(this.calendar?.remindersAuthorized), steps: SETUP_STEPS } };
+      at: this.at, error: this.error, setup: this.source ? null : { google: this.hasRefresh, reminders: Boolean(this.calendar?.remindersAuthorized), steps: SETUP_STEPS },
+      reauth: this.needsReauth, expiresAt: this.expiresAt };
+  }
+  /** Google sign-in lost (the testing-mode 7-day expiry, or revoked): the panel shows RECONNECT instead of the setup choices. */
+  get needsReauth() { const p = this.prefs; return p.source === 'google' && !this.hasRefresh && Boolean(p.signedInAt || p.expiredAt || this.client); }
+  /** When the sign-in is expected to run out: Google expires refresh tokens of apps in "Testing" after 7 days. */
+  get expiresAt() { const p = this.prefs; return p.source === 'google' && this.hasRefresh && p.signedInAt && p.testing !== false ? p.signedInAt + EXPIRY_MS : null; }
+  /** Day 6 of 7: say so once per sign-in ('reauth' {soon}); main pushes it to the phone and the Mac. */
+  checkExpiry(now = Date.now()) {
+    const p = this.prefs, at = this.expiresAt;
+    if (!at || now < at - WARN_BEFORE_MS || p.warnedFor === p.signedInAt) return false;
+    this.writeSettings({ tasks: { ...p, warnedFor: p.signedInAt } });
+    this.log('tasks sign-in expiring', { at: new Date(at).toISOString() });
+    this.emit('reauth', { soon: true, at });
+    return true;
   }
   message() { return { type: 'tasks', tasks: this.snapshot() }; }
   listOn(id) { const on = this.prefs.lists; return !Array.isArray(on) || !on.length || on.includes(id); }
@@ -73,8 +89,10 @@ class Tasks extends EventEmitter {
     this.calendar?.on('permission', () => { if (this.source === 'reminders') this.refresh('permission'); else this.emit('update', this.message()); });
     this.emit('update', this.message());
     if (this.source) this.refresh('start');
+    this.checkExpiry();
+    this.expiryTimer = setInterval(() => this.checkExpiry(), 3_600_000);
   }
-  stop() { clearInterval(this.timer); this.loop?.close(); }
+  stop() { clearInterval(this.timer); clearInterval(this.expiryTimer); this.loop?.close(); }
   setVisible(on) {
     this.visible = on;
     clearInterval(this.timer);
@@ -192,7 +210,8 @@ class Tasks extends EventEmitter {
           await this.keychain.set(KC.refresh, tok.refresh_token);
           this.hasRefresh = true;
           this.access = { token: tok.access_token, exp: Date.now() + (tok.expires_in - 60) * 1000 };
-          this.writeSettings({ tasks: { ...this.prefs, source: 'google' } });
+          this.writeSettings({ tasks: { ...this.prefs, source: 'google', signedInAt: Date.now(), expiredAt: undefined, warnedFor: undefined } });
+          this.emit('reauth-done');
           page('ARES is connected to Google Tasks.');
           this.log('tasks signed in', { ok: true });
           this.emit('update', this.message());
@@ -219,7 +238,12 @@ class Tasks extends EventEmitter {
     const r = await this.fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() });
     const tok = await r.json();
     if (!tok.access_token) {
-      if (tok.error === 'invalid_grant') { await this.keychain.delete(KC.refresh); this.hasRefresh = false; }
+      if (tok.error === 'invalid_grant') {
+        await this.keychain.delete(KC.refresh); this.hasRefresh = false;
+        this.writeSettings({ tasks: { ...this.prefs, expiredAt: Date.now() } });
+        this.log('tasks sign-in expired', {});
+        this.emit('reauth', { expired: true });
+      }
       throw new Error(`Google sign-in expired (${tok.error || r.status}): connect Google Tasks again`);
     }
     this.access = { token: tok.access_token, exp: Date.now() + (tok.expires_in - 60) * 1000 };
