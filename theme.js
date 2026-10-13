@@ -78,6 +78,8 @@ class Theme {
     const t = this.readSettings().theme || {};
     return {
       enabled: Boolean(t.enabled), asked: Boolean(t.asked), stacks: Boolean(t.stacks), notifications: t.notifications !== false,
+      // The two parts that replace macOS chrome can each be switched off: then the Mac's own menu bar / Dock are used as-is
+      menubar: t.menubar !== false, aresDock: t.aresDock !== false,
       dock: { icons: 'glyphs', reveal: 'edge', apps: null, ...(t.dock || {}) },
       folders: t.folders || ['Documents', 'Downloads', 'My AI'].map((f) => path.join(os.homedir(), f)),
       apps: { terminal: true, vscode: true, chrome: true, ...(t.apps || {}) },
@@ -106,15 +108,15 @@ class Theme {
     if (!this.live) return; // switched off meanwhile
     await step('pid', () => fs.writeFileSync(path.join(this.dir, 'ares.pid'), String(process.pid)));
     await step('bar', () => {
-      if (this.bar.installed) { this.bar.start(); this.bar.startBorders(); }
+      if (this.bar.installed) { if (this.opts.menubar) this.bar.start(); this.bar.startBorders(); }
       else this.log('theme: SketchyBar/JankyBorders not installed (brew install felixkratz/formulae/sketchybar felixkratz/formulae/borders)');
     });
-    await step('dock', () => this.dock.start());
+    await step('dock', () => { if (this.opts.aresDock) this.dock.start(); });
     if (!this.live) { this.dock.stop(); return; }
     await step('notifications', () => { if (this.opts.notifications) this.notify.start(); });
-    await step('drop-downs', () => this.drop.start());
+    await step('drop-downs', () => { if (this.opts.menubar) this.drop.start(); }); // the status pill / WORK drop-downs hang off the bar
     await step('icons', () => this.icons.watch());
-    await step('dock settings', () => this.resumeDock());
+    await step('dock settings', () => (this.opts.aresDock ? this.resumeDock() : this.nativeDock()));
     this.onLive?.(true);
   }
   stopLive({ quitting = false } = {}) {
@@ -185,7 +187,7 @@ class Theme {
     });
     await step('pointer', () => this.pointer());
     await step('sound', () => this.sound());
-    await step('dock', async () => {
+    if (o.aresDock) await step('dock', async () => {
       await this.script('dockAutohide', 'true');
       await this.script('dockMagnify', 'false');
       // The ARES dock appears at once at the bottom edge; the Apple Dock after a short dwell (or ⌥⌘D)
@@ -227,13 +229,41 @@ class Theme {
     return lines;
   }
   /** ARES is back: the theme's Dock settings again (only if offline.sh had put the user's back). */
-  async resumeDock() {
-    if (!this.originals.has('pref:com.apple.dock:autohide-delay')) return;
+  async resumeDock(force = false) {
+    if (!force && !this.originals.has('pref:com.apple.dock:autohide-delay')) return;
+    if (force) for (const key of Object.keys(this.dockValues)) await this.originals.keepPref('com.apple.dock', key);
     const cur = await this.originals.readPref('com.apple.dock', 'autohide-delay');
     if (cur.exists && /<real>1\.2/.test(Buffer.from(cur.plist, 'base64').toString())) return;
     for (const [k, v] of Object.entries(this.dockValues)) await run(this.helper, ['pref-set', 'com.apple.dock', k, plist(v)]).catch(() => {});
     await run('/usr/bin/killall', ['Dock']).catch(() => {});
     this.log('theme dock resumed');
+  }
+  /** The ARES dock switched off: the user's own Dock settings back (auto-hide, magnification, delay), from the saved originals. */
+  async nativeDock() {
+    let changed = false;
+    for (const key of Object.keys(this.dockValues)) {
+      const rec = this.originals.get(`pref:com.apple.dock:${key}`);
+      if (!rec) continue;
+      const cur = await this.originals.readPref('com.apple.dock', key).catch(() => null);
+      if (cur && cur.exists === rec.exists && (cur.plist || null) === (rec.plist || null)) continue;
+      if (await this.originals.restorePref(rec)) changed = true;
+    }
+    if (changed) { await run('/usr/bin/killall', ['Dock']).catch(() => {}); this.log('theme: the Mac\'s own Dock settings are back'); }
+  }
+  /** Switch the ARES menu bar or the ARES dock on/off on its own (the rest of the theme stays). */
+  async setPart(part, on) {
+    this.save({ [part]: on });
+    if (!this.live) return;
+    if (part === 'menubar') {
+      if (on) { if (this.bar.installed) this.bar.start(); this.drop.start(); }
+      else { this.bar.stop(); this.drop.stop(); }
+      this.onLive?.(true); // the window shows or hides its own top row to match
+    }
+    if (part === 'aresDock') {
+      if (on) { this.dock.start(); await this.resumeDock(true); }
+      else { this.dock.stop(); await this.nativeDock(); }
+    }
+    this.log('theme part', { part, on });
   }
   /** Earlier versions hid the macOS menu bar; it now stays put underneath the bar (so windows stop below it). */
   async migrate() {
@@ -738,6 +768,9 @@ class Theme {
         if (!item.checked && r?.mismatched) this.restoreNotice(r);
       }) },
       { label: 'ARES Theme Options', submenu: [
+        { label: 'ARES Menu Bar (off: the Mac\'s own)', type: 'checkbox', checked: o.menubar, click: act((item) => this.setPart('menubar', item.checked)) },
+        { label: 'ARES Dock (off: the Mac\'s own)', type: 'checkbox', checked: o.aresDock, click: act((item) => this.setPart('aresDock', item.checked)) },
+        { type: 'separator' },
         { label: 'Dock Icons: ARES Glyphs', type: 'radio', checked: o.dock.icons !== 'real', click: dockSet({ icons: 'glyphs' }) },
         { label: 'Dock Icons: Real App Icons', type: 'radio', checked: o.dock.icons === 'real', click: dockSet({ icons: 'real' }) },
         { type: 'separator' },

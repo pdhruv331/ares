@@ -218,7 +218,7 @@ function writeSettings(patch) {
 function uiPrefs() {
   const s = readSettings();
   return { reduceMotion: Boolean(s.reduceMotion), magnetic: s.ui?.magnetic !== false, panels: s.ui?.[panelsKey()] || {}, maxPins: Number(s.ui?.maxPins) || 3, calendarCollapseSec: Number(s.ui?.calendarCollapseSec) || 60,
-    owner: process.env.ARES_OWNER_NAME || 'Dhruv', themeBar: Boolean(theme?.live), look: look() }; // the ARES bar has the top row's items
+    owner: process.env.ARES_OWNER_NAME || 'Dhruv', themeBar: Boolean(theme?.live && theme.opts.menubar), look: look() }; // the ARES bar has the top row's items
 }
 /** The scene's look (docs/reactor-prompt.md): the reactor (default) or the brain. Instant everywhere, persisted. */
 const look = () => (readSettings().look === 'brain' ? 'brain' : 'reactor');
