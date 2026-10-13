@@ -258,121 +258,143 @@ function refreshTray() {
   tray.setImage(trayGlyph(pm === 'standby' || pm === 'tostandby' || pm === 'fromstandby' ? 'blue' : ['spindown', 'dormant', 'charging'].includes(pm) ? 'gold' : 'cyan', muted || pm === 'dormant' ? 'ring' : awake ? 'dot' : 'both'));
   tray.setTitle('');
   tray.setToolTip(pm === 'dormant' ? 'ARES — powered down (hold the reactor or press ⌥Space to wake)' : pm === 'standby' ? 'ARES — standby' : muted ? `ARES — muted${until}` : awake ? 'ARES — always listening' : 'ARES — listening for "Hey ARES"');
-  const sections = menuSections();
-  tray.setContextMenu(Menu.buildFromTemplate(['listen', 'view', 'voice', 'work', 'phone', 'ares']
-    .flatMap((k, i) => [...(i ? [{ type: 'separator' }] : []), ...sections[k]])));
+  tray.setContextMenu(Menu.buildFromTemplate(trayTemplate()));
   // The ARES theme's bar shows how she's listening while she's idle (as the window's "ear" does)
   theme?.ear(muted ? 'MUTED' : desk?.state.active ? 'DESK MODE' : awake ? 'LISTENING' : 'WAKE WORD');
 }
 
-/** ARES's menus, in sections: the ◉ menu shows them all; the ARES theme's bar shows each one as its own menu. */
-function menuSections() {
+// ---- The ◉ menu, in pieces (2026-10-12: trimmed; the everyday things on top, everything else under Settings & Setup) ------
+const SEP = { type: 'separator' };
+function listenLine() {
   const muted = listener.muted;
-  const until = listener.muteUntil
-    ? ` until ${new Date(listener.muteUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
-    : '';
-  const awake = listener.awake;
-  return {
-    listen: [
-      { label: muted ? `Muted${until}` : desk?.state.active && !manualAwake ? 'Desk mode: no wake word needed' : awake ? 'Always listening (no wake word)' : 'Listening for “Hey ARES”', enabled: false },
-      { label: 'Stay Awake (always listening)', type: 'checkbox', checked: manualAwake, click: (item) => setAwake(item.checked) },
-      muted
-        ? { label: 'Start Listening', click: () => listener.unmute() }
-        : { label: 'Mute', click: () => listener.mute() },
-      { label: 'Mute for 1 Hour', visible: !muted, click: () => listener.mute(60) },
-      // Apple's mic modes (Voice Isolation etc.) are picked per app in its own picker; Control Center may not list the listener
-      { label: 'Microphone Mode (Voice Isolation)…', click: () => listener.send('micmode show') },
-      { type: 'separator' },
-      {
-        label: 'Voice ID (only answer to you)',
-        type: 'checkbox',
-        enabled: voiceId.enrolled,
-        checked: voiceId.enabled,
-        click: (item) => { voiceId.setEnabled(item.checked); refreshTray(); win.webContents.send('voiceid-changed', voiceId.status()); },
-      },
-      { label: voiceId.enrolled ? 'Retrain Voice ID…' : 'Set Up Voice ID…', click: () => { showWindow(); win.webContents.send('voiceid-enroll'); } },
-      { type: 'separator' },
-      ...deskMenu(),
-      { type: 'separator' },
-      ...handsMenu(),
-    ],
-    view: [
-      { label: `Show / Hide  (${HOTKEY.replace('Alt', '⌥')})`, click: toggleWindow },
-      { label: 'Toggle Full Screen  (⌃⌘F)', click: toggleFullScreen },
-      { type: 'separator' },
-      { label: 'Look: Reactor', type: 'radio', checked: look() === 'reactor', click: () => setLook('reactor') },
-      { label: 'Look: Brain', type: 'radio', checked: look() === 'brain', click: () => setLook('brain') },
-      { type: 'separator' },
-      ...wallpaperMenu(),
-      ...(theme ? theme.menu(refreshTray) : []),
-      { type: 'separator' },
-        { label: calendar?.ready ? `Calendar: live from macOS Calendar${calendar.google ? '' : ' (no Google account in it)'}` : calendar?.authorized ? 'Calendar: macOS Calendar has no calendars' : calendar?.permission.events === 'denied' ? 'Calendar: access denied (System Settings ▸ Privacy ▸ Calendars)' : 'Calendar: Google connector (fallback)', enabled: false },
-      { label: 'Connect Calendar (macOS Calendar)…', visible: Boolean(calendar) && !calendar.authorized && calendar.permission.events !== 'denied', click: () => { notice('macOS is asking you to let ARES Calendar see your calendars, sir.'); calendar.authorize(); } },
-      { label: 'Refresh Calendar Now', visible: Boolean(calendar?.ready), click: () => calendar.sync('menu') },
-      { label: tasks?.source === 'google' ? 'Tasks: Google Tasks' : tasks?.source === 'reminders' ? 'Tasks: Apple Reminders' : 'Tasks: not connected', enabled: false },
-      { label: tasks?.hasRefresh ? 'Reconnect Google Tasks…' : 'Connect Google Tasks…', click: () => connectGoogleTasks() },
-      { label: 'Use Apple Reminders for Tasks', type: 'checkbox', checked: readSettings().tasks?.source === 'reminders', click: (item) => { if (item.checked) tasks.useReminders(); else { writeSettings({ tasks: { ...(readSettings().tasks || {}), source: undefined } }); tasks.refresh('menu'); } refreshTray(); } },
-      { label: 'Disconnect Google Tasks', visible: Boolean(tasks?.hasRefresh), click: () => tasks.disconnect().then(refreshTray) },
-      { label: 'Replace Google Tasks Client JSON…', visible: Boolean(tasks), click: () => tasks.forgetClient().then(() => connectGoogleTasks()) },
+  const until = listener.muteUntil ? ` until ${new Date(listener.muteUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : '';
+  return { label: muted ? `Muted${until}` : desk?.state.active && !manualAwake ? 'Desk mode: no wake word needed' : listener.awake ? 'Always listening (no wake word)' : 'Listening for “Hey ARES”', enabled: false };
+}
+function muteItems() {
+  const muted = listener.muted;
+  return [
+    muted ? { label: 'Start Listening', click: () => listener.unmute() } : { label: 'Mute', click: () => listener.mute() },
+    { label: 'Mute for 1 Hour', visible: !muted, click: () => listener.mute(60) },
+  ];
+}
+function voiceIdItems() {
+  return [
+    { label: 'Voice ID (only answer to you)', type: 'checkbox', enabled: voiceId.enrolled, checked: voiceId.enabled,
+      click: (item) => { voiceId.setEnabled(item.checked); refreshTray(); win.webContents.send('voiceid-changed', voiceId.status()); } },
+    { label: voiceId.enrolled ? 'Retrain Voice ID…' : 'Set Up Voice ID…', click: () => { showWindow(); win.webContents.send('voiceid-enroll'); } },
+  ];
+}
+function calendarTasksItems() {
+  return [
+    { label: calendar?.ready ? `Calendar: live from macOS Calendar${calendar.google ? '' : ' (no Google account in it)'}` : calendar?.authorized ? 'Calendar: macOS Calendar has no calendars' : calendar?.permission.events === 'denied' ? 'Calendar: access denied (System Settings ▸ Privacy ▸ Calendars)' : 'Calendar: Google connector (fallback)', enabled: false },
+    { label: 'Connect Calendar (macOS Calendar)…', visible: Boolean(calendar) && !calendar.authorized && calendar.permission.events !== 'denied', click: () => { notice('macOS is asking you to let ARES Calendar see your calendars, sir.'); calendar.authorize(); } },
+    { label: 'Refresh Calendar Now', visible: Boolean(calendar?.ready), click: () => calendar.sync('menu') },
+    SEP,
+    { label: tasks?.source === 'google' ? 'Tasks: Google Tasks' : tasks?.source === 'reminders' ? 'Tasks: Apple Reminders' : 'Tasks: not connected', enabled: false },
+    { label: tasks?.hasRefresh ? 'Reconnect Google Tasks…' : 'Connect Google Tasks…', click: () => connectGoogleTasks() },
+    { label: 'Use Apple Reminders for Tasks', type: 'checkbox', checked: readSettings().tasks?.source === 'reminders', click: (item) => { if (item.checked) tasks.useReminders(); else { writeSettings({ tasks: { ...(readSettings().tasks || {}), source: undefined } }); tasks.refresh('menu'); } refreshTray(); } },
+    { label: 'Disconnect Google Tasks', visible: Boolean(tasks?.hasRefresh), click: () => tasks.disconnect().then(refreshTray) },
+    { label: 'Replace Google Tasks Client JSON…', visible: Boolean(tasks), click: () => tasks.forgetClient().then(() => connectGoogleTasks()) },
+  ];
+}
+function desktopItems() {
+  return [
+    ...wallpaperMenu(),
+    SEP,
     { label: 'Reduce Motion', type: 'checkbox', checked: Boolean(readSettings().reduceMotion), click: (item) => { writeSettings({ reduceMotion: item.checked }); win?.webContents.send('ui-prefs', uiPrefs()); wallpaper?.prefs(); refreshTray(); } },
-      { label: 'Magnetic Panel Slots', type: 'checkbox', checked: readSettings().ui?.magnetic !== false, click: (item) => { writeUi({ magnetic: item.checked }); win?.webContents.send('ui-prefs', uiPrefs()); refreshTray(); } },
-    ],
+    { label: 'Magnetic Panel Slots', type: 'checkbox', checked: readSettings().ui?.magnetic !== false, click: (item) => { writeUi({ magnetic: item.checked }); win?.webContents.send('ui-prefs', uiPrefs()); refreshTray(); } },
+  ];
+}
+function workLine() { return { label: jobs?.active.length ? `Work: ${jobs.running.length} running, ${jobs.active.length - jobs.running.length} queued` : 'Work: no jobs running', enabled: false }; }
+function killSwitch() { return { label: 'Pause All Autonomous Work (kill switch)', type: 'checkbox', checked: Boolean(autonomy?.state.paused), click: (item) => { if (item.checked) autonomy.stopAll('menu'); else autonomy.resumeAll(); refreshTray(); } }; }
+function workSettingsItems() {
+  return [
+    { label: claudeCtl?.hooksInstalled() ? 'Claude Code alerts: connected' : 'Claude Code alerts: hooks not installed', enabled: false },
+    { label: 'Quiet Hours for Claude Alerts (11 pm–7 am)', type: 'checkbox', checked: readSettings().claudeQuiet !== false,
+      click: (item) => { writeSettings({ claudeQuiet: item.checked ? { from: 23, to: 7 } : false }); refreshTray(); } },
+    { label: 'Always Also Notify My Phone', type: 'checkbox', checked: Boolean(readSettings().workAlwaysPhone), click: (item) => { writeSettings({ workAlwaysPhone: item.checked }); refreshTray(); } },
+    SEP,
+    { label: autonomy?.state.paused ? 'KILL SWITCH ON: everything paused' : `Autonomy: ${autonomy ? `${autonomy.view().projects.filter((p) => ['running', 'queued', 'approval'].includes(p.status)).length} project, ${autonomy.state.goals.filter((g) => g.status === 'running').length} goals, ${autonomy.state.routines.filter((r) => r.enabled).length} routines on` : 'starting'}`, enabled: false },
+  ];
+}
+function phoneItems() {
+  return [
+    { label: remoteState === 'online' ? 'Phone (Telegram): connected' : remoteInfo ? `Phone (Telegram): send code ${remoteInfo.code} to @${remoteInfo.bot}` : 'Phone (Telegram): not set up', enabled: false },
+    { label: 'Unpair Phone', visible: remoteState === 'online', click: unpairRemote },
+    { label: phone?.devices.length ? `Phone app: ${phone.devices.length} paired` : 'Phone app: not paired', enabled: false },
+    { label: 'Pair a Phone…', click: pairPhone },
+    { label: 'Stay Reachable From My Phone (no idle sleep on power)', type: 'checkbox', checked: readSettings().stayReachable !== false,
+      click: (item) => { writeSettings({ stayReachable: item.checked }); applyReachable(); refreshTray(); } },
+    { label: 'Unpair All Phones', visible: Boolean(phone?.devices.length), click: () => { phone.unpairAll(); relay.ready && relay.unregisterAll().catch(() => {}); refreshTray(); } },
+    SEP,
+    { label: contacts?.count ? `Contacts: ${contacts.count} imported` : 'Contacts: none imported', enabled: false },
+    { label: 'Import Contacts (vCard)…', click: importContacts },
+  ];
+}
+function memoryFilesItems() {
+  return [
+    { label: memory ? `Memory: ${memory.count} thing${memory.count === 1 ? '' : 's'} remembered` : 'Memory', enabled: false },
+    { label: 'Open Memory…', click: () => { require('electron').shell.openPath(memory.file); } },
+    { label: 'Clear Memory…', click: clearMemory },
+    { label: 'My Phrases…', enabled: Boolean(intents?.ready), click: () => { require('electron').shell.openPath(intents.phrasesFile); } },
+    SEP,
+    { label: `Folders ARES May Use: ${(readSettings().control?.folders || []).length ? `Desktop, Documents, Downloads, iCloud + ${(readSettings().control?.folders || []).length} more` : 'Desktop, Documents, Downloads, iCloud Drive'}`, enabled: false },
+    { label: 'Add a Folder ARES May Use…', click: addControlFolder },
+    { label: 'Forget Added Folders', visible: Boolean((readSettings().control?.folders || []).length), click: () => { writeSettings({ control: { ...(readSettings().control || {}), folders: [] } }); refreshTray(); } },
+    SEP,
+    { label: 'Open Work Folder…', click: () => shell.openPath(jobs.dir) },
+    { label: 'Open ARES Projects Folder…', click: () => { fs.mkdirSync(PROJECTS_DIR, { recursive: true }); shell.openPath(PROJECTS_DIR); } },
+    { label: 'Open Action Log…', click: () => shell.openPath(path.join(app.getPath('userData'), 'audit.jsonl')) },
+    { label: 'Open Calls Log…', visible: Boolean(calls?.ready), click: () => shell.openPath(calls.dir) },
+  ];
+}
+function loginItem() { return { label: 'Launch at Login', type: 'checkbox', enabled: app.isPackaged, checked: app.isPackaged && app.getLoginItemSettings().openAtLogin, click: (item) => setLaunchAtLogin(item.checked) }; }
+function powerDownItem() { return { label: power?.mode === 'dormant' ? 'Wake ARES' : 'Power Down', click: () => (power?.mode === 'dormant' ? power.wake('menu') : power?.powerDown('menu')) }; }
+function quitItem() { return { label: 'Quit ARES Completely', click: () => power?.quitFully('menu') }; } // the only way the process ends (the ignition helper takes over)
+
+/** The ◉ menu: the everyday things, then one Settings & Setup submenu for the rest. */
+function trayTemplate() {
+  const [standbyItem, powerSettings] = powerMenu();
+  const desk = deskMenu();
+  return [
+    listenLine(),
+    ...muteItems(),
+    ...desk.filter((x) => /^Desk Mode \(no wake word|⚠/.test(x.label || '')),
+    SEP,
+    { label: `Show / Hide  (${HOTKEY.replace('Alt', '⌥')})`, click: toggleWindow },
+    workLine(),
+    { label: 'Open Work Panel', click: () => openView('work') },
+    killSwitch(),
+    SEP,
+    { label: 'Settings & Setup', submenu: [
+      { label: 'Listening & Voice ID', submenu: [...voiceIdItems(), SEP, ...desk.filter((x) => !/^Desk Mode \(no wake word|⚠/.test(x.label || ''))] },
+      { label: 'Her Voice', submenu: voiceMenu() },
+      { label: 'Calendar & Tasks', submenu: calendarTasksItems() },
+      { label: 'Desktop & Wallpaper', submenu: desktopItems() },
+      ...(theme ? [{ label: 'ARES Theme', submenu: theme.menu(refreshTray) }] : []),
+      { label: 'Work & Claude Code', submenu: workSettingsItems() },
+      { label: 'Phone & Contacts', submenu: phoneItems() },
+      { label: 'Memory, Folders & Logs', submenu: memoryFilesItems() },
+      ...(powerSettings ? [{ ...powerSettings, label: 'Power & Standby' }] : []),
+      SEP,
+      loginItem(),
+    ] },
+    SEP,
+    ...(standbyItem ? [standbyItem] : []),
+    powerDownItem(),
+    quitItem(),
+  ];
+}
+
+/** ARES's menus, in sections, for the ARES theme's bar (each one its own menu there). Same pieces as the ◉ menu. */
+function menuSections() {
+  return {
+    listen: [listenLine(), ...muteItems(), SEP, ...voiceIdItems(), SEP, ...deskMenu()],
+    view: [{ label: `Show / Hide  (${HOTKEY.replace('Alt', '⌥')})`, click: toggleWindow }, SEP, ...desktopItems(), ...(theme ? theme.menu(refreshTray) : []), SEP, ...calendarTasksItems()],
     voice: voiceMenu(),
-    work: [
-      { label: jobs?.active.length ? `Work: ${jobs.running.length} running, ${jobs.active.length - jobs.running.length} queued` : 'Work: no jobs running', enabled: false },
-      { label: 'Open Work Panel', click: () => openView('work') },
-      { label: 'Open Work Folder…', click: () => shell.openPath(jobs.dir) },
-      { type: 'separator' },
-      { label: claudeCtl?.hooksInstalled() ? 'Claude Code alerts: connected' : 'Claude Code alerts: hooks not installed', enabled: false },
-      { label: 'Quiet Hours for Claude Alerts (11 pm–7 am)', type: 'checkbox', checked: readSettings().claudeQuiet !== false,
-        click: (item) => { writeSettings({ claudeQuiet: item.checked ? { from: 23, to: 7 } : false }); refreshTray(); } },
-      { label: 'Always Also Notify My Phone', type: 'checkbox', checked: Boolean(readSettings().workAlwaysPhone), click: (item) => { writeSettings({ workAlwaysPhone: item.checked }); refreshTray(); } },
-      { type: 'separator' },
-      { label: autonomy?.state.paused ? 'KILL SWITCH ON: everything paused' : `Autonomy: ${autonomy ? `${autonomy.view().projects.filter((p) => ['running', 'queued', 'approval'].includes(p.status)).length} project, ${autonomy.state.goals.filter((g) => g.status === 'running').length} goals, ${autonomy.state.routines.filter((r) => r.enabled).length} routines on` : 'starting'}`, enabled: false },
-      { label: 'Pause All Autonomous Work (kill switch)', type: 'checkbox', checked: Boolean(autonomy?.state.paused), click: (item) => { if (item.checked) autonomy.stopAll('menu'); else autonomy.resumeAll(); refreshTray(); } },
-      { label: 'Open ARES Projects Folder…', click: () => { fs.mkdirSync(PROJECTS_DIR, { recursive: true }); shell.openPath(PROJECTS_DIR); } },
-    ],
-    phone: [
-      {
-        label: remoteState === 'online' ? 'Phone (Telegram): connected' : remoteInfo ? `Phone (Telegram): send code ${remoteInfo.code} to @${remoteInfo.bot}` : 'Phone (Telegram): not set up',
-        enabled: false,
-      },
-      { label: 'Unpair Phone', visible: remoteState === 'online', click: unpairRemote },
-      { label: phone?.devices.length ? `Phone app: ${phone.devices.length} paired` : 'Phone app: not paired', enabled: false },
-      { label: 'Pair a Phone…', click: pairPhone },
-      { label: 'Stay Reachable From My Phone (no idle sleep on power)', type: 'checkbox', checked: readSettings().stayReachable !== false,
-        click: (item) => { writeSettings({ stayReachable: item.checked }); applyReachable(); refreshTray(); } },
-      { label: 'Unpair All Phones', visible: Boolean(phone?.devices.length), click: () => { phone.unpairAll(); relay.ready && relay.unregisterAll().catch(() => {}); refreshTray(); } },
-      { type: 'separator' },
-      { label: 'Open Calls Log…', visible: Boolean(calls?.ready), click: () => shell.openPath(calls.dir) },
-      { label: contacts?.count ? `Contacts: ${contacts.count} imported` : 'Contacts: none imported', enabled: false },
-      { label: 'Import Contacts (vCard)…', click: importContacts },
-    ],
-    ares: [
-      { label: 'Summon ARES', click: () => openView('summon') },
-      { type: 'separator' },
-      { label: memory ? `Memory: ${memory.count} thing${memory.count === 1 ? '' : 's'} remembered` : 'Memory', enabled: false },
-      { label: 'Open Memory…', click: () => { require('electron').shell.openPath(memory.file); } },
-      { label: 'Clear Memory…', click: clearMemory },
-      { label: 'My Phrases…', enabled: Boolean(intents?.ready), click: () => { require('electron').shell.openPath(intents.phrasesFile); } },
-      { type: 'separator' },
-      { label: `Folders ARES May Use: ${(readSettings().control?.folders || []).length ? `Desktop, Documents, Downloads, iCloud + ${(readSettings().control?.folders || []).length} more` : 'Desktop, Documents, Downloads, iCloud Drive'}`, enabled: false },
-      { label: 'Add a Folder ARES May Use…', click: addControlFolder },
-      { label: 'Forget Added Folders', visible: Boolean((readSettings().control?.folders || []).length), click: () => { writeSettings({ control: { ...(readSettings().control || {}), folders: [] } }); refreshTray(); } },
-      { label: 'Open Action Log…', click: () => shell.openPath(path.join(app.getPath('userData'), 'audit.jsonl')) },
-      { type: 'separator' },
-      {
-        label: 'Launch at Login',
-        type: 'checkbox',
-        enabled: app.isPackaged,
-        checked: app.isPackaged && app.getLoginItemSettings().openAtLogin,
-        click: (item) => setLaunchAtLogin(item.checked),
-      },
-      { type: 'separator' },
-      ...powerMenu(),
-      { label: power?.mode === 'dormant' ? 'Wake ARES' : 'Power Down', click: () => (power?.mode === 'dormant' ? power.wake('menu') : power?.powerDown('menu')) },
-      { label: 'Quit ARES Completely', click: () => power?.quitFully('menu') }, // the only way the process ends (the ignition helper takes over)
-    ],
+    work: [workLine(), { label: 'Open Work Panel', click: () => openView('work') }, { label: 'Open Work Folder…', click: () => shell.openPath(jobs.dir) }, SEP, ...workSettingsItems(), killSwitch(), { label: 'Open ARES Projects Folder…', click: () => { fs.mkdirSync(PROJECTS_DIR, { recursive: true }); shell.openPath(PROJECTS_DIR); } }],
+    phone: phoneItems(),
+    ares: [{ label: 'Summon ARES', click: () => openView('summon') }, SEP, ...memoryFilesItems(), SEP, loginItem(), SEP, ...powerMenu(), powerDownItem(), quitItem()],
   };
 }
 
