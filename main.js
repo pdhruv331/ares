@@ -258,13 +258,26 @@ function refreshTray() {
   tray.setImage(trayGlyph(pm === 'standby' || pm === 'tostandby' || pm === 'fromstandby' ? 'blue' : ['spindown', 'dormant', 'charging'].includes(pm) ? 'gold' : 'cyan', muted || pm === 'dormant' ? 'ring' : awake ? 'dot' : 'both'));
   tray.setTitle('');
   tray.setToolTip(pm === 'dormant' ? 'ARES — powered down (hold the reactor or press ⌥Space to wake)' : pm === 'standby' ? 'ARES — standby' : muted ? `ARES — muted${until}` : awake ? 'ARES — always listening' : 'ARES — listening for "Hey ARES"');
-  tray.setContextMenu(Menu.buildFromTemplate(trayTemplate()));
+  tray.setContextMenu(Menu.buildFromTemplate(cleanMenu(trayTemplate())));
   // The ARES theme's bar shows how she's listening while she's idle (as the window's "ear" does)
   theme?.ear(muted ? 'MUTED' : desk?.state.active ? 'DESK MODE' : awake ? 'LISTENING' : 'WAKE WORD');
 }
 
 // ---- The ◉ menu, in pieces (2026-10-12: trimmed; the everyday things on top, everything else under Settings & Setup) ------
-const SEP = { type: 'separator' };
+/** Never let one malformed line take ARES down (2026-10-12: an item with no label/role/type crashed startup and quit):
+ *  drop it, and log where it was so it can be fixed. Fresh separator objects each time (none shared between menus). */
+function cleanMenu(items, where = '◉') {
+  const out = [];
+  for (const [i, it] of (items || []).entries()) {
+    if (!it || typeof it !== 'object') { log('menu item dropped', { where, i, why: String(it) }); continue; }
+    if (!it.label && !it.role && !it.type) { log('menu item dropped', { where, i, keys: Object.keys(it).join(','), before: out.at(-1)?.label || '' }); continue; }
+    const x = { ...it };
+    if (Array.isArray(x.submenu)) x.submenu = cleanMenu(x.submenu, `${where} ▸ ${x.label || i}`);
+    out.push(x);
+  }
+  return out;
+}
+const SEP = Object.freeze({ type: 'separator' });
 function listenLine() {
   const muted = listener.muted;
   const until = listener.muteUntil ? ` until ${new Date(listener.muteUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : '';
