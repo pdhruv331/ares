@@ -319,7 +319,7 @@ function desktopItems() {
   ];
 }
 function workLine() { return { label: jobs?.active.length ? `Work: ${jobs.running.length} running, ${jobs.active.length - jobs.running.length} queued` : 'Work: no jobs running', enabled: false }; }
-function killSwitch() { return { label: 'Pause All Autonomous Work (kill switch)', type: 'checkbox', checked: Boolean(autonomy?.state.paused), click: (item) => { if (item.checked) autonomy.stopAll('menu'); else autonomy.resumeAll(); refreshTray(); } }; }
+function killSwitchItem() { return { label: 'Pause All Autonomous Work (kill switch)', type: 'checkbox', checked: Boolean(autonomy?.state.paused), click: (item) => { if (item.checked) autonomy.stopAll('menu'); else autonomy.resumeAll(); refreshTray(); } }; }
 function workSettingsItems() {
   return [
     { label: claudeCtl?.hooksInstalled() ? 'Claude Code alerts: connected' : 'Claude Code alerts: hooks not installed', enabled: false },
@@ -377,7 +377,7 @@ function trayTemplate() {
     { label: `Show / Hide  (${HOTKEY.replace('Alt', '⌥')})`, click: toggleWindow },
     workLine(),
     { label: 'Open Work Panel', click: () => openView('work') },
-    killSwitch(),
+    killSwitchItem(),
     SEP,
     { label: 'Settings & Setup', submenu: [
       { label: 'Listening & Voice ID', submenu: [...voiceIdItems(), SEP, ...desk.filter((x) => !/^Desk Mode \(no wake word|⚠/.test(x.label || ''))] },
@@ -405,7 +405,7 @@ function menuSections() {
     listen: [listenLine(), ...muteItems(), SEP, ...voiceIdItems(), SEP, ...deskMenu()],
     view: [{ label: `Show / Hide  (${HOTKEY.replace('Alt', '⌥')})`, click: toggleWindow }, SEP, ...desktopItems(), ...(theme ? theme.menu(refreshTray) : []), SEP, ...calendarTasksItems()],
     voice: voiceMenu(),
-    work: [workLine(), { label: 'Open Work Panel', click: () => openView('work') }, { label: 'Open Work Folder…', click: () => shell.openPath(jobs.dir) }, SEP, ...workSettingsItems(), killSwitch(), { label: 'Open ARES Projects Folder…', click: () => { fs.mkdirSync(PROJECTS_DIR, { recursive: true }); shell.openPath(PROJECTS_DIR); } }],
+    work: [workLine(), { label: 'Open Work Panel', click: () => openView('work') }, { label: 'Open Work Folder…', click: () => shell.openPath(jobs.dir) }, SEP, ...workSettingsItems(), killSwitchItem(), { label: 'Open ARES Projects Folder…', click: () => { fs.mkdirSync(PROJECTS_DIR, { recursive: true }); shell.openPath(PROJECTS_DIR); } }],
     phone: phoneItems(),
     ares: [{ label: 'Summon ARES', click: () => openView('summon') }, SEP, ...memoryFilesItems(), SEP, loginItem(), SEP, ...powerMenu(), powerDownItem(), quitItem()],
   };
