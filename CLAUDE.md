@@ -238,6 +238,9 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
 - Lessons (2026-10-06): `open -j` keeps every window of ARES hidden (never use it); `loadFileURL` throws on a file URL with a query
   (the helper injects geometry as a user script); a `.prohibited` activation policy forbids windows; macOS can report a new desktop
   picture while still showing the old one (wallpaper.js reads it back and retries; keep the previous still file until then).
+- Lesson (2026-10-16): the helper's panels must be torn down with `Panel.close()` (the WKScriptMessageHandler retains them). Rebuilding
+  on every screen-parameters burst leaked 399 WebContent processes until IOKit ran out of ports and every Electron/Chromium app
+  (ARES included) segfaulted at launch in IONotificationPortGetRunLoopSource. Check `top -stats pid,command,ports -o ports` first.
 
 ## Power from the phone and the relay (docs/ignition-prompt.md part B: 4d, 4e, 4f; built 2026-10-06)
 
