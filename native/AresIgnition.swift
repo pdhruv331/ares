@@ -157,6 +157,16 @@ final class Panel: NSObject, WKScriptMessageHandler {
     let js = "window.Ignition && Ignition.rx(\(json))"
     if ready { web.evaluateJavaScript(js) } else { queued.append(js) }
   }
+  /** Gone for good. The message handler retains the panel (so its web view and WebContent process) until it's removed; orderOut alone
+   *  leaked one page per display change (2026-10-16: 399 WebContent processes, 6 GB, and ports enough that Chromium apps crashed at launch). */
+  func close() {
+    web.configuration.userContentController.removeScriptMessageHandler(forName: "ares")
+    web.configuration.userContentController.removeAllUserScripts()
+    web.stopLoading()
+    window.orderOut(nil)
+    window.contentView = nil
+    window.close()
+  }
   /** The pointer, in the page's CSS px (top-left origin) when it's on this display. */
   func pointer(_ p: NSPoint) -> (x: CGFloat, y: CGFloat, on: Bool) {
     let f = window.frame
@@ -198,7 +208,8 @@ final class Ignition: NSObject, NSApplicationDelegate {
     DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.pollRelay() }
     Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.applyKeepAwake() }
     applyKeepAwake()
-    NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in self?.buildPanels() }
+    // Sleep/wake, the lid and Space changes post this in bursts: rebuild once things settle, and only if the displays really changed
+    NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in self?.rebuildSoon() }
     log("up: \(panels.count) display(s), login=\(atLogin)")
   }
   func applicationWillTerminate(_ n: Notification) { try? FileManager.default.removeItem(at: dir.appendingPathComponent("helper.pid")); unregisterHotKey(); releaseKeepAwake() }
@@ -245,10 +256,21 @@ final class Ignition: NSObject, NSApplicationDelegate {
   }
   func releaseKeepAwake() { if assertion != 0 { IOPMAssertionRelease(assertion); assertion = 0; log("no longer keeping the Mac awake") } }
 
+  var rebuild: DispatchWorkItem?
+  var layoutKey = ""
+  func rebuildSoon() {
+    rebuild?.cancel()
+    let work = DispatchWorkItem { [weak self] in self?.buildPanels() }
+    rebuild = work
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0, execute: work)
+  }
   func buildPanels() {
-    for p in panels { p.window.orderOut(nil) }
-    panels = []
     let geos = geometries()
+    let key = NSScreen.screens.map { "\($0.frame) \($0.backingScaleFactor)" }.joined(separator: "|") + "#" + geos.map { "\($0.frame) \($0.cx) \($0.cy) \($0.r)" }.joined(separator: "|")
+    if key == layoutKey && !panels.isEmpty { return }
+    layoutKey = key
+    for p in panels { p.close() }
+    panels = []
     for screen in NSScreen.screens {
       // Match ARES's display (its bounds are in a top-left, Electron coordinate space; match by size and the primary's origin)
       let primary = NSScreen.screens.first!.frame
