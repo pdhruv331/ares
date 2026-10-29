@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const out = path.join(root, 'renderer', 'vendor');
+const out = path.join(root, 'src', 'renderer', 'vendor');
 fs.mkdirSync(out, { recursive: true });
 const nm = (p) => path.join(root, 'node_modules', p);
 

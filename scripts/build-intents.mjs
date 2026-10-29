@@ -8,7 +8,7 @@ import { SEEDS } from './intent-seeds.mjs';
 import { SOURCES } from './intent-sources.mjs';
 
 const require = createRequire(import.meta.url);
-const { Embedder, INTENTS, normalize } = require('../intent.js');
+const { Embedder, INTENTS, normalize } = require('../src/intent.js');
 
 const ROOT = path.join(import.meta.dirname, '..');
 const OUT = path.join(ROOT, 'models', 'intent');

@@ -24,7 +24,7 @@ const QUICK = [
 const require = createRequire(import.meta.url);
 const src = fs.readFileSync(new URL('../claude.js', import.meta.url), 'utf8');
 const PERSONA = eval(src.match(/const PERSONA = (`[\s\S]*?`);/)[1]);
-const { CLI } = require('../claude.js');
+const { CLI } = require('../src/claude.js');
 const workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'ares-bench-'));
 
 function session(model) {

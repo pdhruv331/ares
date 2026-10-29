@@ -49,8 +49,8 @@ xcrun swiftc -O -swift-version 5 native/AresIgnition.swift -o "$IGN/Contents/Mac
 cp native/Ignition-Info.plist "$IGN/Contents/Info.plist"
 # The page reuses the window's scene: the same drawing code, so the handover is pixel-for-pixel
 node scripts/make-sounds.js >/dev/null
-cp native/ignition.html native/ignition.js renderer/perf.js renderer/neural.js renderer/reactor.js renderer/ignite.js renderer/scene-boot.js renderer/scene.js "$IGN/Contents/Resources/"
-cp renderer/sounds/*.wav "$IGN/Contents/Resources/sounds/"
+cp native/ignition.html native/ignition.js src/renderer/perf.js src/renderer/neural.js src/renderer/reactor.js src/renderer/ignite.js src/renderer/scene-boot.js src/renderer/scene.js "$IGN/Contents/Resources/"
+cp src/renderer/sounds/*.wav "$IGN/Contents/Resources/sounds/"
 codesign --force --sign "$SIGN" "$IGN"
 
 echo "› Backup voice model (Kokoro, downloaded once into the support folder)"

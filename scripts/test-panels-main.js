@@ -1,6 +1,6 @@
 // Main-process pieces of panels v2 with fakes (no helper, no Claude, no network). run(check) is called by test-panels.js.
 const path = require('path');
-const root = path.join(__dirname, '..');
+const root = path.join(__dirname, '..', 'src'); // the app's code
 const DAY = 86_400_000;
 
 /** A CalendarKit whose helper is an in-memory EventKit: the same request() surface, answered from a list. */

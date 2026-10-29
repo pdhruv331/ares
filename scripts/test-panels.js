@@ -6,7 +6,7 @@
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const root = path.join(__dirname, '..');
+const root = path.join(__dirname, '..', 'src'); // the app's code
 const Flow = require(path.join(root, 'renderer', 'flow.js'));
 
 const V = process.argv.includes('-v');

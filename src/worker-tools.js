@@ -16,7 +16,7 @@ const { isPublicUrl } = require('./egress');
  */
 function registry({ env, appDir, runtime, bridge, egress }) {
   const playwrightCli = (() => {
-    const cli = path.join(appDir, 'node_modules', '@playwright', 'mcp', 'cli.js'); // not in the package's exports map
+    const cli = path.join(appDir, '..', 'node_modules', '@playwright', 'mcp', 'cli.js'); // not in the package's exports map
     return fs.existsSync(cli) ? cli : null;
   })();
   const plugin = path.join(runtime, 'plugin');

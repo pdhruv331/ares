@@ -2,7 +2,7 @@
 // hologram with neurons and travelling signals inside it. The 2D HUD (neural.js) keeps drawing the
 // rings and readouts on top, and is the fallback if WebGL isn't available.
 // Brain model: "Brain AS" by Agnieszka Starostecka, Wikimedia Commons, CC BY 4.0.
-import * as THREE from '../node_modules/three/build/three.module.js';
+import * as THREE from '../../node_modules/three/build/three.module.js';
 import * as MESH from './brain-mesh.js';
 
 const hud = HUD; // declared by neural.js (global lexical scope, not a window property)

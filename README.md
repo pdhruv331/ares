@@ -7,6 +7,72 @@ This is a personal project, built for one person (me) on my own machines. It isn
 for anyone else to install. I design it, make the product decisions, and test and debug it; Claude Code writes
 most of the code under my direction.
 
+## How it fits together
+
+**Talking to her.** Every way I reach her ends up at the same brain on the Mac. Grey boxes are outside services.
+
+```mermaid
+flowchart TB
+  desk(["Me at the desk<br/><i>“hey ARES”</i>"])
+  phone(["Me on my phone<br/><i>ARES Android app</i>"])
+  tg(["Me on Telegram"])
+
+  subgraph mac["My Mac · the ARES app"]
+    ears["Ears<br/>wake word · speech · voice ID<br/><i>on-device</i>"]
+    phonesrv["Phone server"]
+    brain{{"Brain · intent router"}}
+    tools["Mac tools<br/>files · apps · UI · OCR<br/>Calendar + Reminders"]
+    jobs["Background work<br/>jobs · projects · routines"]
+    voice["Voice<br/>sentence by sentence"]
+    kokoro["Kokoro<br/><i>local backup voice</i>"]
+  end
+
+  claude["Claude<br/><i>Claude Code CLI</i>"]
+  gtasks["Google Tasks"]
+  web["Web tools<br/>Playwright · Firecrawl · Unsplash"]
+  eleven["ElevenLabs TTS<br/><i>Katherine</i>"]
+
+  desk --> ears --> brain
+  phone -- "Tailscale" --> phonesrv --> brain
+  tg -- "bot" --> brain
+  brain <--> claude
+  brain --> tools --> gtasks
+  brain --> jobs --> web
+  jobs <--> claude
+  brain --> voice --> eleven
+  voice -. "if slow or offline" .-> kokoro
+
+  classDef ext fill:#f4f4f5,stroke:#a1a1aa,color:#18181b
+  class claude,eleven,web,gtasks ext
+```
+
+**My phone line and notifications.** The phone line runs in the cloud, so it works even when the Mac is off.
+
+```mermaid
+flowchart TB
+  caller(["Someone calls me"])
+  twilio["Twilio number"]
+  agent["ElevenLabs agent<br/><i>ARES Calls · Hope</i>"]
+  vm["TwiML voicemail"]
+  mac["ARES on my Mac"]
+  relay["Cloudflare Worker relay"]
+  fcm["Firebase Cloud Messaging"]
+  phone["ARES Android app"]
+
+  caller --> twilio --> agent
+  twilio -. "agent can't answer" .-> vm
+  mac -- "context · outbound calls" --> agent
+  agent -- "after each call" --> relay
+  vm -. "fetched + transcribed" .-> mac
+  mac -- "pushes" --> relay --> fcm --> phone
+
+  classDef ext fill:#f4f4f5,stroke:#a1a1aa,color:#18181b
+  class twilio,agent,vm,relay,fcm ext
+```
+
+Everything the Mac does goes out over HTTPS; nothing on the internet can connect in. The phone reaches the Mac
+only through my own Tailscale network.
+
 ## What she does
 
 - **Talks.** An on-device wake word, speech recognition and voice ID (she only takes commands from me), Claude as
@@ -21,27 +87,24 @@ most of the code under my direction.
 - **Keeps an eye on my Claude Code sessions.** She tells me when a session finishes or needs an answer, and I can
   reply from my phone.
 - **Is on my phone.** A native Android app and home-screen launcher: a floating bubble, hold-to-talk, cards,
-  live job progress in the status bar, and approvals with my fingerprint. The phone talks to the Mac over my
-  private Tailscale network.
+  live job progress in the status bar, and approvals with my fingerprint.
 - **Answers my phone.** A separate ElevenLabs agent on a Twilio number takes calls when I can't, sends me the caller,
   topic and callback number, and can place calls for me. If the agent is down, callers get a voicemail and ARES
   transcribes it.
 - **Has a look.** An arc-reactor interface with panels for the calendar, tasks and jobs, plus power states: standby,
   power down and a charge-up on wake, mirrored on the phone.
 
-## How it's built
+## What's in the repo
 
-| Part | Where | What |
-|---|---|---|
-| Mac app | `main.js`, `*.js`, `renderer/` | Electron (Node.js + Chromium). The main process holds the services; `renderer/` is the interface. |
-| Brain | `claude.js`, `bridge.js`, `tools/` | Claude through the Claude Code CLI on my own subscription. Tools reach the Mac through a local bridge. |
-| Native helpers | `native/` | Swift: the microphone and wake word, Mac control (Accessibility, input, OCR), calendar/EventKit, camera, and the start-up screen. |
-| Voice | `voice.js`, `kokoro-worker.js`, `voiceid.js` | ElevenLabs streaming TTS, the local Kokoro voice, and voice ID. Every engine outputs the same 24 kHz PCM. |
-| Phone server | `phone.js`, `phone/` | Pairing, streamed answers, live events and file sharing for the phone. Paired devices only. |
-| Android app | `android/` | Kotlin: the app, the launcher, the bubble, widgets, notifications. See [android/README.md](android/README.md). |
-| Relay | `relay/` | A small Cloudflare Worker for push notifications and waking the Mac while ARES is off. See [relay/README.md](relay/README.md). |
-| Phone line | `calls.js`, `voicemail.js` | The ElevenLabs agent and the Twilio voicemail fallback. |
-| Docs | `docs/`, `CLAUDE.md` | The design brief for each feature (`docs/*-prompt.md`) and the working notes. |
+| Folder | What |
+|---|---|
+| `src/` | The Mac app (Electron: Node.js + Chromium). `main.js` and the other files hold the services; `renderer/` is the interface, `tools/` the brain's tools, `phone/` the phone's web page. |
+| `native/` | Swift helpers: the microphone and wake word, Mac control (Accessibility, input, OCR), calendar/EventKit, camera, and the start-up screen. |
+| `android/` | The Android app and launcher (Kotlin). See [android/README.md](android/README.md). |
+| `relay/` | The Cloudflare Worker for push notifications and waking the Mac. See [relay/README.md](relay/README.md). |
+| `scripts/` | Build scripts and tests. |
+| `models/` | The small on-device models (intents, voice ID). The big ones are downloaded, not committed. |
+| `docs/` | The design brief for each feature (`docs/*-prompt.md`). `CLAUDE.md` has the working notes. |
 
 ## Running it
 

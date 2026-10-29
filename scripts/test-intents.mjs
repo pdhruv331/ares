@@ -7,7 +7,7 @@ import { createRequire } from 'module';
 import { HELD_OUT } from './intent-seeds.mjs';
 
 const require = createRequire(import.meta.url);
-const { Intents, normalize } = require('../intent.js');
+const { Intents, normalize } = require('../src/intent.js');
 const verbose = process.argv.includes('--verbose');
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ares-intent-test-')); // no personal phrases

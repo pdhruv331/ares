@@ -9,7 +9,7 @@ const os = require('os');
 const path = require('path');
 const { EventEmitter } = require('events');
 
-const root = path.join(__dirname, '..');
+const root = path.join(__dirname, '..', 'src'); // the app's code
 const { Autonomy } = require(path.join(root, 'autonomy.js'));
 const { Audit } = require(path.join(root, 'audit.js'));
 const sandbox = require(path.join(root, 'worker-sandbox.js'));

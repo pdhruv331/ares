@@ -53,16 +53,16 @@ val brainAssets = layout.buildDirectory.dir("generated/brainAssets")
 val copyBrain by tasks.registering(Copy::class) {
     into(brainAssets.map { it.dir("brain") })
     from("src/main/brain")
-    from(rootProject.file("../renderer")) { include("perf.js", "neural.js", "brain3d.mjs", "brain-mesh.js"); into("renderer") }
+    from(rootProject.file("../src/renderer")) { include("perf.js", "neural.js", "brain3d.mjs", "brain-mesh.js"); into("src/renderer") }
     from(rootProject.file("../node_modules/three/build")) { include("three.module.js", "three.core.js"); into("node_modules/three/build") }
 }
 android.sourceSets["main"].assets.srcDir(brainAssets.get().asFile)
 
-// The phone's three short sounds (Sounds.kt) are the Mac's own WAVs (renderer/sounds), copied in at build time
+// The phone's three short sounds (Sounds.kt) are the Mac's own WAVs (src/renderer/sounds), copied in at build time
 val soundRes = layout.buildDirectory.dir("generated/soundRes")
 val copySounds by tasks.registering(Copy::class) {
     into(soundRes.map { it.dir("raw") })
-    from(rootProject.file("../renderer/sounds")) { include("tick.wav", "ptt-on.wav", "ptt-off.wav") }
+    from(rootProject.file("../src/renderer/sounds")) { include("tick.wav", "ptt-on.wav", "ptt-off.wav") }
     rename { it.replace('-', '_') }
 }
 android.sourceSets["main"].res.srcDir(soundRes.get().asFile)

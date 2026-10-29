@@ -6,7 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { replay } = require('../hands');
+const { replay } = require('../src/hands');
 const { CLIPS } = require('./hands-synth');
 
 const verbose = process.argv.includes('-v');

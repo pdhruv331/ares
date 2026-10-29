@@ -2,6 +2,7 @@ const { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, po
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const ROOT = path.join(__dirname, '..'); // the repo: the app's code is in src/, the helpers in native/, the models in models/
 
 // Development only: a separate support folder (test harnesses), so tests never touch the real jobs or paired phones
 if (!app.isPackaged && process.env.ARES_USER_DATA) app.setPath('userData', process.env.ARES_USER_DATA);
@@ -13,7 +14,7 @@ if (!app.requestSingleInstanceLock()) {
 
 // Minimal .env loader (ARES_CLAUDE_MODEL, ARES_WAKE_PHRASES, ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID, ELEVENLABS_MODEL, ELEVENLABS_SPEED).
 // The installed app reads ~/Library/Application Support/ARES/.env; development falls back to the project's .env.
-for (const file of [path.join(app.getPath('userData'), '.env'), path.join(__dirname, '.env')]) {
+for (const file of [path.join(app.getPath('userData'), '.env'), path.join(ROOT, '.env')]) {
   try {
     for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
       const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
@@ -531,7 +532,7 @@ function openEars(why) {
 /** Quiet hours for Claude alerts, or a macOS Focus on: the wake line is shown but not spoken, the power sounds stay silent. */
 async function silentNow() {
   if (claudeQuietNow()) return true;
-  const helper = app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(__dirname, 'native', 'build', 'ares-theme');
+  const helper = app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(ROOT, 'native', 'build', 'ares-theme');
   return new Promise((resolve) => require('child_process').execFile(helper, ['focus'], { timeout: 3000 }, (err, out) => { try { resolve(!err && JSON.parse(out).focus === true); } catch { resolve(false); } }));
 }
 /** The wake line's context: how long she was off and why, what happened meanwhile, what's next. */
@@ -792,8 +793,8 @@ function createDesk() {
 }
 function createVision() {
   vision = new Vision({
-    helper: visionPath(app, __dirname), log, readSettings, writeSettings, supportDir: app.getPath('userData'), powerMonitor, desk,
-    pointerHelper: app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(__dirname, 'native', 'build', 'ares-theme'),
+    helper: visionPath(app, ROOT), log, readSettings, writeSettings, supportDir: app.getPath('userData'), powerMonitor, desk,
+    pointerHelper: app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(ROOT, 'native', 'build', 'ares-theme'),
     screen: require('electron').screen, bounds: () => (win && !win.isDestroyed() ? win.getBounds() : null),
     lowPower: () => Boolean(wallpaper?.desk?.lowPower), devBuild: !app.isPackaged,
   });
@@ -1787,7 +1788,7 @@ function startClaudeControl() {
     },
   });
   claudeCtl = new ClaudeControl({ log, sessions, jobs, cli: claude.CLI, readSettings, workDir: jobs.dir,
-    aresRepo: app.isPackaged ? path.join(os.homedir(), 'My AI') : __dirname });
+    aresRepo: app.isPackaged ? path.join(os.homedir(), 'My AI') : ROOT });
   sessions.on('event', () => orb?.refresh()); // a session waiting on the user, or done: the orb's needs-you count
   claudeCtl.startHooks(app.getPath('userData'), path.join(__dirname, 'tools', 'claude-hook.sh'));
   claudeCtl.on('alert', deliverClaudeAlert);
@@ -2409,7 +2410,7 @@ app.whenReady().then(async () => {
   // Ignition (ignition.js): the helper's socket, the start-up steps the charge-to-wake follows, the shutdown record
   ignition = new Ignition({
     supportDir: app.getPath('userData'), appDir: __dirname, log, isPackaged: app.isPackaged, version: app.getVersion(), readSettings, writeSettings,
-    helperApp: app.isPackaged ? path.join(process.resourcesPath, 'ARES Ignition.app') : path.join(__dirname, 'native', 'build', 'ARES Ignition.app'),
+    helperApp: app.isPackaged ? path.join(process.resourcesPath, 'ARES Ignition.app') : path.join(ROOT, 'native', 'build', 'ARES Ignition.app'),
     appPath: app.isPackaged ? path.resolve(process.resourcesPath, '..', '..') : null,
     relay: () => relay,
   });
@@ -2450,8 +2451,8 @@ app.whenReady().then(async () => {
   ignition.writeConfig(); // (now that the relay is known: relay.json for the helper)
   calls = createCalls();
   control = new Control({
-    helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-control') : path.join(__dirname, 'native', 'build', 'ares-control'),
-    themeHelper: app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(__dirname, 'native', 'build', 'ares-theme'),
+    helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-control') : path.join(ROOT, 'native', 'build', 'ares-control'),
+    themeHelper: app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(ROOT, 'native', 'build', 'ares-theme'),
     supportDir: app.getPath('userData'), appDir: __dirname, readSettings, writeSettings, log,
     push: (n) => pushToPhones(n), phoneUrl: () => phoneUrl, notice: (line) => notice(line),
   });
@@ -2495,7 +2496,7 @@ app.whenReady().then(async () => {
   control.attach({ turn: bridge.turn });
   // The calendar through EventKit (calendar.js): its routes join control's, so the tiers and the audit log apply
   calendar = new CalendarKit({
-    helper: app.isPackaged ? path.join(process.resourcesPath, 'ARES Calendar.app') : path.join(__dirname, 'native', 'build', 'ARES Calendar.app'),
+    helper: app.isPackaged ? path.join(process.resourcesPath, 'ARES Calendar.app') : path.join(ROOT, 'native', 'build', 'ARES Calendar.app'),
     supportDir: app.getPath('userData'), log, readSettings, writeSettings, tier: (level, what, ctx) => control.tier(level, what, ctx), notice: (line) => notice(line),
   });
   Object.assign(control.routes, calendar.routes(), {
@@ -2581,13 +2582,13 @@ app.whenReady().then(async () => {
   voiceId = new VoiceId({
     modelPath: app.isPackaged
       ? path.join(process.resourcesPath, 'speaker-titanet-small.onnx')
-      : path.join(__dirname, 'models', 'speaker-titanet-small.onnx'),
+      : path.join(ROOT, 'models', 'speaker-titanet-small.onnx'),
     profilePath: path.join(app.getPath('userData'), 'voiceprint.json'),
     logPath: path.join(app.getPath('userData'), 'voiceid-log.jsonl'),
     threshold: Number(process.env.ARES_VOICE_THRESHOLD) || null,
   });
   intents = new Intents({
-    modelDir: app.isPackaged ? path.join(process.resourcesPath, 'intent') : path.join(__dirname, 'models', 'intent'),
+    modelDir: app.isPackaged ? path.join(process.resourcesPath, 'intent') : path.join(ROOT, 'models', 'intent'),
     dataDir: path.join(app.getPath('userData'), 'intents'),
     log,
   });
@@ -2596,7 +2597,7 @@ app.whenReady().then(async () => {
   createListener();
   wallpaper = new Wallpaper({
     log, readSettings, writeSettings, appDir: __dirname, supportDir: app.getPath('userData'), prefs: uiPrefs,
-    helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-desktop') : path.join(__dirname, 'native', 'build', 'ares-desktop'),
+    helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-desktop') : path.join(ROOT, 'native', 'build', 'ares-desktop'),
   });
   wallpaper.revealed = !ignition.helperAlive; // a helper is drawing the charge: the backdrop waits for the handover
   wallpaper.coldStart = () => !ignition.ready;
@@ -2652,13 +2653,13 @@ app.whenReady().then(async () => {
     orbMenu: (refresh) => orb?.menu(refresh) || [],
     onLive: () => { if (win && !win.isDestroyed()) win.webContents.send('ui-prefs', uiPrefs()); }, // never while quitting
     systemStats, dashAct, jobAnswer: (id, yes) => jobs.answer(id, yes), // the WORK drop-down's Approve / Decline (a click: the owner)
-    helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(__dirname, 'native', 'build', 'ares-theme'),
+    helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(ROOT, 'native', 'build', 'ares-theme'),
   });
   theme.jobs(jobs.list());
   // The corner orb: the small reactor in a corner while her live one can't be seen (docs/orb-prompt.md)
   orb = new Orb({
     appDir: __dirname, log, readSettings, writeSettings,
-    helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(__dirname, 'native', 'build', 'ares-theme'),
+    helper: app.isPackaged ? path.join(process.resourcesPath, 'ares-theme') : path.join(ROOT, 'native', 'build', 'ares-theme'),
     deps: { // (getters: some of these come up after the orb does)
       get listener() { return listener; }, get power() { return power; }, get autonomy() { return autonomy; }, get jobs() { return jobs; }, get control() { return control; },
       get memory() { return memory; }, get tasks() { return tasks; }, get usage() { return claudeUsage; }, get sessions() { return claudeCtl?.sessions; },

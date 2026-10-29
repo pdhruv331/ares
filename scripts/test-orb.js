@@ -10,7 +10,7 @@ const os = require('os');
 const path = require('path');
 const { EventEmitter } = require('events');
 
-const root = path.join(__dirname, '..');
+const root = path.join(__dirname, '..', 'src'); // the app's code
 const scratch = fs.mkdtempSync(path.join(os.homedir(), 'Downloads', '.ares-orb-test-'));
 const support = fs.mkdtempSync(path.join(os.tmpdir(), 'ares-orb-support-'));
 let failures = 0;
@@ -25,7 +25,7 @@ app.whenReady().then(async () => {
   let settings = { control: { folders: [] }, theme: { orb: { enabled: true, corner: 'br', hideFullscreen: true } } };
   const pushed = [];
   const control = new Control({
-    helper: path.join(root, 'native/build/ares-control'), themeHelper: path.join(root, 'native/build/ares-theme'),
+    helper: path.join(root, '..', 'native/build/ares-control'), themeHelper: path.join(root, '..', 'native/build/ares-theme'),
     supportDir: support, appDir: root, readSettings: () => settings, writeSettings: (p) => Object.assign(settings, p), log: () => {},
     push: async (n) => { pushed.push(n); return 1; }, phoneUrl: () => 'https://mac.example.ts.net', notice: () => {},
   });
@@ -47,7 +47,7 @@ app.whenReady().then(async () => {
   };
   const hooks = { calls: [], summon() { this.calls.push('summon'); }, dismiss() { this.calls.push('dismiss'); }, sendWindow(ch, m) { this.calls.push(`${ch}:${JSON.stringify(m)}`); },
     openView(v) { this.calls.push(`open:${v}`); }, stopSpeaking() { this.calls.push('stop'); }, ask(t) { this.calls.push(`ask:${t.slice(0, 40)}`); }, silentNow: async () => false, liveCall: () => null, ownIds: ['com.github.Electron'] };
-  const orb = new Orb({ appDir: root, helper: path.join(root, 'native/build/ares-theme'), log: (...p) => log.push(p), readSettings: () => settings, writeSettings: (p) => Object.assign(settings, p),
+  const orb = new Orb({ appDir: root, helper: path.join(root, '..', 'native/build/ares-theme'), log: (...p) => log.push(p), readSettings: () => settings, writeSettings: (p) => Object.assign(settings, p),
     deps: { listener, power, autonomy, jobs, control, memory, tasks, usage, sessions }, hooks });
   // What the page is told
   const sent = [];

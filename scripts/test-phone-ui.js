@@ -5,9 +5,9 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { validateCard } = require('../cards');
-const { isOutgoing, check } = require('../sentinel');
-const { ideas } = require('../ideas');
+const { validateCard } = require('../src/cards');
+const { isOutgoing, check } = require('../src/sentinel');
+const { ideas } = require('../src/ideas');
 
 let n = 0;
 const ok = (name) => { n++; console.log(`  ok ${name}`); };
@@ -68,7 +68,7 @@ const ok = (name) => { n++; console.log(`  ok ${name}`); };
 
   // ---- Approvals: edit, the undo window, the sentinel verdict on the request -------------------------------------
   {
-    const { Jobs } = require('../jobs');
+    const { Jobs } = require('../src/jobs');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ares-ui-'));
     const jobs = new Jobs({ dir, cli: '/bin/false', tools: () => [], runtime: dir });
     const audit = []; jobs.audit = { record: (e) => audit.push(e) };

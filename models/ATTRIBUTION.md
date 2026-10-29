@@ -1,6 +1,6 @@
 # Third-party assets
 
-- **Brain model** (renderer/brain-mesh.js, simplified from models/brain-src/Brain_AS.stl):
+- **Brain model** (src/renderer/brain-mesh.js, simplified from models/brain-src/Brain_AS.stl):
   "Brain AS" by Agnieszka Starostecka, Wikimedia Commons,
   https://commons.wikimedia.org/wiki/File:Brain_AS.stl — licensed CC BY 4.0
   (https://creativecommons.org/licenses/by/4.0/). Simplified from ~3M to 80k triangles and recoloured.

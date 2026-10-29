@@ -1,7 +1,12 @@
 # ARES: notes for Claude sessions
 
-ARES is a personal Electron assistant (main process: `main.js`; renderer: `renderer/`; Android app: `android/`).
+ARES is a personal Electron assistant (main process: `src/main.js`; renderer: `src/renderer/`; Android app: `android/`).
 Build and install with `npm run build`. The support folder is `~/Library/Application Support/ARES`.
+
+Layout (since 2026-10-29): the Electron app is in `src/`: every main-process file, plus `renderer/`, `tools/` and `phone/`.
+In the notes below, a bare file name (`main.js`, `jobs.js`) or a path starting `renderer/`, `tools/` or `phone/` is under
+`src/`. `native/`, `models/`, `scripts/`, `android/`, `relay/` and `docs/` stay at the top. In `src/main.js`, `ROOT` is
+the repo (native helpers, models, `.env`); `__dirname` / `appDir` is `src/`. A test's `root` is `src/` too.
 
 ## Don't spend the user's ElevenLabs credits on testing
 

@@ -1,7 +1,7 @@
 // Synthetic hand clips for hands.js, in the exact shape ares-vision sends (21 joints, normalised, mirrored). Used by
 // scripts/test-hands.js until (and alongside) real recordings in ~/Library/Application Support/ARES/hands/clips.
 // A hand is built from a pose and a palm position; the geometry is a flat schematic of a hand facing the camera.
-const { J } = require('../hands');
+const { J } = require('../src/hands');
 
 const ASPECT = 4 / 3;
 // Finger layout relative to the wrist, in palm lengths (wrist→middle knuckle = 1)

@@ -71,8 +71,8 @@ class PhoneServer extends EventEmitter {
       '/renderer/neural.js': 'renderer/neural.js',
       '/renderer/brain3d.mjs': 'renderer/brain3d.mjs',
       '/renderer/brain-mesh.js': 'renderer/brain-mesh.js',
-      '/node_modules/three/build/three.module.js': 'node_modules/three/build/three.module.js',
-      '/node_modules/three/build/three.core.js': 'node_modules/three/build/three.core.js',
+      '/node_modules/three/build/three.module.js': '../node_modules/three/build/three.module.js',
+      '/node_modules/three/build/three.core.js': '../node_modules/three/build/three.core.js',
     };
     // The results renderer's libraries, bundled with the app (no CDN)
     for (const f of ['marked.umd.js', 'purify.min.js', 'chart.umd.min.js', 'mermaid.min.js', 'highlight.min.js', 'hljs-dark.css']) this.files[`/vendor/${f}`] = `renderer/vendor/${f}`;

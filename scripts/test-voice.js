@@ -9,7 +9,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { Voice } = require('../voice');
+const { Voice } = require('../src/voice');
 
 const SUPPORT = path.join(os.homedir(), 'Library', 'Application Support', 'ARES');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ares-voice-test-'));

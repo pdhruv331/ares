@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const SR = 44100;
-const OUT = path.join(__dirname, '..', 'renderer', 'sounds');
+const OUT = path.join(__dirname, '..', 'src', 'renderer', 'sounds');
 fs.mkdirSync(OUT, { recursive: true });
 
 const TAU = Math.PI * 2;

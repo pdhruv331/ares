@@ -12,16 +12,16 @@ import { CASES, FAST_TODAY, noisy } from './intent-set.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = path.join(import.meta.dirname, '..', '..');
-const { Intents } = require(path.join(ROOT, 'intent.js'));
-const { Remarks } = require(path.join(ROOT, 'remarks.js'));
-const { route } = require(path.join(ROOT, 'router.js'));
-const { judge } = require(path.join(ROOT, 'addressed.js'));
+const { Intents } = require(path.join(ROOT, 'src', 'intent.js'));
+const { Remarks } = require(path.join(ROOT, 'src', 'remarks.js'));
+const { route } = require(path.join(ROOT, 'src', 'router.js'));
+const { judge } = require(path.join(ROOT, 'src', 'addressed.js'));
 const args = process.argv.slice(2);
 const verbose = args.includes('--verbose');
 const SUPPORT = path.join(os.homedir(), 'Library/Application Support/ARES');
 
 // main.js's phrases caught before the brain (read from the source so they can't drift)
-const mainSrc = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
+const mainSrc = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
 const POWER = eval(mainSrc.match(/const POWER_PHRASE = (\/.*\/[a-z]*);/)[1]);
 const KILL = eval(mainSrc.match(/const KILL_PHRASE = (\/.*\/[a-z]*);/)[1]);
 

@@ -2,7 +2,7 @@
   "name": "ares",
   "version": "0.1.0",
   "description": "Personal AI assistant — desktop interface",
-  "main": "main.js",
+  "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "build": "zsh scripts/build-app.sh"

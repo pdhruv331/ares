@@ -151,7 +151,7 @@ class WakeListener extends EventEmitter {
 function listenerPath(app) {
   return app.isPackaged
     ? path.join(process.resourcesPath, 'ares-listener')
-    : path.join(__dirname, 'native', 'build', 'ares-listener');
+    : path.join(__dirname, '..', 'native', 'build', 'ares-listener');
 }
 
 module.exports = { WakeListener, listenerPath };

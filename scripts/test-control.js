@@ -11,7 +11,7 @@ const http = require('http');
 const crypto = require('crypto');
 
 const LIVE = process.argv.includes('--live');
-const root = path.join(__dirname, '..');
+const root = path.join(__dirname, '..', 'src'); // the app's code
 const scratch = fs.mkdtempSync(path.join(os.homedir(), 'Downloads', '.ares-control-test-')); // inside a root, so the scope allows it
 const support = fs.mkdtempSync(path.join(os.tmpdir(), 'ares-control-support-'));
 let failures = 0;
@@ -23,7 +23,7 @@ app.whenReady().then(async () => {
   const pushed = [];
   let settings = { control: { folders: [] } };
   const control = new Control({
-    helper: path.join(root, 'native/build/ares-control'), themeHelper: path.join(root, 'native/build/ares-theme'),
+    helper: path.join(root, '..', 'native/build/ares-control'), themeHelper: path.join(root, '..', 'native/build/ares-theme'),
     supportDir: support, appDir: root, readSettings: () => settings, writeSettings: (p) => Object.assign(settings, p), log: () => {},
     push: async (n) => { pushed.push(n); return 1; }, phoneUrl: () => 'https://mac.example.ts.net', notice: () => {},
   });
