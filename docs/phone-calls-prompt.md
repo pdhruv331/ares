@@ -1,5 +1,5 @@
 Add real phone calls to ARES using ElevenLabs Agents + my Twilio number (see project notes). Already set up and tested in the ElevenLabs dashboard:
-- Twilio number (upgraded account, voice only), imported into ElevenLabs as "ARES Line", phone number id phnum_…
+- Twilio number (upgraded account, voice only), imported into ElevenLabs as "ARES Line" (its phone number id is ELEVENLABS_PHONE_NUMBER_ID in .env)
 - Agent "ARES Calls": Hope (Bubbly) voice, Zara for Hindi, Claude Haiku, published, authentication on. Inbound calls are assigned to it.
 - The Mac ARES keeps the Katherine voice; don't change it.
 

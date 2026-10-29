@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /** App-wide settings and the little bits of state the widget, tile and notification share. */
 object Ares {
-    const val DEFAULT_URL = "https://your-mac.your-tailnet.ts.net"
+    const val DEFAULT_URL = BuildConfig.ARES_URL // from android/local.properties (ares.url)
 
     fun prefs(c: Context) = c.getSharedPreferences("ares", Context.MODE_PRIVATE)
 

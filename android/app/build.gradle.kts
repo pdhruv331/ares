@@ -6,6 +6,8 @@ plugins {
 
 // Release signing: a private key kept on this Mac (android/ares.jks), so every update installs over the last one
 val keys = Properties().apply { rootProject.file("keystore.properties").takeIf { it.exists() }?.inputStream()?.use(::load) }
+// This Mac's own settings (android/local.properties, never committed): ares.url = the Mac's Tailscale address, which pairing pre-fills
+val local = Properties().apply { rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use(::load) }
 
 android {
     namespace = "com.dhruv.ares"
@@ -17,7 +19,10 @@ android {
         targetSdk = 36
         versionCode = (findProperty("aresVersionCode") as String?)?.toInt() ?: 1 // set by build.sh
         versionName = "0.5.0"
+        buildConfigField("String", "ARES_URL", "\"${local.getProperty("ares.url", "")}\"")
     }
+
+    buildFeatures { buildConfig = true }
 
     signingConfigs {
         if (keys.isNotEmpty()) create("ares") {
