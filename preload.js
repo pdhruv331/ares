@@ -103,6 +103,7 @@ contextBridge.exposeInMainWorld('ares', {
   hide: () => ipcRenderer.send('window-hide'),
   pin: (pinned) => ipcRenderer.send('window-pin', pinned),
   toggleFullscreen: () => ipcRenderer.send('window-fullscreen'),
+  minimize: () => ipcRenderer.send('window-minimize'),
   onSummoned: (fn) => ipcRenderer.on('summoned', fn),
   // The corner orb (orb.js): a question asked from it, a click that stops her, the portal reveal (renderer/surface.js)
   orb: {

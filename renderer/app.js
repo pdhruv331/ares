@@ -863,6 +863,7 @@ $('pinBtn').addEventListener('click', () => {
   $('pinBtn').classList.toggle('active', pinned);
 });
 $('hideBtn').addEventListener('click', () => window.ares.hide());
+$('minBtn').addEventListener('click', () => window.ares.minimize());
 $('fullBtn').addEventListener('click', () => window.ares.toggleFullscreen());
 let fullscreen = false;
 window.ares.onFullscreen((on) => {

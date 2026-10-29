@@ -118,7 +118,17 @@ function log(...parts) {
   } catch {}
 }
 
+/** As the live desktop ARES is a menu-bar app (no Dock icon, a non-activating panel window); as a plain window (the
+ *  wallpaper off) she's an ordinary app: in the Dock, and her window minimizes. */
+const asDesktop = () => wallpaper?.opts.enabled ?? readSettings().wallpaper?.enabled !== false;
+function syncDock() {
+  if (!app.dock) return;
+  if (asDesktop()) app.dock.hide();
+  else app.dock.show().catch(() => {});
+}
+
 function createWindow({ show }) {
+  const desktop = asDesktop();
   win = new BrowserWindow({
     width: 1100,
     height: 720,
@@ -130,10 +140,12 @@ function createWindow({ show }) {
     transparent: true,
     backgroundColor: '#00000000',
     acceptFirstMouse: true, // as the desktop it's never the key window: a click on a panel must still land
-    // A non-activating panel: clicking it (a dashboard panel on the live desktop) never activates ARES, so macOS never
-    // switches Spaces to "go to" ARES (it's on every Space) and the app you're in keeps the keyboard. Lifted or as a
-    // window it still becomes the key window and takes typing; native full screen still works.
-    type: 'panel',
+    // As the live desktop, a non-activating panel: clicking it (a dashboard panel on the live desktop) never activates ARES,
+    // so macOS never switches Spaces to "go to" ARES (it's on every Space) and the app you're in keeps the keyboard. Lifted
+    // or as a window it still becomes the key window and takes typing; native full screen still works. A panel can't be
+    // minimized, so with the wallpaper off (decided at launch) it's a normal window.
+    ...(desktop ? { type: 'panel' } : {}),
+    minimizable: true,
     fullscreenable: true,
     hasShadow: true,
     show: false,
@@ -154,7 +166,7 @@ function createWindow({ show }) {
     onChange: (name) => { wallpaper?.mainSurface(name, win); theme?.surface(name); orb?.surface(name); win.webContents.send('ui-prefs', uiPrefs()); setTimeout(() => dashboard?.setVisible(win.isVisible()), 50); } });
   win.once('ready-to-show', () => {
     if (app.isHidden?.()) app.show(); // (launched hidden, e.g. `open -j`: the windows would never appear otherwise; show() doesn't focus)
-    if (surface.desktopOn) surface.desktop(); else if (show) win.show();
+    if (surface.desktopOn) surface.desktop(); else if (show) surface.window(); // (window(): one Space, on screen, un-minimized)
   });
 
   // Closing the window hides it; the assistant keeps running in the menu bar.
@@ -578,7 +590,7 @@ function wallpaperMenu() {
   const o = wallpaper.opts;
   const act = (fn) => async (item) => { await fn(item); refreshTray(); };
   return [
-    { label: 'ARES as Wallpaper', type: 'checkbox', checked: o.enabled, click: act((item) => wallpaper.setEnabled(item.checked)) },
+    { label: 'ARES as Wallpaper', type: 'checkbox', checked: o.enabled, click: act(async (item) => { await wallpaper.setEnabled(item.checked); syncDock(); }) },
     { label: 'Wallpaper Options', submenu: [
       { label: 'On Every Display', type: 'radio', checked: o.displays !== 'main', click: act(() => wallpaper.setDisplays('all')) },
       { label: 'Main Display Only', type: 'radio', checked: o.displays === 'main', click: act(() => wallpaper.setDisplays('main')) },
@@ -1657,6 +1669,7 @@ ipcMain.on('brain-reset', () => resetBrain());
 
 ipcMain.on('window-hide', () => hideWindow());
 ipcMain.on('window-fullscreen', () => toggleFullScreen());
+ipcMain.on('window-minimize', () => { if (surface.name === 'window' && win.isMinimizable()) win.minimize(); });
 ipcMain.on('window-pin', (_e, pinned) => { if (surface.name === 'window') win.setAlwaysOnTop(pinned, 'floating'); });
 ipcMain.on('surface-hits', (_e, h) => surface.setHits(h || {}));
 ipcMain.handle('surface-state', () => ({ name: surface.name, blend: surface.blend, panel: surface.name === 'lifted' ? surface.panel : null, ...(wallpaper?.mainState() || {}) }));
@@ -2632,6 +2645,7 @@ app.whenReady().then(async () => {
   power.start();
   desk.on('change', (st) => { if (st.active) power.back('desk mode'); });
   createWindow({ show: !openedAtLogin }); // at login, wait quietly in the menu bar
+  syncDock(); // in the Dock unless she's the live desktop
   theme = new Theme({
     log, readSettings, writeSettings, supportDir: app.getPath('userData'), appDir: __dirname, onOpen: openView, brainVisible, look,
     menuSections, onMenuAction: () => refreshTray(), selfIds: ['com.dhruv.ares', 'com.github.Electron'],

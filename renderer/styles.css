@@ -49,6 +49,7 @@ body.fullscreen .frame { border: none; border-radius: 0; }
 }
 .icon-btn:hover { color: var(--cyan); border-color: var(--cyan-dim); }
 .icon-btn.active { color: var(--bg); background: var(--cyan); }
+html.s-desktop #minBtn, html.s-lifted #minBtn, html.s-sinking #minBtn { display: none; } /* minimizing is for the plain window only */
 
 /* Stage: the brain fills it; dashboard panels float over it */
 .stage { position: relative; min-height: 0; }

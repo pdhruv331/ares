@@ -111,7 +111,11 @@ class Surface {
     w.setHiddenInMissionControl?.(false);
     w.setFocusable(true); w.setResizable(true); w.setMovable(true); w.setHasShadow(true);
     const d = this.display().workArea;
-    const b = this.windowBounds || { width: 1100, height: 720, x: Math.round(d.x + (d.width - 1100) / 2), y: Math.round(d.y + (d.height - 720) / 2) };
+    const b = { ...(this.windowBounds || { width: 1100, height: 720, x: Math.round(d.x + (d.width - 1100) / 2), y: Math.round(d.y + (d.height - 720) / 2) }) };
+    // Never (partly) off screen: back inside the work area
+    b.width = Math.min(b.width, d.width); b.height = Math.min(b.height, d.height);
+    b.x = Math.min(Math.max(b.x, d.x), d.x + d.width - b.width); b.y = Math.min(Math.max(b.y, d.y), d.y + d.height - b.height);
+    if (w.isMinimized()) w.restore();
     w.setBounds(b);
     this.setInteractive(true);
     w.show();
@@ -121,7 +125,7 @@ class Surface {
 
   /** Summon (wake word, ⌥Space, the tray), or just one panel of hers (panel: see lift()). */
   show(panel = null, { solid = false } = {}) {
-    if (!this.desktopOn) { if (this.name !== 'window') this.window(); else { this.win.show(); this.win.focus(); } return; }
+    if (!this.desktopOn) { if (this.name !== 'window') this.window(); else { if (this.win.isMinimized()) this.win.restore(); this.win.show(); this.win.focus(); } return; }
     if (this.opts().summon === 'window' && !panel) this.window(); else this.lift(panel, { solid });
   }
 
