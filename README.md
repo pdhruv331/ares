@@ -38,6 +38,44 @@ most of the code under my direction.
 The native Android app and launcher, left to right: the app, the home screen with suggestions, live jobs with an
 approval waiting, and the approval itself with each step she took. Screens are shown with made-up data.
 
+## Away from the Mac
+
+My phone works as a remote for the whole Mac, through the paired connection over my own Tailscale network.
+
+### My Claude Code workflow, from my phone
+
+ARES watches every Claude Code session on the Mac: the ones in the Claude desktop app, the ones in a terminal, and
+the ones she runs herself.
+
+- **She tells me when one needs me.** A notification arrives when a session finishes a long turn, asks for
+  permission, is waiting for an answer, or stops with an error. It has buttons for **Summary**, **Reply** (typed
+  straight into the notification) and **Open in Claude**.
+- **I can ask how they're doing.** "What are my Claude sessions doing?" gets a list of what each one is busy with,
+  and "summarise the portfolio one" says where it got to.
+- **I can reply to any of them.** A closed session picks up on the Mac where it stopped. A reply to one that's
+  mid-turn waits until the turn ends. She never writes into a session that's open in the desktop app; she offers a
+  copy of it instead.
+- **I can start new work.** "Start a Claude session in my portfolio to fix the mobile nav" starts one in that folder.
+  Through Remote Control she can put a session on my phone so I drive it myself in the Claude app, or open it in
+  Terminal on the Mac for when I'm back.
+- **Whole projects build while I'm out.** "Build me a habit tracker" becomes a project in its own folder. Claude Code
+  builds and tests it, a separate check grades it against a definition of done and sends it back once if it falls
+  short, and the finished project arrives on my phone as a zip.
+- **It stays inside my limits.** The phone shows how much of my Claude 5-hour and weekly limits is used, and near the
+  limit, running projects pause and resume by themselves. Pushing, deploying or publishing always asks me first, and
+  STOP ALL on the phone halts everything.
+
+### Files between my phone and my Mac
+
+- **Mac to phone.** "Send that PDF to my phone" sends any file from my folders, and a screenshot or the picture on
+  the clipboard work the same way. It arrives as a notification with **Open**, downloads over the paired connection
+  into the phone's Downloads, and opens in the right app. Only my paired phone can fetch it, and the link expires
+  after 24 hours. Text and links go the same way.
+- **Phone to Mac.** I share from any app to ARES: up to five files (PDFs, documents, photos), plus text or a link,
+  and say what to do with them. She reads photos straight away, or hands the files to a background job on the Mac.
+- **Back at the desk.** OPEN ON MAC on a job puts it on the Mac's screen, or waits until I'm back at the Mac.
+- **When the Mac is out of reach.** Requests wait on the phone and go through as soon as the Mac is back.
+
 ## How it fits together
 
 **Talking to her.** Every way I reach her ends up at the same brain on the Mac. Grey boxes are outside services.
@@ -115,8 +153,9 @@ only through my own Tailscale network.
 - **Runs jobs in the background.** Research and writing jobs, whole coding projects in their own folders (checked
   against a definition of done before she calls them finished), multi-step goals, and routines on a schedule. One
   phrase, "stop everything", pauses all of it.
-- **Keeps an eye on my Claude Code sessions.** She tells me when a session finishes or needs an answer, and I can
-  reply from my phone.
+- **Runs my Claude Code sessions.** Alerts, summaries, replies, new sessions and Remote Control, from anywhere
+  (see [Away from the Mac](#away-from-the-mac)).
+- **Moves files between my phone and Mac.** Either way, over the paired connection.
 - **Is on my phone.** A native Android app and home-screen launcher: a floating bubble, hold-to-talk, cards,
   live job progress in the status bar, and approvals with my fingerprint.
 - **Answers my phone.** A separate ElevenLabs agent on a Twilio number takes calls when I can't, sends me the caller,
