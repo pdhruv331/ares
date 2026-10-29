@@ -3,9 +3,40 @@
 My personal assistant. ARES lives on my Mac, follows me to my phone, and answers my phone line when I can't.
 I talk to her by voice ("hey ARES"), type to her, or message her, and she gets things done on the Mac for me.
 
+![ARES on the Mac, with her Android home screen](docs/images/hero.png)
+
 This is a personal project, built for one person (me) on my own machines. It isn't a product and isn't set up
 for anyone else to install. I design it, make the product decisions, and test and debug it; Claude Code writes
 most of the code under my direction.
+
+<p align="center"><img src="docs/images/wake.gif" width="680" alt="ARES waking up: the reactor charges from gold to blue and comes online"></p>
+<p align="center"><sub>Waking up: the reactor charges while her services start, then she comes online.</sub></p>
+
+## Highlights
+
+- **She never goes silent.** Her voice streams from ElevenLabs one sentence at a time. If a sentence's audio
+  hasn't started within 1.2 s, ARES sends a second request and plays whichever answers first; after 6 s that
+  sentence switches to a local voice (Kokoro, about 0.2–0.4 s to first audio), and she switches back by herself.
+  In my logs first audio was 0.62 s at the median and 4.06 s at the 95th percentile over 103 sentences.
+- **Every failure gets the right response.** Out of credits, a key without permission, a rate limit, a dropped
+  stream: each is told apart and handled differently, announced once, and retried on a schedule.
+- **Measured, not guessed.** I benchmarked first audio before picking models: 3.07 s for `eleven_v3`, 0.21 s for
+  `eleven_v4_turbo` over a WebSocket. I measured that macOS's voice processing silenced other apps' audio
+  (0 of 44 test words heard), and the reactor look cut the window's CPU from 23% to 8%.
+- **She asks before anything risky.** Every action has a tier. Sending, deleting and paying wait for my own "yes"
+  (a fingerprint on the phone), a separate model checks each outgoing message against what I asked for, and
+  everything lands in an audit log. One phrase, "stop everything", pauses all background work.
+- **Private by design.** Wake word, speech recognition and voice ID run on the Mac. The Mac accepts no connections
+  from the internet; the phone reaches it over my own Tailscale network.
+- **Real debugging.** One crash took every Electron app on the Mac down at launch. I traced it to the start-up helper
+  leaking 399 web processes until macOS ran out of Mach ports, then fixed the leak at its source.
+
+## On the phone
+
+![The Android app, the ARES home screen, live jobs, and an approval](docs/images/phone.png)
+
+The native Android app and launcher, left to right: the app, the home screen with suggestions, live jobs with an
+approval waiting, and the approval itself with each step she took. Screens are shown with made-up data.
 
 ## How it fits together
 
