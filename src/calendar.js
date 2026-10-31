@@ -5,7 +5,7 @@
 //
 // Emits: 'update' { type: 'calendar', calendar: { events (a wide range), calendars, source, at, google } } for the panel,
 //        'near' events (now → end of tomorrow) for NEXT and LEAVE BY, 'permission' { events, reminders }.
-const { spawn, execFile } = require('child_process');
+const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const fs = require('fs');
 const net = require('net');
@@ -371,18 +371,4 @@ function normalize(x) {
     calendar: String(x.calendar || '').slice(0, 60), color: x.color || '', recurring: Boolean(x.recurring), declined: Boolean(x.declined), organizer: x.organizer || '' };
 }
 
-/** Keychain through the helper's binary (the secret travels on stdin/stdout, never argv, never a file). */
-function keychain(helperApp) {
-  const bin = path.join(helperApp, 'Contents', 'MacOS', 'ares-calendar');
-  const run = (args, input) => new Promise((resolve, reject) => {
-    const child = execFile(bin, ['keychain', ...args], { timeout: 10_000 }, (err, stdout) => (err ? reject(err) : resolve(String(stdout))));
-    if (input != null) child.stdin.end(input); else child.stdin.end();
-  });
-  return {
-    get: (service) => run(['get', service]).catch(() => null),
-    set: (service, secret) => run(['set', service], secret).then(() => true),
-    delete: (service) => run(['delete', service]).then(() => true).catch(() => false),
-  };
-}
-
-module.exports = { CalendarKit, parseWhen, normalize, keychain, DAY };
+module.exports = { CalendarKit, parseWhen, normalize, DAY };

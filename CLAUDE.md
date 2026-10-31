@@ -176,8 +176,11 @@ The project became a git repo on 2026-10-01. Commit after each working step. Sec
   a dashboard message for tests.
 - Calendar: `native/AresCalendar.swift` → "ARES Calendar.app" (launched with `open -a … --args --serve <sock>`, like Vision, so the
   Calendars/Reminders prompt names it); `calendar.js` (EventKit client, `EKEventStoreChanged` → refresh, tiered add/move/delete as
-  `control.routes['calendar/…']`), `dashboard.js`'s connector read is the fallback (`dashboard.external`). The helper's `keychain`
-  subcommand is the only Keychain path (secret on stdin/stdout, never argv).
+  `control.routes['calendar/…']`), `dashboard.js`'s connector read is the fallback (`dashboard.external`).
+- Keychain (since 2026-10-31): `keychain.js` through `/usr/bin/security` (secret as hex on `security -i`'s stdin, read with `-w`;
+  never argv), account `ares-keychain`, partition `apple-tool:`. Without a team ID macOS ties an item to the saving binary's cdhash,
+  so items the helper saved (account `ares`) asked for the login password after every rebuild; `get` moves them over once
+  (the helper's `keychain` subcommand now exists only for that move).
 - Tasks: `tasks.js` — Google Tasks (OAuth "Desktop app" client JSON picked in a dialog, loopback + PKCE, refresh token in the
   Keychain under "ARES google-tasks-refresh") or Apple Reminders through the same helper. Custom panels: `custom-panels.js`, specs
   in `<support>/panels/<id>.json`; shell commands need a one-time yes (tier 3) and live in settings `panels.allowedCommands`;

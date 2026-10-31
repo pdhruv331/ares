@@ -39,7 +39,8 @@ const { Jobs } = require('./jobs');
 const { Calls } = require('./calls');
 const { Relay } = require('./relay');
 const { Dashboard } = require('./dashboard');
-const { CalendarKit, keychain: keychainVia } = require('./calendar');
+const { CalendarKit } = require('./calendar');
+const { keychain } = require('./keychain');
 const { Tasks } = require('./tasks');
 const { CustomPanels } = require('./custom-panels');
 const { Voice } = require('./voice');
@@ -2520,7 +2521,7 @@ app.whenReady().then(async () => {
     }
   });
   dashboard.external = () => calendar.ready; // EventKit live: no timed Claude calendar reads
-  tasks = new Tasks({ keychain: keychainVia(calendar.helper), calendar, readSettings, writeSettings, log, tier: (level, what, ctx) => control.tier(level, what, ctx),
+  tasks = new Tasks({ keychain: keychain({ legacyHelperApp: calendar.helper, log }), calendar, readSettings, writeSettings, log, tier: (level, what, ctx) => control.tier(level, what, ctx),
     openExternal: (u) => shell.openExternal(u), notice: (line) => notice(line) });
   Object.assign(control.routes, tasks.routes());
   tasks.on('update', toDash);
